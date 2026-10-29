@@ -1,0 +1,142 @@
+# SmartTrade architecture
+
+## Scope and labels
+
+This architecture covers Release 1: account/authentication foundations; manual business and company verification; brand and company-owned product catalogues; dealer locations and location-specific listings; authenticated dealer discovery; and the staff/admin panel. Quotations, invoices, service providers, job seekers, employers, and later commercial features are deferred.
+
+- **Confirmed** means finalized by the project owner or explicitly included in the requirements.
+- **Recommendation** means a proposed implementation policy that still needs approval where stated.
+- **Open** means the requirements do not define the behavior.
+
+See [decisions.md](decisions.md) for the decision register and [database-design.md](database-design.md) for constraints and the ER diagram.
+
+## System shape
+
+**Recommendation:** Expo/React Native mobile app, React admin panel, Django REST Framework API, PostgreSQL, and private object storage. Both clients use the same versioned API. The API is authoritative for account status, access control, ownership, verification, catalogue publication, dealer listings, and file access. Do not rely on frontend checks for permissions.
+
+```mermaid
+flowchart LR
+    Mobile[Mobile app<br/>React Native / Expo]
+    Admin[Staff/admin panel<br/>React]
+    API[REST API<br/>Django REST Framework]
+    DB[(PostgreSQL)]
+    Files[Private object storage]
+    OTP[Configurable OTP provider]
+    Mail[Configurable email provider]
+    Mobile --> API
+    Admin --> API
+    API --> DB
+    API --> Files
+    API --> OTP
+    API --> Mail
+```
+
+Provider configuration and credentials are external to source code. Cloud, OTP, email, and object-storage vendors remain configurable choices.
+
+## Client surfaces and navigation
+
+**Recommendation:** Keep a shared authenticated mobile shell with role-aware sections; one account has one account type, so another role requires a separate account.
+
+- **Personal:** catalogue/category search, product detail, company catalogue information, authenticated dealer search/results, and dealer/location details/contact.
+- **Business:** registration and verification state, business profile and private draft locations, location-specific listing/stock/price management after verification.
+- **Company:** company registration/email verification and state, owned brand/product catalogue, catalogue assets/prices, representatives, and company + brand + dealer authorization grants.
+- **Shared account:** OTP sign-in, profile completion, verification documents/state, and account/session controls.
+- **Staff web panel:** staff sign-in; user lookup; business/company verification queues; taxonomy and brand-suggestion management; catalogue/product moderation and duplicate review; dealer businesses, locations, listings, representatives/grants; audit history and reports.
+
+These are suggested screen groups, not a finalized visual navigation design. Quotations/invoices, jobs, service providers, and employer screens are omitted from Release 1.
+
+## Account and authorization model
+
+**Confirmed:** one account per normalized mobile number; exactly one account type; using another account type requires a separate account/mobile. Staff/admin is a distinct account type and is not a profile flag on an ordinary account.
+
+**Recommendation:** A shared `Account` identity row has a normalized E.164 mobile number with a database `UNIQUE NOT NULL` constraint and one immutable `account_type`: `PERSONAL`, `BUSINESS`, `COMPANY`, or `STAFF`. One-to-one `PersonalProfile`, `BusinessProfile`, `CompanyUserProfile`, and `StaffProfile` tables hold the matching account subtype. `CompanyProfile` is the organization; company-type accounts join it through a `CompanyRepresentative` membership. For Release 1, each company account may have at most one active organization membership; revoked memberships remain historical. A deferred database constraint trigger (or equivalent database-enforced invariant) ensures exactly one matching account subtype exists and no nonmatching subtype exists. Staff role assignments are separate records. This preserves global mobile uniqueness across staff and marketplace accounts while isolating staff authority. See database design for the enforcement approach.
+
+Ordinary account creation accepts a permitted marketplace account type only. The API ignores/rejects client-supplied account type changes, staff role assignments, verification states, ownership IDs, and audit actors. Staff accounts are provisioned only by an authorized staff workflow; ordinary users cannot promote themselves. Account type is immutable after creation.
+
+### Permission matrix
+
+| Account/status | Permitted actions | Prohibited actions |
+|---|---|---|
+| Personal, active | Browse catalogue; authenticated dealer search/details; manage own personal profile | Manage dealer listings, company catalogue, verification, or staff permissions |
+| Business, pending | Sign in; complete own business profile; upload/read own business verification documents; view own review state | Publish/show as verified dealer; create public product listings; access other users' private files |
+| Business, verified | Pending actions plus manage own dealer locations and location-specific listings, availability, stock, and selling prices | Change company catalogue data, self-verify, grant company authorization |
+| Company, pending | Sign in; complete own company profile; upload/read own verification documents; view own review state | Create canonical brands or publish catalogue products; grant dealer authorization |
+| Company, verified | Manage owned brands/catalogues/products; publish products immediately; appoint authorized company representatives; grant/revoke own brand-to-dealer authorizations | Change business verification or another company's catalogue/authorizations |
+| Business/company, rejected or suspended | No authenticated marketplace actions until admin restoration; see recovery rule below | Profile edits, uploads, listings, catalogue actions, dealer search, or other protected operations |
+| Staff, active | Only actions assigned by staff role/permission; all sensitive actions audited | Marketplace role actions unless separately represented as an ordinary account (which uses a distinct account/mobile) |
+| Staff, disabled | No staff access | All staff operations |
+
+All authenticated accounts must be active. **Confirmed:** users must log in to browse dealers. Catalogue product browsing may be public or authenticated; the API currently proposes public catalogue reads because the requirements do not mandate catalogue sign-in. This public catalogue policy is a recommendation, not a confirmed rule.
+
+### Account and verification states
+
+Account access state, business verification, company verification, product moderation, and dealer authorization are independent concepts:
+
+- Business/company verification: `PENDING`, `VERIFIED`, `REJECTED`, `SUSPENDED`.
+- Account access: `ACTIVE` or `BLOCKED`; rejecting/suspending a business blocks its account, while rejecting/suspending a company blocks its owner and sole-affiliated representative accounts. No protected account action is available until staff restores access.
+- Staff access: `ACTIVE` or `DISABLED`, independent of marketplace verification.
+- Product moderation: `PUBLISHED`, `HIDDEN`, or `SUSPENDED`; company catalogue status (for example discontinued) is a separate field.
+- Authorized dealer: an explicit active/revoked company + brand + business relationship; never inferred from business verification.
+
+**Visibility recommendation:** A product is discoverable only while its owning company is currently verified, the product moderation state is `PUBLISHED`, and its public assets are approved. A dealer result additionally requires a currently verified business, visible location, and eligible listing. If a company is rejected/suspended after publishing, its products and related authorization labels are suppressed from discovery until verification is restored; product moderation state and grant history remain unchanged.
+
+**Recovery recommendation, pending business approval:** Restoration is admin-only and requires a reason. A rejected business/company returns to `PENDING` and must pass manual review again. A suspended account returns to its recorded pre-suspension state (`PENDING` or `VERIFIED`). The account access state becomes active only as part of that audited transition. Existing sessions/tokens are invalidated; restored users authenticate again. There is no self-service reactivation path while blocked.
+
+Each company-type account has at most one active organization membership in the proposed Release 1 schema. This lets a company verification decision block/restore the same active account set deterministically. If multiple simultaneous memberships are required, the access-blocking rule must be redesigned before implementation.
+
+## Catalogue, brands, and dealer inventory
+
+Each canonical `Brand` belongs to exactly one verified `CompanyProfile`; one verified company can own multiple brands. A pending company may submit brand details in its application, but canonical brand creation is unavailable until verification. Company owns product and variant data, catalogue/list price, description, specifications, product assets, and catalogue change history.
+
+Dealer businesses may have multiple `DealerLocation` rows. Each listing belongs to exactly one location and one company-owned product, with an optional variant; stock, availability, and selling price are maintained independently per location. Catalogue price is never overwritten by dealer selling price. The unique listing key is location + product + variant, with a separate uniqueness rule for no-variant listings.
+
+An authorized-dealer grant is scoped to company + brand + dealer business. It does not imply product ownership, business verification, or permission to edit the catalogue. Only active authorized representatives of the owning company with `MANAGE_AUTHORIZED_DEALERS` can grant or revoke it. The company owner has all representative permissions and may assign narrower rights. Representative changes are audited.
+
+Pending businesses may create location drafts while completing their profiles. Draft locations are visible only to the business owner and assigned reviewer. Once verified, the owner may explicitly make each location visible; verification alone does not publish a location.
+
+## Dealer discovery
+
+Dealer search requires login and supports PIN code, area/locality, and district. Results reference a specific `DealerLocation`; its location-specific availability and selling price are returned separately from catalogue price. Results show business verification and authorized-dealer status as separate fields. Only verified businesses with eligible active listings appear as verified dealers. Pending dealer listing visibility is disabled in the proposed policy; an unverified dealer cannot appear as verified.
+
+GPS is optional and only used for nearby-distance features. Exact/partial matching, sort order, nearby radius, and no-result behavior remain open in [decisions.md](decisions.md).
+
+## Staff permissions and audit history
+
+**Recommendation:** Assign staff roles through database-backed `StaffRole`, `StaffPermission`, and `StaffRoleAssignment` relations. Seed role bundles such as `PLATFORM_ADMIN`, `VERIFICATION_REVIEWER`, `CATALOGUE_MODERATOR`, and `AUDIT_READER`; permissions are checked by the API, not frontend route visibility. Only platform administrators can provision/disable staff and assign staff permissions. Approval of role bundles and separation-of-duty requirements remains open.
+
+| Staff role | Proposed permissions |
+|---|---|
+| `PLATFORM_ADMIN` | Provision/disable staff; assign staff roles; manage taxonomy; review business/company verification; moderate products; read audit and reports. |
+| `VERIFICATION_REVIEWER` | `REVIEW_BUSINESS`, `REVIEW_COMPANY`, and assigned-case `VIEW_PRIVATE_DOCUMENTS`; cannot grant dealer authorization or change catalogue data. |
+| `CATALOGUE_MODERATOR` | `MANAGE_TAXONOMY`, `REVIEW_DUPLICATES`, `MODERATE_PRODUCTS`; cannot decide business/company verification. |
+| `AUDIT_READER` | `READ_AUDIT` only; cannot change marketplace records. |
+
+Reports require `READ_REPORTS`; platform admins receive it by default.
+
+These role bundles are recommendations; exact separation-of-duty policy is pending approval.
+
+Company representative permissions are `MANAGE_COMPANY_PROFILE`, `MANAGE_CATALOGUE`, and `MANAGE_AUTHORIZED_DEALERS`. The owner account has all three and is also stored as an active representative row, so grant actors always reference a real representative. Additional representatives receive only explicitly assigned permissions. Only the owner may appoint/revoke representatives in the proposed policy; delegation of that management power is unresolved.
+
+Record append-only audit events for registration/profile state changes, verification decisions, staff permission changes, brand/product updates, product hide/suspend/restore, dealer location/listing/price/stock changes, file upload/download/replace/delete, and authorization grant/revocation. Each event has an account FK actor, exactly one explicit FK subject, action, timestamp, and relevant reason/change details. No ordinary API may update/delete audit rows. Retention duration and legally required archival/purge policy remain to be confirmed; retain records until an approved policy is established.
+
+## File security
+
+Use private object storage. Relational document/asset rows have explicit foreign keys to their business, company, verification case, or product; do not use a polymorphic `owner_type/owner_id`. The API authorizes every upload and download.
+
+| File category | Upload/replace | View/download | Delete |
+|---|---|---|---|
+| Business verification document | Owning pending/verified business account; replacement creates a new version | Owner and assigned staff reviewer | Owner cannot erase submitted evidence; staff may mark superseded/withdrawn with reason. Physical deletion follows retention policy only. |
+| Company verification document | Owning pending/verified company account; replacement creates a new version | Owner and assigned staff reviewer | Same controlled supersede/withdrawal rule as business evidence. |
+| Company logo/profile asset | Owning pending/verified company account; verified company representative with `MANAGE_COMPANY_PROFILE` | Pending assets only to owner/reviewer; public only after company verification and asset approval | Deactivate/replace with history; no public access before approval or after deactivation. |
+| Product image/catalogue asset | Verified owning company or representative with `MANAGE_CATALOGUE` | Owning company and authorized staff; public readers only for approved assets on published products | Soft-deactivate with audit; physical object retention follows policy. |
+
+Sensitive files are never exposed through public API responses. Return neither storage keys nor permanent sensitive-document URLs. Any temporary download authorization is short-lived and issued only after access checks. File upload, access, replacement, and deactivation are audited.
+
+## Security boundaries
+
+- Business and company registration review is manual by staff.
+- Verified companies can publish immediately; staff can hide, suspend, or restore products without changing company verification.
+- Dealer listings require verified business ownership and must reference products/variants consistently.
+- Company/brand/business relationships and representative authority are checked on the server and protected by foreign keys.
+- OTP, email, cloud, and object-storage credentials are configurable secrets, not source code.
+- Rate limits, OTP recovery, file size/type limits, and audit retention need the decisions listed in `decisions.md`.
