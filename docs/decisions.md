@@ -25,14 +25,25 @@ Confirmed project decisions, architecture recommendations, and unresolved questi
 | D-017 | Each brand belongs to exactly one verified company; a verified company may own multiple brands. | Brand has one required verified-company FK. |
 | D-018 | Authorized-dealer status is scoped to company + brand + dealer business. Only that company's authorized representatives may grant/revoke. | Grant scope and actor permissions are explicit and audited. |
 | D-019 | A listing is unique per dealer location + product + optional variant, including products without variants. | Two partial unique indexes handle NULL and non-NULL variants. |
-| D-020 | Files have explicit owning-entity relationships and access control; audit history is retained. | No unprotected polymorphic file owner; append-only audit with a retention policy to be approved. |
+| D-020 | Files have explicit owning-entity relationships and access control; audit history is retained. | No unprotected polymorphic file owner; document a retention policy without inventing periods or purge rules. |
+| D-021 | A company account can be linked to only one company; a company may have multiple separately authenticated representatives. | Unique company membership per account for its lifetime, including revoked memberships. |
+| D-022 | Catalogue browsing is public; dealer discovery/details require login. | Public API returns only eligible published catalogue data and approved public assets. |
+| D-023 | Rejected/suspended accounts remain blocked until admin restoration; a restricted review-request process is allowed without marketplace access. | Blocked accounts may use only explicit recovery/review routes; requests do not restore access or change state. |
+| D-024 | Staff/admin identities are separate and least-privileged; initial super-admin provisioning is secure and controlled. | No public staff signup; bootstrap mechanism and operator procedure must be specified before deployment. |
+| D-025 | Company suspension hides its catalogue and disables new company-scoped activity while preserving all records and audit history. | Does not block associated accounts; permitted sign-in/account-level functions, suspension status, and restricted review request remain available unless an account is independently blocked. |
+| D-026 | File limits are configurable, private-file access is authorized and audited, and a retention policy is documented. | Do not invent size/type limits, retention periods, or temporary-link lifetime. |
+| D-027 | Business permission confirmation is required to submit trade-worker contacts; each contact must separately opt in before becoming a public service-provider profile. | Release 1 stores contacts privately and never creates public profiles automatically; service-provider profiles remain deferred. |
+| D-028 | Dealer discovery matches PIN code first, then locality, then district; optional GPS nearby fallback must be clearly labelled. | Do not invent search radius or coordinate/permission behavior. |
+| D-029 | Registration fee collection is disabled in Release 1; retain future configurable-fee capability. | No Release 1 payment/fee collection or access gating. |
+| D-030 | Company suspension does not revoke otherwise valid sessions; account blocking revokes active sessions and refresh tokens. | Backend checks current account/company state on every request. Restoration does not revive old tokens or clear an independent account block; re-authentication is required after account restoration. |
+| D-031 | Company verification state (`PENDING/VERIFIED/REJECTED`), company activity (`ACTIVE/SUSPENDED`), account access (`ACTIVE/BLOCKED`), and authorized-dealer status are independent. | Rejected or activity-suspended companies are not catalogue eligible; neither state automatically blocks the owning account. |
 
 ## Requirements carried forward from the source document
 
 | Requirement | Release 1 treatment |
 |---|---|
 | Company registration includes email verification. | Use configurable email verification before submitting a company verification case. |
-| Business registration supplies at least ten associated trade-worker contacts (name, mobile, trade, optional location). | Store privately with the business profile and require ten at verification submission; this does not enable the deferred service-provider marketplace. |
+| Business registration supplies at least ten associated trade-worker contacts (name, mobile, trade, optional location). | Store privately with the business profile and require ten at verification submission; business confirms permission to submit and every contact separately opts in before any later public service-provider profile. No Release 1 profile is auto-created. |
 
 ## Provisional recommendations
 
@@ -40,34 +51,29 @@ Confirmed project decisions, architecture recommendations, and unresolved questi
 |---|---|---|
 | R-001 | Shared `Account` table with immutable type enum and matching account subtype tables; deferred constraint trigger enforces exactly one subtype. `CompanyProfile` is the organization; `CompanyUserProfile` is the account subtype for company owners/representatives. | Provides one global unique mobile and prevents multiple roles without treating every representative as a separate company. Approve subtype enforcement approach. |
 | R-002 | Normalize phone to E.164 and enforce a unique non-null DB column. | Prevents formatting variants from bypassing uniqueness; confirm country handling. |
-| R-003 | Product catalogue reads may be public; dealer browse requires login. | Original requirements do not require sign-in for product browsing. Confirm public product access. |
-| R-004 | Pending dealers do not appear in dealer discovery; only verified businesses with eligible listings appear. | Avoids exposing incomplete business data. Confirm this visibility policy. |
-| R-005 | Admin restoration requires a reason; rejected returns to pending for review, suspended returns to its recorded pre-suspension state (pending or verified), and existing sessions are invalidated. | Deterministic admin-only recovery proposal. Confirm before implementation. |
+| R-004 | Pending dealers do not appear in dealer discovery; only verified businesses with eligible listings appear. | Applies the confirmed rule that pending users cannot appear as verified dealers. |
 | R-006 | Company owner alone appoints/revokes representatives in Release 1; representatives receive explicit `MANAGE_COMPANY_PROFILE`, `MANAGE_CATALOGUE`, and/or `MANAGE_AUTHORIZED_DEALERS` permissions. | Least privilege; confirm whether delegation of representative management is desired later. |
 | R-007 | Active authorization requires a verified dealer business. | Avoids displaying authorized status for an unverified business; confirm if mapping may be recorded before verification. |
 | R-008 | Use append-only audit events with real actor and explicit subject foreign keys; no application role may modify/delete them. | Preserves integrity. Audit retention duration and legal archival policy still require confirmation. |
 | R-009 | Verified company-created product is immediately published unless staff moderation state blocks it; staff moderation is separate from product discontinued status. | Resolves publication and moderation state conflation. |
 | R-010 | Monorepo layout is `apps/mobile`, `apps/admin`, `services/api`, and `docs`. | Keeps clients/API/docs together; directory remains proposed. |
-| R-011 | Limit each company-type account to one active company organization membership in Release 1; an owner is a membership role, not a separate account type. Revoked memberships remain historical. | Makes rejected/suspended organization state and account-wide blocking unambiguous. Confirm this limit before implementation. |
 
 ## Open questions and blockers
 
 1. **Phone normalization:** Which country/country-code input rules should registration accept before storing E.164?
-2. **Product browsing visibility:** Is public catalogue browsing acceptable, or must product search also require login? Dealer browsing login is confirmed.
-3. **Restoration policy:** Confirm the recommended rejected/suspended recovery transitions and whether users can contact support through a non-authenticated route. No self-service restoration is proposed.
-4. **Staff permission bundles:** Approve staff roles, separation of duties, and whether a platform admin may both decide verification and modify product moderation.
-5. **Representative governance:** Confirm owner-only appointment, permissions, and whether representative delegation is allowed.
-6. **Authorization verification:** Confirm whether grant creation requires dealer business verification, and whether authorization can be pre-recorded while a dealer is pending.
-7. **Catalogue price details:** Confirm currency, decimal precision, effective dates, and whether price history is immutable snapshots or version rows.
-8. **File policy:** Set allowed file types/sizes, replacement/deletion behavior, retention, malware scanning needs, and signed-link lifetime before upload implementation.
-9. **Audit retention:** Confirm retention duration, archival method, and any legal purge requirements; records are immutable through normal application/admin workflows.
-10. **Search behavior:** Exact vs partial PIN/area/district matching, sorting, no-result behavior, nearby radius, and location coordinate source.
-11. **Registration fields/business fee:** Confirm mandatory launch fields and whether the PDF's minimal business/company registration fees are in Release 1. The stack and marketplace workflows do not define fee collection.
-12. **Product taxonomy/duplicates:** Seed categories/brands, duplicate matching rules, and whether company product code/model uniqueness should be enforced within a brand/company scope.
-13. **Organization membership cardinality and blocking:** The proposed Release 1 schema limits a company account to one active company membership. Confirm whether an account may own/represent multiple companies simultaneously. Multiple active memberships complicate the confirmed rule that rejected/suspended accounts are blocked, because it is unclear whether blocking one organization blocks every organization accessible through that account.
-14. **Trade-worker contacts:** Confirm consent language, correction/removal process, and retention for the ten business registration contacts. They remain private and are not searchable in Release 1.
-15. **Company suspension visibility:** Confirm whether products and active dealer authorization labels should be hidden from discovery while the owning company is rejected/suspended. The recommendation is to suppress them until company verification is restored, without changing moderation/grant history.
-16. **Initial staff bootstrap:** How is the first `PLATFORM_ADMIN` account securely created before staff APIs exist? Recommend a one-time controlled bootstrap outside ordinary signup; do not add a public staff-registration route.
-17. **Dealer-suggested brands:** How is the verified company owner of a brand suggestion established? Recommendation: keep it non-canonical until a verified company claims/creates it or staff records ownership evidence.
+2. **Restoration transitions:** Define exact post-restoration verification-state transitions. A review request never restores access; the approved token revocation/re-authentication behavior is documented in D-030.
+3. **Staff operations:** Approve role bundles/separation-of-duty rules and specify the secure initial super-admin bootstrap operator/procedure.
+4. **Representative governance:** Confirm owner-only appointment, permission delegation, and offboarding behavior beyond the approved one-company-per-account rule.
+5. **Authorization verification:** Confirm whether grant creation requires dealer business verification and whether a grant may be recorded before verification.
+6. **Catalogue price details:** Confirm currency, decimal precision, effective dates, and whether price history is immutable snapshots or version rows.
+7. **File policy values:** Set allowed file types/sizes, retention periods, malware-scanning requirements, and temporary-link lifetime before upload implementation. Limits must be configurable; document the policy without assuming values.
+8. **Audit retention:** Confirm retention duration, archival method, and legal purge requirements; audit records are immutable through normal application/admin workflows.
+9. **Search details:** Specify exact/partial matching, sorting, no-result behavior, nearby radius, coordinate source, and GPS permission wording. PIN/locality/district priority and labelled fallback are confirmed.
+10. **Registration fields/fee configuration:** Confirm mandatory launch fields. Fee collection is disabled in Release 1; future configurable fee amount/currency/timing remain unspecified until a later phase.
+11. **Product taxonomy/duplicates:** Seed categories/brands, duplicate matching rules, and whether company product code/model uniqueness should be enforced within a brand/company scope.
+12. **Trade-worker contacts:** Define business permission confirmation evidence, individual opt-in wording, contact correction/removal process, and retention. No public profile is created in Release 1.
+13. **Dealer-suggested brands:** How is the verified company owner of a brand suggestion established? Recommendation: keep it non-canonical until a verified company claims/creates it or staff records ownership evidence.
+14. **Company verification resubmission:** After a rejection, the current API requires staff review before a new verification submission. Define whether staff may reopen the case, or the owner may submit a corrected application directly.
+15. **Conflict-of-interest identity:** The implementation denies same-account company self-review and resolves roles by separate immutable account types. It cannot identify a person using a separate staff mobile/account from the company owner's account; define a verifiable staff identity/conflict policy before relying on this control operationally.
 
-The implementation plan gates work on architecture approval and on resolving questions before their dependent phases. Decisions about quotation/invoice tax, numbering, secure-link expiration/revocation, jobs, service providers, and payments can wait for their later phases.
+The implementation plan gates work on architecture approval and on resolving operational specifications before dependent phases. Decisions about quotation/invoice tax, numbering, secure-link expiration/revocation, jobs, service-provider profile operation, and payments can wait for their later phases.

@@ -49,7 +49,7 @@ These are suggested screen groups, not a finalized visual navigation design. Quo
 
 **Confirmed:** one account per normalized mobile number; exactly one account type; using another account type requires a separate account/mobile. Staff/admin is a distinct account type and is not a profile flag on an ordinary account.
 
-**Recommendation:** A shared `Account` identity row has a normalized E.164 mobile number with a database `UNIQUE NOT NULL` constraint and one immutable `account_type`: `PERSONAL`, `BUSINESS`, `COMPANY`, or `STAFF`. One-to-one `PersonalProfile`, `BusinessProfile`, `CompanyUserProfile`, and `StaffProfile` tables hold the matching account subtype. `CompanyProfile` is the organization; company-type accounts join it through a `CompanyRepresentative` membership. For Release 1, each company account may have at most one active organization membership; revoked memberships remain historical. A deferred database constraint trigger (or equivalent database-enforced invariant) ensures exactly one matching account subtype exists and no nonmatching subtype exists. Staff role assignments are separate records. This preserves global mobile uniqueness across staff and marketplace accounts while isolating staff authority. See database design for the enforcement approach.
+**Recommendation:** A shared `Account` identity row has a normalized E.164 mobile number with a database `UNIQUE NOT NULL` constraint and one immutable `account_type`: `PERSONAL`, `BUSINESS`, `COMPANY`, or `STAFF`. One-to-one `PersonalProfile`, `BusinessProfile`, `CompanyUserProfile`, and `StaffProfile` tables hold the matching account subtype. `CompanyProfile` is the organization; company-type accounts join it through a `CompanyRepresentative` membership. Each company account may belong to only one company, including after membership revocation; a company may have multiple separately authenticated representatives. A deferred database constraint trigger (or equivalent database-enforced invariant) ensures exactly one matching account subtype exists and no nonmatching subtype exists. Staff role assignments are separate records. This preserves global mobile uniqueness across staff and marketplace accounts while isolating staff authority. See database design for the enforcement approach.
 
 Ordinary account creation accepts a permitted marketplace account type only. The API ignores/rejects client-supplied account type changes, staff role assignments, verification states, ownership IDs, and audit actors. Staff accounts are provisioned only by an authorized staff workflow; ordinary users cannot promote themselves. Account type is immutable after creation.
 
@@ -60,29 +60,33 @@ Ordinary account creation accepts a permitted marketplace account type only. The
 | Personal, active | Browse catalogue; authenticated dealer search/details; manage own personal profile | Manage dealer listings, company catalogue, verification, or staff permissions |
 | Business, pending | Sign in; complete own business profile; upload/read own business verification documents; view own review state | Publish/show as verified dealer; create public product listings; access other users' private files |
 | Business, verified | Pending actions plus manage own dealer locations and location-specific listings, availability, stock, and selling prices | Change company catalogue data, self-verify, grant company authorization |
-| Company, pending | Sign in; complete own company profile; upload/read own verification documents; view own review state | Create canonical brands or publish catalogue products; grant dealer authorization |
-| Company, verified | Manage owned brands/catalogues/products; publish products immediately; appoint authorized company representatives; grant/revoke own brand-to-dealer authorizations | Change business verification or another company's catalogue/authorizations |
-| Business/company, rejected or suspended | No authenticated marketplace actions until admin restoration; see recovery rule below | Profile edits, uploads, listings, catalogue actions, dealer search, or other protected operations |
+| Company, pending before submission | Sign in; complete own company profile; upload/read own verification documents; view own review state | Create canonical brands or publish catalogue products; grant dealer authorization |
+| Company, verified and activity `ACTIVE` | Manage owned brands/catalogues/products; publish products immediately; appoint authorized company representatives; grant/revoke own brand-to-dealer authorizations | Change business verification or another company's catalogue/authorizations |
+| Company activity `SUSPENDED`, account not otherwise blocked | Sign in; view company suspension status; submit restricted company review request; use other permitted account-level functions | Publish or perform other company-scoped writes; expose company catalogue |
+| Any account independently `BLOCKED` | Only explicitly authorized recovery/review-request functions | Normal protected features, regardless of separate company verification or activity state |
 | Staff, active | Only actions assigned by staff role/permission; all sensitive actions audited | Marketplace role actions unless separately represented as an ordinary account (which uses a distinct account/mobile) |
 | Staff, disabled | No staff access | All staff operations |
 
-All authenticated accounts must be active. **Confirmed:** users must log in to browse dealers. Catalogue product browsing may be public or authenticated; the API currently proposes public catalogue reads because the requirements do not mandate catalogue sign-in. This public catalogue policy is a recommendation, not a confirmed rule.
+All authenticated accounts must be active. **Confirmed:** catalogue browsing is public, while dealer discovery and dealer details require login. Public responses include only eligible products/assets and never private company or verification data.
 
 ### Account and verification states
 
 Account access state, business verification, company verification, product moderation, and dealer authorization are independent concepts:
 
-- Business/company verification: `PENDING`, `VERIFIED`, `REJECTED`, `SUSPENDED`.
-- Account access: `ACTIVE` or `BLOCKED`; rejecting/suspending a business blocks its account, while rejecting/suspending a company blocks its owner and sole-affiliated representative accounts. No protected account action is available until staff restores access.
+- Business/company verification: `PENDING`, `VERIFIED`, `REJECTED`. Company activity suspension is not a verification outcome.
+- Company activity/suspension: separate `ACTIVE` or `SUSPENDED` state. Suspension suppresses all catalogue visibility and company write/grant activity while preserving verification state, products, dealer mappings, memberships, and audit history. It does not block company-associated accounts from sign-in or otherwise permitted account-level functions.
+- Account access: `ACTIVE` or `BLOCKED`; company verification rejection and company activity suspension do not automatically change the linked account state. An independently blocked account remains restricted to explicitly authorized recovery/review-request functions until admin restoration.
 - Staff access: `ACTIVE` or `DISABLED`, independent of marketplace verification.
 - Product moderation: `PUBLISHED`, `HIDDEN`, or `SUSPENDED`; company catalogue status (for example discontinued) is a separate field.
 - Authorized dealer: an explicit active/revoked company + brand + business relationship; never inferred from business verification.
 
-**Visibility recommendation:** A product is discoverable only while its owning company is currently verified, the product moderation state is `PUBLISHED`, and its public assets are approved. A dealer result additionally requires a currently verified business, visible location, and eligible listing. If a company is rejected/suspended after publishing, its products and related authorization labels are suppressed from discovery until verification is restored; product moderation state and grant history remain unchanged.
+**Visibility recommendation:** A product is discoverable only while its owning company is currently verified and activity `ACTIVE`, the product moderation state is `PUBLISHED`, and its public assets are approved. A dealer result additionally requires a currently verified business, visible location, and eligible listing. If company verification is rejected or company activity is suspended, its products and related authorization labels are suppressed from discovery; product moderation state and grant history remain unchanged.
 
-**Recovery recommendation, pending business approval:** Restoration is admin-only and requires a reason. A rejected business/company returns to `PENDING` and must pass manual review again. A suspended account returns to its recorded pre-suspension state (`PENDING` or `VERIFIED`). The account access state becomes active only as part of that audited transition. Existing sessions/tokens are invalidated; restored users authenticate again. There is no self-service reactivation path while blocked.
+**Confirmed recovery policy:** Rejected or suspended accounts remain blocked from normal protected actions until an administrator restores them. Blocking revokes the account's active sessions and refresh tokens. Restoration is audited and does not revive old tokens; the user must authenticate again. A restricted recovery request may accept a request after recovery-only identity verification, but cannot grant marketplace access, change verification state, or restore access. Company activity suspension alone does not revoke sessions; each request is authorized against current account and company states, so suspended company writes remain denied while permitted account-level reads and review requests work.
 
-Each company-type account has at most one active organization membership in the proposed Release 1 schema. This lets a company verification decision block/restore the same active account set deterministically. If multiple simultaneous memberships are required, the access-blocking rule must be redesigned before implementation.
+Each company-type account may belong to at most one company, enforced by a unique account-to-company relationship. A company may have separately authenticated owner/representative accounts. Each company has one owner; membership and permissions are retained as history when revoked. Company activity suspension suppresses its catalogue and disables new company-scoped activity without deleting records or audit history; it does not change linked account access.
+
+The initial implementation stores one immutable company owner account (`COMPANY`) per `CompanyProfile`; additional representative membership/permissions remain future work. Verification review and activity suspend/restore are separate staff actions. Rejection disables catalogue eligibility but does not itself block the owner account. Company email verification and private document upload fail closed until real providers and explicit file policy configuration are supplied.
 
 ## Catalogue, brands, and dealer inventory
 
@@ -96,32 +100,32 @@ Pending businesses may create location drafts while completing their profiles. D
 
 ## Dealer discovery
 
-Dealer search requires login and supports PIN code, area/locality, and district. Results reference a specific `DealerLocation`; its location-specific availability and selling price are returned separately from catalogue price. Results show business verification and authorized-dealer status as separate fields. Only verified businesses with eligible active listings appear as verified dealers. Pending dealer listing visibility is disabled in the proposed policy; an unverified dealer cannot appear as verified.
+Dealer search requires login and matches PIN code first, then locality/area and district. Results reference a specific `DealerLocation`; its location-specific availability and selling price are returned separately from catalogue price. Results show business verification and authorized-dealer status as separate fields. Only verified businesses with eligible active listings appear as verified dealers. If no direct location match is available, an optional GPS nearby fallback must be clearly labelled as a nearby result; GPS permission and a search radius are not assumed.
 
 GPS is optional and only used for nearby-distance features. Exact/partial matching, sort order, nearby radius, and no-result behavior remain open in [decisions.md](decisions.md).
 
 ## Staff permissions and audit history
 
-**Recommendation:** Assign staff roles through database-backed `StaffRole`, `StaffPermission`, and `StaffRoleAssignment` relations. Seed role bundles such as `PLATFORM_ADMIN`, `VERIFICATION_REVIEWER`, `CATALOGUE_MODERATOR`, and `AUDIT_READER`; permissions are checked by the API, not frontend route visibility. Only platform administrators can provision/disable staff and assign staff permissions. Approval of role bundles and separation-of-duty requirements remains open.
+**Confirmed:** Staff/admin identities are separate from marketplace accounts and use least-privilege permissions. Provision the initial super-admin through a secure, controlled bootstrap that does not expose public staff registration; the operational bootstrap mechanism must be approved before implementation. Assign staff roles through database-backed `StaffRole`, `StaffPermission`, and `StaffRoleAssignment` relations; permissions are checked by the API, not frontend route visibility.
 
 | Staff role | Proposed permissions |
 |---|---|
-| `PLATFORM_ADMIN` | Provision/disable staff; assign staff roles; manage taxonomy; review business/company verification; moderate products; read audit and reports. |
-| `VERIFICATION_REVIEWER` | `REVIEW_BUSINESS`, `REVIEW_COMPANY`, and assigned-case `VIEW_PRIVATE_DOCUMENTS`; cannot grant dealer authorization or change catalogue data. |
+| `PLATFORM_ADMIN` | `MANAGE_STAFF`, manage taxonomy, review business/company verification, handle review requests, suspend/restore companies, moderate products, read audit and reports. |
+| `VERIFICATION_REVIEWER` | `REVIEW_BUSINESS`, `REVIEW_COMPANY`, `HANDLE_REVIEW_REQUESTS`, and assigned-case `VIEW_PRIVATE_DOCUMENTS`; cannot grant dealer authorization or change catalogue data. |
 | `CATALOGUE_MODERATOR` | `MANAGE_TAXONOMY`, `REVIEW_DUPLICATES`, `MODERATE_PRODUCTS`; cannot decide business/company verification. |
 | `AUDIT_READER` | `READ_AUDIT` only; cannot change marketplace records. |
 
-Reports require `READ_REPORTS`; platform admins receive it by default.
+Reports require `READ_REPORTS`; platform admins receive it by default. The first super-admin is created through a secure, controlled bootstrap outside ordinary signup; exact operator/procedure and credential handoff are documented before deployment. No public registration or self-promotion route exists.
 
-These role bundles are recommendations; exact separation-of-duty policy is pending approval.
+The role names and bundle mapping are implementation recommendations; any action not explicitly granted remains denied. Additional separation-of-duty rules remain an operational decision.
 
 Company representative permissions are `MANAGE_COMPANY_PROFILE`, `MANAGE_CATALOGUE`, and `MANAGE_AUTHORIZED_DEALERS`. The owner account has all three and is also stored as an active representative row, so grant actors always reference a real representative. Additional representatives receive only explicitly assigned permissions. Only the owner may appoint/revoke representatives in the proposed policy; delegation of that management power is unresolved.
 
-Record append-only audit events for registration/profile state changes, verification decisions, staff permission changes, brand/product updates, product hide/suspend/restore, dealer location/listing/price/stock changes, file upload/download/replace/delete, and authorization grant/revocation. Each event has an account FK actor, exactly one explicit FK subject, action, timestamp, and relevant reason/change details. No ordinary API may update/delete audit rows. Retention duration and legally required archival/purge policy remain to be confirmed; retain records until an approved policy is established.
+Record append-only audit events for registration/profile state changes, verification decisions, review requests, staff permission changes, brand/product updates, company suspension/restoration, product hide/suspend/restore, dealer location/listing/price/stock changes, file upload/download/replace/delete, trade-worker contact submissions, and authorization grant/revocation. Each event has an account FK actor, exactly one explicit FK subject, action, timestamp, and relevant reason/change details. No ordinary API may update/delete audit rows. Retention duration and legally required archival/purge policy remain to be confirmed; retain records until an approved policy is established.
 
 ## File security
 
-Use private object storage. Relational document/asset rows have explicit foreign keys to their business, company, verification case, or product; do not use a polymorphic `owner_type/owner_id`. The API authorizes every upload and download.
+Use private object storage. Relational document/asset rows have explicit foreign keys to their business, company, verification case, or product; do not use a polymorphic `owner_type/owner_id`. The API authorizes every upload and download. File size/type limits must be configurable. Maintain a documented retention schedule and access policy; specific limits, retention periods, and temporary-link lifetimes remain unset until approved. Verification documents and other private files are never publicly accessible.
 
 | File category | Upload/replace | View/download | Delete |
 |---|---|---|---|
@@ -139,4 +143,6 @@ Sensitive files are never exposed through public API responses. Return neither s
 - Dealer listings require verified business ownership and must reference products/variants consistently.
 - Company/brand/business relationships and representative authority are checked on the server and protected by foreign keys.
 - OTP, email, cloud, and object-storage credentials are configurable secrets, not source code.
-- Rate limits, OTP recovery, file size/type limits, and audit retention need the decisions listed in `decisions.md`.
+- Rate limits, OTP recovery, file limit values, retention periods, consent wording, and nearby search radius remain configuration requirements or open operational specifications in `decisions.md`. Registration-fee collection is disabled in Release 1; future fees, if approved, must be configurable and are out of scope now.
+
+Trade-worker contacts are not public profiles. A business must confirm it has permission before submitting contacts, and each contact must separately opt in before a later service-provider profile can be created. Release 1 stores contacts privately for registration only and never creates service-provider profiles automatically.

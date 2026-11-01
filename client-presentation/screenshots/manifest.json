@@ -1,0 +1,239 @@
+{
+  "capture_date": "2026-11-01",
+  "timezone": "Asia/Calcutta",
+  "mobile_count": 13,
+  "web_count": 8,
+  "screenshots": [
+    {
+      "file": "mobile/authentication/mobile_login.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 169996,
+      "sha256": "6bf6e9f0e63ddbe3c1147ec9b20a6f9056058ba4e94f97575a0d0e36fa9d86ed",
+      "module": "Mobile / Authentication",
+      "state": "Actual UI; no credentials entered."
+    },
+    {
+      "file": "mobile/authentication/mobile_registration_account_type.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 233702,
+      "sha256": "9c4edcc07a165b355963a75940e0411fea660ee4290517608398886649d4c8db",
+      "module": "Mobile / Authentication",
+      "state": "Actual blank registration UI."
+    },
+    {
+      "file": "mobile/buyer/mobile_buyer_category_filter_empty.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 237623,
+      "sha256": "428d15feb059b85b95c8aa9f032b93c89c112c0dc05cc78a6c08380bc94b93a4",
+      "module": "Mobile / Buyer",
+      "state": "Real category filter; empty product result."
+    },
+    {
+      "file": "mobile/buyer/mobile_buyer_home_catalogue.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 238331,
+      "sha256": "b1bafc0d828c50a23e298d95a6f969e6ce1257c6541d25146160fbc6f7ee6386",
+      "module": "Mobile / Buyer",
+      "state": "Real category API data; zero matching products."
+    },
+    {
+      "file": "mobile/company/mobile_company_document_management.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 203343,
+      "sha256": "d9deeaf85f4d4faac016ba79c568ba2d80744ee407eb0598afc90d7f8deb44e8",
+      "module": "Mobile / Company",
+      "state": "Real company context; no documents; policy unconfigured."
+    },
+    {
+      "file": "mobile/company/mobile_company_verification_status.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 200125,
+      "sha256": "315d25023345eaa3d18605659066db47b187b4b31d35c00ad3719021e3d610f7",
+      "module": "Mobile / Company",
+      "state": "Real pending company context; no submitted application."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_authorization_empty.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 188722,
+      "sha256": "de6de9321e1483794bffe35e6026a2153f6c6209024a967f4e5cf1b8b7fc88a8",
+      "module": "Mobile / Dealer",
+      "state": "Real empty authorization API context."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_branch_form_controls.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 172412,
+      "sha256": "56764ee95190b41a4a6f2f86037adc9568f1db52ab628b9cfcae95a8c8918537",
+      "module": "Mobile / Dealer",
+      "state": "Actual unsaved form; pending-business publication restriction."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_branches_empty.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 146378,
+      "sha256": "fa234d0be678815e6b83c4e76c4ea3e3a58dbbf0975c73c5810779259d9fb09f",
+      "module": "Mobile / Dealer",
+      "state": "Real empty branch API result."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_business_profile.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 194883,
+      "sha256": "9ac28b70c6df80886de1052facf1c0c9a47daf6c7022572bc1f25dc3886d381c",
+      "module": "Mobile / Dealer",
+      "state": "Real existing incomplete business profile."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_dashboard_pending.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 231302,
+      "sha256": "44809562009f8dd28a0c179bebfff6d933a7e94d6d6467785eda244bed59c64c",
+      "module": "Mobile / Dealer",
+      "state": "Real API data: active account, pending verification, zero branches/listings."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_listings_inventory_restricted.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 177154,
+      "sha256": "66b070da7b9b10136ae5a42944daf347e03fbb184cd38caae9651ca134bb8e0b",
+      "module": "Mobile / Dealer",
+      "state": "Real empty listing API result; creation disabled for pending business."
+    },
+    {
+      "file": "mobile/dealer/mobile_dealer_new_branch_unsaved.png",
+      "captured": true,
+      "format": "PNG",
+      "width": 1280,
+      "height": 2856,
+      "bytes": 195301,
+      "sha256": "26495deceb629cf1d8cf2bc784d66b019258e35c73f1423cfd50e5acf8ab0df0",
+      "module": "Mobile / Dealer",
+      "state": "Actual blank form; not a saved branch."
+    },
+    {
+      "file": "web/catalogue/web_catalogue_management_empty.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 80611,
+      "sha256": "6a4b723efb85953f87d0e16c1dd22f02932689a6185f44eeccc51b797d242c5c",
+      "module": "Web / Catalogue",
+      "state": "Authenticated real empty product result."
+    },
+    {
+      "file": "web/dealers/web_dealer_branches_empty.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 65316,
+      "sha256": "18ff532af24ab24de1bba16cbd9234133b55b93d4e6e966401ff0be00259398d",
+      "module": "Web / Dealers",
+      "state": "Authenticated real empty branch result."
+    },
+    {
+      "file": "web/dealers/web_dealer_inventory_empty.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 65386,
+      "sha256": "f40f3b28ca8b302fc932364c8a84e685ea043b8998b0f1356c876466b2b07b57",
+      "module": "Web / Dealers",
+      "state": "Authenticated real empty listing result."
+    },
+    {
+      "file": "web/dealers/web_dealer_network_pending_business.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 65987,
+      "sha256": "16df756116e15b3cc0766265534532acda7b90f2454b2a2b983e731ed86b6186",
+      "module": "Web / Dealers",
+      "state": "Authenticated real existing development business record."
+    },
+    {
+      "file": "web/other/web_audit_history_not_implemented.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 54661,
+      "sha256": "028efa17c367a66d878542150c52201a78576c8a79b404bb662ebaf134cc7445",
+      "module": "Web / Audit history",
+      "state": "Actual application limitation; no audit read API invoked."
+    },
+    {
+      "file": "web/overview/web_admin_overview.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 76876,
+      "sha256": "6e26ac79267b7182667a236687ca7fad63fdddfbeb493dc08488879bd9e78fa7",
+      "module": "Web / Overview",
+      "state": "Authenticated actual UI; real process-health request."
+    },
+    {
+      "file": "web/verification/web_company_verification_empty.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 56811,
+      "sha256": "3ea8008c42294d55a77454b86d0ce2077c49b4f57d139d8303d0ba779eb4ae0d",
+      "module": "Web / Verification",
+      "state": "Authenticated real empty queue."
+    },
+    {
+      "file": "web/verification/web_review_requests_empty.jpg",
+      "captured": true,
+      "format": "JPEG",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 63560,
+      "sha256": "dd082bc4d56e7994a8a0084185dc4723049ceebbcffdf96cc076679d87174011",
+      "module": "Web / Review requests",
+      "state": "Authenticated real empty queue."
+    }
+  ]
+}
