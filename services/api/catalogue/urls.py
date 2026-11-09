@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import OwnerBrand, StaffBrands, StaffCategory, StaffCatalogueAudit, Categories, ModerateProduct, OwnerCatalogue, OwnerProduct, OwnerVariant, OwnerVariants, PublicProduct, PublicProducts, StaffCategories, StaffProducts
+from .views import OwnerBrand, StaffBrands, StaffCategory, StaffCatalogueAudit, Categories, ModerateProduct, OwnerCatalogue, OwnerProduct, OwnerVariant, OwnerVariants, PublicBrands, PublicProduct, PublicProducts, StaffCategories, StaffProducts
 
 urlpatterns = [
     path('companies/me/catalogue/brands/<int:pk>', OwnerBrand.as_view()),
@@ -8,6 +8,7 @@ urlpatterns = [
     path('staff/catalogue/audit', StaffCatalogueAudit.as_view()),
     path('catalogue/products', PublicProducts.as_view()),
     path('catalogue/products/<int:pk>', PublicProduct.as_view()),
+    path('catalogue/brands', PublicBrands.as_view()),
     path('catalogue/categories', Categories.as_view()),
     path('staff/catalogue/categories', StaffCategories.as_view()),
     path('staff/catalogue/products', StaffProducts.as_view()),

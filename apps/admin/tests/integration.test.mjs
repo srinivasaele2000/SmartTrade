@@ -8,7 +8,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
 test('all six sidebar links resolve to distinct page identities', () => {
-  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'dealers', 'audit']);
+  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'dealers', 'enquiries', 'orders', 'audit']);
   for (const page of pages) assert.equal(pageFromHash(`#${page.id}`), page.id);
   assert.equal(pageFromHash(''), 'overview');
   assert.equal(pageFromHash('#missing'), 'overview');
@@ -24,9 +24,9 @@ test('JSON requests retain exact base/path, method and bearer header', async () 
   const result = await requestApi('/api/v1', '/staff/catalogue/products/7/moderation', 'isolated-test-token', { method: 'POST', body: JSON.stringify({ action: 'HIDE', reason: 'Review' }) });
   assert.equal(result.moderation_state, 'HIDDEN');
 });
-test('field validation explains invalid E.164 input instead of hiding field errors', async () => {
-  globalThis.fetch = async () => json({ message: 'Request validation failed.', field_errors: { mobile_e164: ['Use a complete E.164 mobile number.'] } }, 400);
-  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), error => error.status === 400 && /mobile_e164.*E.164/.test(error.message));
+test('field validation explains invalid Indian mobile input instead of hiding field errors', async () => {
+  globalThis.fetch = async () => json({ message: 'Request validation failed.', field_errors: { mobile_e164: ['Use a valid Indian mobile number in +91XXXXXXXXXX format.'] } }, 400);
+  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), error => error.status === 400 && /mobile_e164.*Indian/.test(error.message));
 });
 test('missing real provider remains an explicit 503 failure', async () => {
   globalThis.fetch = async () => json({ code: 'AUTH_PROVIDER_UNAVAILABLE', message: 'Phone verification is not configured for this environment.' }, 503);

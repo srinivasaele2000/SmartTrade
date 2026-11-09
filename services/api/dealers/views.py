@@ -1,4 +1,5 @@
 import unicodedata
+from config.india import INDIAN_PIN_PATTERN
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, Value, BooleanField
 from django.shortcuts import get_object_or_404
@@ -14,7 +15,10 @@ from catalogue.views import Pages, eligible_products
 from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
 from .models import AuthorizedDealerGrant, DealerAudit, DealerLocation, DealerProductListing
-from .serializers import BusinessSerializer, DiscoverySerializer, GrantSerializer, ListingSerializer, LocationSerializer
+from .serializers import (
+    BUSINESS_SUMMARY_FIELDS, BusinessSerializer, BusinessSummarySerializer,
+    DiscoverySerializer, GrantSerializer, ListingSerializer, LocationSerializer,
+)
 
 
 class IsBusiness(BasePermission):
@@ -77,11 +81,15 @@ def page(request, qs, serializer):
     return pages.get_paginated_response(serializer(pages.paginate_queryset(qs, request), many=True).data)
 
 
-def save_validated(request, serializer, dealer, action, **kwargs):
+def save_validated(request, serializer, dealer, action, *, audit_fields=None, **kwargs):
     try:
         with transaction.atomic():
             item = serializer.save(**kwargs)
-            audit(request, dealer, action, serializer.data,
+            snapshot = serializer.data
+            if audit_fields is not None:
+                snapshot = {name: snapshot[name] for name in audit_fields}
+                snapshot['fields'] = sorted(serializer.validated_data)
+            audit(request, dealer, action, snapshot,
                   location=item if isinstance(item, DealerLocation) else item.location if isinstance(item, DealerProductListing) else None,
                   listing=item if isinstance(item, DealerProductListing) else None)
     except IntegrityError:
@@ -121,7 +129,12 @@ class BusinessMe(APIView):
         item = business(request)
         serializer = BusinessSerializer(item, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        return save_validated(request, serializer, item, 'BUSINESS_UPDATED')
+        response = save_validated(
+            request, serializer, item, 'BUSINESS_UPDATED',
+            audit_fields=BUSINESS_SUMMARY_FIELDS,
+        )
+        response['Cache-Control'] = 'no-store'
+        return response
 
 
 class Locations(APIView):
@@ -256,6 +269,10 @@ class Discovery(APIView):
 
     def get(self, request):
         qs = eligible_listings()
+        if 'pin_code' in request.query_params:
+            pin = ''.join(unicodedata.normalize('NFKC', request.query_params['pin_code']).split())
+            if not INDIAN_PIN_PATTERN.fullmatch(pin):
+                raise serializers.ValidationError({'pin_code': 'Use a six-digit Indian PIN code.'})
         for param, field in [('product', 'product_id'), ('brand', 'product__brand_category__brand_id'), ('variant', 'variant_id')]:
             value = request.query_params.get(param)
             if value:
@@ -308,7 +325,7 @@ class DiscoveryDetail(generics.RetrieveAPIView):
 class StaffBusinesses(generics.ListAPIView):
     permission_classes = [HasStaffPermission]
     required_staff_permission = 'REVIEW_BUSINESS'
-    serializer_class = BusinessSerializer
+    serializer_class = BusinessSummarySerializer
     pagination_class = Pages
 
     def get_queryset(self):
@@ -343,8 +360,9 @@ class StaffBusinessDecision(APIView):
             raise serializers.ValidationError('A business legal name is required for verification.')
         item.verification_state = {'APPROVE': 'VERIFIED', 'REJECT': 'REJECTED', 'SUSPEND': 'SUSPENDED', 'RESTORE': 'VERIFIED'}[action]
         item.save(update_fields=['verification_state'])
-        audit(request, item, 'BUSINESS_' + action, BusinessSerializer(item).data, serializer.validated_data['reason'])
-        return Response(BusinessSerializer(item).data)
+        result = BusinessSummarySerializer(item).data
+        audit(request, item, 'BUSINESS_' + action, result, serializer.validated_data['reason'])
+        return Response(result)
 
 
 class StaffLocations(generics.ListAPIView):

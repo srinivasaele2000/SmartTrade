@@ -33,6 +33,24 @@ class BrandSerializer(StrictSerializer):
         read_only_fields = ['id', 'company']
 
 
+class PublicBrandSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source='company.legal_name', read_only=True)
+    categories = serializers.SerializerMethodField()
+
+    def get_categories(self, instance):
+        links = getattr(instance, 'public_category_links', instance.category_links.all())
+        return [
+            {'id': link.category_id, 'name': link.category.name}
+            for link in links
+            if link.category.active
+        ]
+
+    class Meta:
+        model = Brand
+        fields = ['id', 'name', 'company_name', 'categories']
+        read_only_fields = fields
+
+
 class BrandCategorySerializer(StrictSerializer):
     class Meta:
         model = BrandCategory
@@ -85,6 +103,6 @@ class ProductSerializer(StrictSerializer):
             raise serializers.ValidationError({'brand_category': 'Category is inactive.'})
         price = attrs.get('catalogue_price', getattr(instance, 'catalogue_price', None))
         currency = attrs.get('currency', getattr(instance, 'currency', ''))
-        if (price is None and currency) or (price is not None and (price < 0 or not re.fullmatch('[A-Z]{3}', currency))):
-            raise serializers.ValidationError('Price requires a nonnegative amount and an explicit three-letter uppercase currency code; omit both when unspecified.')
+        if (price is None and currency) or (price is not None and (price < 0 or currency != 'INR')):
+            raise serializers.ValidationError('Catalogue price must be nonnegative and use INR; omit both amount and currency when unspecified.')
         return attrs

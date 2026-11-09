@@ -50,7 +50,7 @@ Confirmed project decisions, architecture recommendations, and unresolved questi
 | ID | Recommendation | Reason / confirmation |
 |---|---|---|
 | R-001 | Shared `Account` table with immutable type enum and matching account subtype tables; deferred constraint trigger enforces exactly one subtype. `CompanyProfile` is the organization; `CompanyUserProfile` is the account subtype for company owners/representatives. | Provides one global unique mobile and prevents multiple roles without treating every representative as a separate company. Approve subtype enforcement approach. |
-| R-002 | Normalize phone to E.164 and enforce a unique non-null DB column. | Prevents formatting variants from bypassing uniqueness; confirm country handling. |
+| R-002 | Store Indian mobiles in canonical `+91XXXXXXXXXX` form and enforce a unique non-null DB column. | Prevents formatting variants from bypassing uniqueness; India-only operation is approved. |
 | R-004 | Pending dealers do not appear in dealer discovery; only verified businesses with eligible listings appear. | Applies the confirmed rule that pending users cannot appear as verified dealers. |
 | R-006 | Company owner alone appoints/revokes representatives in Release 1; representatives receive explicit `MANAGE_COMPANY_PROFILE`, `MANAGE_CATALOGUE`, and/or `MANAGE_AUTHORIZED_DEALERS` permissions. | Least privilege; confirm whether delegation of representative management is desired later. |
 | R-007 | Active authorization requires a verified dealer business. | Avoids displaying authorized status for an unverified business; confirm if mapping may be recorded before verification. |
@@ -60,12 +60,12 @@ Confirmed project decisions, architecture recommendations, and unresolved questi
 
 ## Open questions and blockers
 
-1. **Phone normalization:** Which country/country-code input rules should registration accept before storing E.164?
+1. **Phone normalization:** Resolved for Release 1: accept canonical Indian `+91XXXXXXXXXX` only; do not silently infer a country code.
 2. **Restoration transitions:** Define exact post-restoration verification-state transitions. A review request never restores access; the approved token revocation/re-authentication behavior is documented in D-030.
 3. **Staff operations:** Approve role bundles/separation-of-duty rules and specify the secure initial super-admin bootstrap operator/procedure.
 4. **Representative governance:** Confirm owner-only appointment, permission delegation, and offboarding behavior beyond the approved one-company-per-account rule.
 5. **Authorization verification:** Confirm whether grant creation requires dealer business verification and whether a grant may be recorded before verification.
-6. **Catalogue price details:** Confirm currency, decimal precision, effective dates, and whether price history is immutable snapshots or version rows.
+6. **Catalogue price details:** INR-only is resolved. Confirm accounting rounding, effective dates, and whether price history is immutable snapshots or version rows.
 7. **File policy values:** Set allowed file types/sizes, retention periods, malware-scanning requirements, and temporary-link lifetime before upload implementation. Limits must be configurable; document the policy without assuming values.
 8. **Audit retention:** Confirm retention duration, archival method, and legal purge requirements; audit records are immutable through normal application/admin workflows.
 9. **Search details:** Specify exact/partial matching, sorting, no-result behavior, nearby radius, coordinate source, and GPS permission wording. PIN/locality/district priority and labelled fallback are confirmed.

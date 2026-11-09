@@ -1,4 +1,5 @@
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers
 from rest_framework.exceptions import PermissionDenied
@@ -9,7 +10,7 @@ from rest_framework.views import APIView
 from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
 from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductVariant
-from .serializers import BrandSerializer, BrandCategorySerializer, CategorySerializer, ProductSerializer, VariantSerializer
+from .serializers import BrandSerializer, BrandCategorySerializer, CategorySerializer, ProductSerializer, PublicBrandSerializer, VariantSerializer
 
 
 class Pages(PageNumberPagination):
@@ -69,7 +70,45 @@ class PublicProducts(generics.ListAPIView):
                     raise serializers.ValidationError({param: 'Expected a numeric ID.'})
                 qs = qs.filter(**{field: value})
         search = self.request.query_params.get('search', '').strip()
-        return qs.filter(name__icontains=search) if search else qs
+        for term in search.split():
+            qs = qs.filter(
+                Q(name__icontains=term)
+                | Q(code__icontains=term)
+                | Q(description__icontains=term)
+                | Q(brand_category__brand__name__icontains=term)
+                | Q(brand_category__category__name__icontains=term)
+                | (Q(variants__active=True) & (Q(variants__sku__icontains=term) | Q(variants__name__icontains=term)))
+            )
+        return qs.distinct()
+
+
+class PublicBrands(generics.ListAPIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    serializer_class = PublicBrandSerializer
+    pagination_class = Pages
+
+    def get_queryset(self):
+        public_links = BrandCategory.objects.filter(
+            products__in=eligible_products(), category__active=True
+        ).select_related('category').distinct()
+        qs = Brand.objects.filter(
+            category_links__products__in=eligible_products()
+        ).select_related('company').prefetch_related(
+            Prefetch('category_links', queryset=public_links, to_attr='public_category_links')
+        )
+        category = self.request.query_params.get('category')
+        if category:
+            if not category.isdecimal():
+                raise serializers.ValidationError({'category': 'Expected a numeric ID.'})
+            qs = qs.filter(
+                category_links__category_id=category,
+                category_links__products__in=eligible_products(),
+            )
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(company__legal_name__icontains=search))
+        return qs.distinct().order_by('name', 'pk')
 
 
 class PublicProduct(generics.RetrieveAPIView):

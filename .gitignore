@@ -16,6 +16,10 @@ private_uploads/
 *.pfx
 *.jks
 *.keystore
+apps/mobile/android/local.properties
+apps/mobile/android/.gradle/
+apps/mobile/android/.cxx/
+client-presentation/apk/*.apk
 id_rsa*
 id_ed25519*
 

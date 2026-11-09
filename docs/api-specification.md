@@ -14,7 +14,7 @@ Paths use `/api/v1`. Account registration/authentication and the initial company
 
 ## Authentication and access rules
 
-- One canonical E.164 mobile number maps to one immutable `Account.account_type` (`PERSONAL`, `BUSINESS`, `COMPANY`, `STAFF`). `POST /auth/register` accepts only `PERSONAL`, `BUSINESS`, and `COMPANY`; staff creation is restricted to the controlled `bootstrap_superadmin` management command or a future authorized staff workflow.
+- One canonical Indian `+91XXXXXXXXXX` mobile number maps to one immutable `Account.account_type` (`PERSONAL`, `BUSINESS`, `COMPANY`, `STAFF`). `POST /auth/register` accepts only `PERSONAL`, `BUSINESS`, and `COMPANY`; staff creation is restricted to the controlled `bootstrap_superadmin` management command or a future authorized staff workflow.
 - OTP login uses an adapter selected by `SMARTTRADE_OTP_PROVIDER`. No provider is configured by default. Registration remains mobile-unverified; OTP request/login return `503 AUTH_PROVIDER_UNAVAILABLE` until a real adapter is configured. The API never creates, stores, returns, or logs OTP codes.
 - Successful provider verification issues access/refresh JWTs using Simple JWT. Tokens are not persisted. Every authenticated request checks current account state and token version; blocking or logout increments the token version, so old access/refresh tokens stay invalid after restoration.
 - An account must be active to use authenticated endpoints. Pending company owners may edit their own profile and upload/read their own verification documents before submission. A submitted profile is locked for staff review. They cannot publish products or appear as verified dealers.
@@ -140,7 +140,7 @@ Listing create request:
 }
 ```
 
-Response includes `listing_id`, `dealer_business_id`, `dealer_location_id`, `product_id`, optional `variant_id`, dealer price/stock/availability, and read-only company catalogue price. Exact currency/decimal precision and stock unit remain open.
+Response includes `listing_id`, `dealer_business_id`, `dealer_location_id`, `product_id`, optional `variant_id`, dealer price/stock/availability, and read-only company catalogue price. Currency is INR-only; accounting rounding and stock unit policy remain open.
 
 Authorized-dealer grant response includes `grant_id`, `company_id`, `brand_id`, `dealer_business_id`, `status`, `granted_by`, and `granted_at`; actor values are server-generated. Revocation adds `revoked_by`, `revoked_at`, and reason.
 
@@ -168,7 +168,7 @@ Company activity suspension does not revoke otherwise valid account sessions or 
 
 ## Deferred API modules
 
-Cart, quotation, secure customer approval links, invoices, payment, jobs, service providers, and employment APIs are later phases.
+Cart, secure customer approval links, payment, jobs, service providers, and employment APIs are later phases. Orders and invoices are covered by Phase 7 below.
 
 ### Implemented owner company status context
 
@@ -179,3 +179,31 @@ Cart, quotation, secure customer approval links, invoices, payment, jobs, servic
 `GET /api/v1/businesses/me` retains its profile fields and adds owner-only `workspace`: `branch_count`, `published_listing_count`, `discoverable_listing_count`, `can_edit`, `can_publish_branches`, `can_manage_listings`, and `authorizations`. Each grant contains its ID, canonical brand/company IDs and names, active flag, current company verification/activity state, effective eligibility and update timestamp. Grant actors, private contacts and other businesses' grants are not included. This response is `Cache-Control: no-store`. No workspace write field exists; the strict profile serializer rejects it. Dealers still cannot call the company-owned authorization-write API.
 
 Product responses add read-only `brand_id` and `company_id` for canonical matching. Product ownership and all existing write constraints remain unchanged. These are additive fields on existing URLs; no new endpoint or database migration is required.
+## Phase 6 enquiries and quotations
+
+All Phase 6 endpoints require JWT authentication. Buyer endpoints accept active `PERSONAL` accounts; dealer endpoints require the active `BUSINESS` account that owns the enquiry branch and its verified business profile. Staff inspection requires `READ_REPORTS`.
+
+- `GET|POST /api/v1/enquiries` — buyer enquiry history and multi-item creation from currently eligible listings at one branch.
+- `GET /api/v1/enquiries/{id}` — buyer-owned enquiry, quotation revisions, and current response state.
+- `POST /api/v1/enquiries/{id}/response` — accept or reject the latest sent, unexpired quotation; rejection requires a reason.
+- `GET /api/v1/businesses/me/enquiries` and `GET /api/v1/businesses/me/enquiries/{id}` — owning dealer inbox/detail.
+- `POST /api/v1/businesses/me/enquiries/{id}/quotations` — send a complete item-wise INR quotation revision with future validity.
+- `POST /api/v1/businesses/me/enquiries/{id}/decline` — decline an eligible enquiry with a reason.
+- `GET /api/v1/staff/enquiries` and `GET /api/v1/staff/enquiries/{id}` — read-only staff inspection and revision history.
+
+Enquiry item quantities must be positive. Every item must reference an eligible published dealer listing at the selected branch. Quotations must cover every enquiry item exactly once, use INR, and preserve immutable revisions. Expired quotations cannot be accepted. Phase 6 itself creates no orders, invoices, taxes, payments, reservations, or delivery commitments.
+
+## Phase 7 orders and invoices
+
+All endpoints require JWT authentication. Buyer endpoints accept the active `PERSONAL` account that owns the accepted quotation. Dealer endpoints require the active `BUSINESS` account that owns the branch and verified dealer business. Staff inspection is read-only and requires `READ_REPORTS`.
+
+- `GET|POST /api/v1/orders` — buyer order history and idempotent creation from an accepted quotation. A second order for the same quotation returns `409`.
+- `GET /api/v1/orders/{id}` — buyer-owned order detail and immutable accepted-quotation item snapshots.
+- `POST /api/v1/orders/{id}/cancel` — permitted buyer cancellation with a mandatory reason.
+- `GET /api/v1/orders/{id}/invoice/download` — authorized, private PDF download for the buyer, owning dealer, or reporting staff.
+- `GET /api/v1/businesses/me/orders` and `GET /api/v1/businesses/me/orders/{id}` — owning dealer order inbox/detail.
+- `POST /api/v1/businesses/me/orders/{id}/action` — validated dealer transitions: confirm, reject, process, ready, complete, or cancel; rejection and cancellation require a reason.
+- `POST /api/v1/businesses/me/orders/{id}/invoice` — issue one immutable invoice for an eligible confirmed order.
+- `GET /api/v1/staff/orders` and `GET /api/v1/staff/orders/{id}` — read-only staff inspection of orders, status history, invoices, and invoice audit records.
+
+Order creation snapshots product, variant/SKU, quantity, and accepted INR unit price. Commercial identity and issued invoice records are immutable, with append-only audit histories. Invoice numbers are sequential per supplier and Indian financial year. Invoice issuance requires an explicit supply basis, place of supply, per-line HSN, discount, tax rate, and CGST/SGST or IGST mode when issuing a tax invoice. Bills of supply require zero tax and no tax mode. The API never infers GST applicability or rates; missing statutory information prevents issuance. Phase 7 does not implement payments, fulfillment integrations, or legal/tax advice.

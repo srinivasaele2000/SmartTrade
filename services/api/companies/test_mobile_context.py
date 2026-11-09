@@ -12,7 +12,7 @@ from .models import CompanyProfile, CompanyDocument, CompanyVerificationCase, Co
                    SMARTTRADE_COMPANY_EMAIL_PROVIDER='')
 class MobileCompanyContextTests(TestCase):
     def setUp(self):
-        self.owner = Account.objects.create_user('+12025550131', 'COMPANY')
+        self.owner = Account.objects.create_user('+919800000027', 'COMPANY')
         self.company = CompanyProfile.objects.create(owner_account=self.owner, legal_name='Test company', company_email='test@example.test')
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
@@ -36,7 +36,7 @@ class MobileCompanyContextTests(TestCase):
 
     def test_documents_are_private_metadata_and_owner_scoped(self):
         CompanyDocument.objects.create(company=self.company, uploaded_by=self.owner, document_type='REGISTRATION', file='private/never-exposed.pdf', original_filename='registration.pdf', content_type='application/pdf', size_bytes=10)
-        other = Account.objects.create_user('+12025550132', 'COMPANY')
+        other = Account.objects.create_user('+919800000028', 'COMPANY')
         foreign = CompanyProfile.objects.create(owner_account=other, legal_name='Other', company_email='other@example.test')
         CompanyDocument.objects.create(company=foreign, uploaded_by=other, document_type='REGISTRATION', file='private/other.pdf', original_filename='other.pdf', content_type='application/pdf', size_bytes=10)
         value = self.context()
@@ -76,7 +76,7 @@ class MobileCompanyContextTests(TestCase):
         self.assertFalse(value['can_upload'])
 
     def test_non_company_and_blocked_accounts_cannot_read_context(self):
-        personal = Account.objects.create_user('+12025550133', 'PERSONAL')
+        personal = Account.objects.create_user('+919800000029', 'PERSONAL')
         self.client.force_authenticate(personal)
         self.assertEqual(self.client.get('/api/v1/companies/me').status_code, 403)
         self.owner.access_state = 'BLOCKED'

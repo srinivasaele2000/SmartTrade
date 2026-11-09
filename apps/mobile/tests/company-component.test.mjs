@@ -1,3 +1,4 @@
+import {buttonModule} from './button-adapter.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -5,6 +6,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as company from '../src/company.ts';
 import * as api from '../src/api.ts';
+import * as india from '../src/india.ts';
 
 // Reuse the monorepo's existing matching React/ReactDOM installations. Render
 // the actual TSX component with native host adapters and isolated API fixtures;
@@ -20,7 +22,7 @@ function render({ role = 'COMPANY', tab = 'Dashboard', state = {status:'ready',d
  const native = {};
  for (const name of ['Text', 'View', 'ScrollView', 'Pressable', 'TextInput', 'ActivityIndicator']) native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, ...(name === 'TextInput' ? { value: props.value, readOnly: !props.editable } : {}) }, props.children);
  native.StyleSheet = { create: value => value };
- const imports = { './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, 'expo-document-picker':{getDocumentAsync(){throw new Error('Native picker not invoked in render test');}}, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
+ const imports = { './Button':buttonModule(React,native,jsx), './india': india, './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, './LocalFileVault': {default:props=>React.createElement('div',null,props.title,props.description)}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
  const module={exports:{}};
  new Function('require','module','exports',compiled)(name=>{if(!(name in imports))throw new Error(name);return imports[name];},module,module.exports);
  return renderToStaticMarkup(React.createElement(module.exports.default,{api:new api.ApiClient('http://example.test/api/v1')}));
@@ -35,7 +37,8 @@ test('email simulation is visibly labelled and does not claim ownership verifica
  const html=render({tab:'Email'});assert.match(html,/LOCAL SIMULATION/);assert.match(html,/Start local email simulation/);assert.match(html,/does not verify real email ownership/);
 });
 test('documents and application respect server policy and submission capabilities',()=>{
- assert.match(render({tab:'Documents'}),/Maximum file size: 1024/);
+ assert.match(render({tab:'Documents'}),/Company documents on this device/);
+ assert.match(render({tab:'Documents'}),/cannot see files listed only in the local section/);
  assert.match(render({tab:'Application'}),/disabled=""[^>]*>.*?Submit verification application/);
  const restricted=structuredClone(base);restricted.company.activity_state='SUSPENDED';restricted.verification.can_request_review=true;
  assert.match(render({tab:'Application',state:{status:'ready',data:restricted}}),/Restricted review request/);

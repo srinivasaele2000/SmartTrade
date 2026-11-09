@@ -1,11 +1,13 @@
 import { ApiClient, ApiError } from './api.ts';
+import { GSTIN, INDIAN_PIN, INDIAN_STATES, PAN } from './india.ts';
 
 export const fields = [
   ['legal_name', 'Legal company name', 200], ['trading_name', 'Trading name', 200],
-  ['registration_number', 'Registration number', 100], ['tax_registration_number', 'Tax registration', 100],
+  ['registration_number', 'Registration number', 100], ['tax_registration_number', 'Legacy tax registration reference', 100],
+  ['gstin', 'GSTIN (optional)', 15], ['pan', 'PAN (optional)', 10],
   ['authorized_person_name', 'Authorized person', 200], ['company_email', 'Company email', 254],
-  ['address_line', 'Address', 300], ['pin_code', 'PIN / postal code', 16], ['area', 'Area / locality', 120],
-  ['district', 'District', 120], ['state_or_region', 'State / region', 120], ['website', 'Website', 200],
+  ['address_line', 'Address', 300], ['pin_code', 'Indian PIN code', 6], ['area', 'Area / locality', 120],
+  ['district', 'District', 120], ['state_or_region', 'Indian state / union territory', 120], ['website', 'Website', 200],
 ] as const;
 export type ProfileInput = Record<typeof fields[number][0], string>;
 export type Company = ProfileInput & { id: number; verification_state: 'PENDING' | 'VERIFIED' | 'REJECTED'; activity_state: 'ACTIVE' | 'SUSPENDED'; email_verified_at: string | null; can_publish_catalogue: boolean };
@@ -23,6 +25,10 @@ export function validateProfile(value: ProfileInput): string[] {
   const errors = fields.filter(([key, , max]) => value[key].trim().length > max).map(([, label]) => `${label} is too long.`);
   if (!value.legal_name.trim()) errors.push('Legal company name is required.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.company_email.trim())) errors.push('Enter a valid company email.');
+  if (value.pin_code && !INDIAN_PIN.test(value.pin_code.trim())) errors.push('Use a six-digit Indian PIN code.');
+  if (value.state_or_region && !INDIAN_STATES.some(state => state.toLowerCase() === value.state_or_region.trim().toLowerCase())) errors.push('Choose a valid Indian state or union territory.');
+  if (value.gstin && !GSTIN.test(value.gstin.trim().toUpperCase())) errors.push('Use a valid 15-character GSTIN.');
+  if (value.pan && !PAN.test(value.pan.trim().toUpperCase())) errors.push('Use a valid 10-character PAN.');
   if (value.website && !/^https?:\/\//i.test(value.website)) errors.push('Website must start with http:// or https://.');
   return errors;
 }
@@ -39,7 +45,7 @@ export async function loadCompany(api: ApiClient, token: string, signal?: AbortS
 }
 export async function saveProfile(api: ApiClient, token: string, value: ProfileInput, creating: boolean) {
   const errors = validateProfile(value); if (errors.length) throw new ApiError(errors.join(' '));
-  const body = Object.fromEntries(fields.map(([key]) => [key, value[key].trim()]));
+  const body = Object.fromEntries(fields.map(([key]) => [key, ['gstin','pan'].includes(key) ? value[key].trim().toUpperCase() : value[key].trim()]));
   const result = await api.get(creating ? '/companies/register' : '/companies/me', undefined, token, { method: creating ? 'POST' : 'PATCH', body: JSON.stringify(body) }) as { company?: { id?: number } };
   if (typeof result.company?.id !== 'number') throw new ApiError('Save response is incomplete. Refresh company status before retrying.');
   return result;
@@ -47,43 +53,6 @@ export async function saveProfile(api: ApiClient, token: string, value: ProfileI
 export function confirmReply(value: unknown, required: Record<string, 'number' | 'string'>): void {
   if (!value || typeof value !== 'object' || Object.entries(required).some(([key, type]) => typeof (value as Record<string, unknown>)[key] !== type)) throw new ApiError('Server response is incomplete. Refresh company status before retrying.');
 }
-export type PickedFile = { uri: string; name: string; mimeType?: string; size?: number };
-export function validateDocument(policy: DocumentPolicy, type: string, file: PickedFile): string[] {
-  if (!policy.configured || !policy.max_bytes) return ['Company document policy is not configured.'];
-  const errors: string[] = [];
-  if (!policy.required_types.includes(type)) errors.push('Choose a configured document type.');
-  if (!file.mimeType || !policy.allowed_mime_types.includes(file.mimeType)) errors.push('File MIME type is not permitted.');
-  if (file.size !== undefined && (file.size <= 0 || file.size > policy.max_bytes)) errors.push('File is empty or exceeds the configured size limit.');
-  if (!file.uri || !file.name || file.name.length > 255) errors.push('Invalid filename or file selection.');
-  return errors;
-}
-export function uploadDocument(api: ApiClient, token: string, policy: DocumentPolicy, type: string, file: PickedFile, progress: (percent: number | null) => void, createXHR = () => new XMLHttpRequest()) {
-  const errors = validateDocument(policy, type, file); if (errors.length) throw new ApiError(errors.join(' '));
-  const url = new URL(api.base);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new ApiError('Invalid API configuration.');
-  return new Promise<DocumentMetadata>((resolve, reject) => {
-    const xhr = createXHR();
-    const data = new FormData(); data.append('document_type', type);
-    data.append('file', { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
-    xhr.open('POST', `${api.base}/companies/me/documents`); xhr.timeout = 120000;
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`); xhr.setRequestHeader('Accept', 'application/json');
-    xhr.upload.onprogress = event => progress(event.lengthComputable ? Math.round(event.loaded / event.total * 100) : null);
-    xhr.onerror = () => reject(new ApiError('Upload connection failed. Refresh documents before retrying.'));
-    xhr.ontimeout = () => reject(new ApiError('Upload timed out. Refresh documents before retrying.'));
-    xhr.onload = () => {
-      try {
-        const value = JSON.parse(xhr.responseText);
-        if (xhr.status < 200 || xhr.status >= 300) {
-          const details = value.field_errors ?? Object.fromEntries(Object.entries(value).filter(([key]) => !['code','message'].includes(key)));
-          reject(new ApiError([value.message || 'Document upload rejected.', JSON.stringify(details)].join(' '), xhr.status, value.code));
-        } else if (!value.document?.id) reject(new ApiError('Upload could not be confirmed. Refresh documents.'));
-        else resolve(value.document);
-      } catch { reject(new ApiError('Upload response unreadable. Refresh documents before retrying.')); }
-    };
-    xhr.send(data);
-  });
-}
-
 /** Display real ownership verification separately from local simulation evidence. */
 export function emailStatus(context: CompanyContext): string {
   if (context.company.email_verified_at) return 'Verified by provider';

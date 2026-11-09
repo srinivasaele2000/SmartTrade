@@ -9,7 +9,7 @@
 
 No provider is bundled or configured in development. Registration can create an account, but it leaves `mobile_verified_at` null. OTP request and login return `503 AUTH_PROVIDER_UNAVAILABLE`, and no token is issued until a real provider adapter is configured. With a provider configured, dispatch failures receive the same acknowledgement as unknown/blocked numbers to reduce account enumeration. The API does not create, store, log, or return OTP codes. Provider credentials must come from environment-based secret configuration; delivery policy/rate limiting is the provider adapter's responsibility.
 
-Registration accepts a complete E.164 mobile number because country-specific local-number normalization remains an open project decision. It does not infer a country code.
+Registration accepts only canonical Indian mobile numbers in `+91XXXXXXXXXX` format. Local numbers are not silently normalized because doing so can conceal invalid input.
 
 ## Tokens and account status
 

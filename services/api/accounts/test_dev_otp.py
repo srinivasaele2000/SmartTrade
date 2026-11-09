@@ -13,7 +13,7 @@ from .otp import get_otp_provider, OTPProviderUnavailable
 class DevelopmentOTPTests(TestCase):
     def setUp(self):
         self.client = APIClient(HTTP_HOST='localhost')
-        self.mobile = '+14155550800'
+        self.mobile = '+919800000003'
 
     def request(self, mobile=None, **headers):
         return self.client.post('/api/v1/auth/otp/request', {'mobile_e164': mobile or self.mobile}, format='json', **headers)
@@ -32,7 +32,7 @@ class DevelopmentOTPTests(TestCase):
 
     def test_registration_and_any_nonempty_code_for_marketplace_types(self):
         for index, kind in enumerate(('PERSONAL', 'BUSINESS', 'COMPANY')):
-            self.mobile = f'+1415555081{index}'
+            self.mobile = f'+91980000008{index}'
             response = self.client.post('/api/v1/auth/register', {'mobile_e164': self.mobile, 'account_type': kind}, format='json')
             self.assertEqual(response.status_code, 201)
             for code in ('letters', '1', 'arbitrary code'):
@@ -51,7 +51,7 @@ class DevelopmentOTPTests(TestCase):
         Account.objects.create_user(self.mobile, AccountType.PERSONAL)
         for code in ('', '   '):
             self.assertEqual(self.login(code).status_code, 400)
-        self.assertEqual(self.client.post('/api/v1/auth/register', {'mobile_e164': '+14155550899', 'account_type': 'STAFF'}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/auth/register', {'mobile_e164': '+919800000004', 'account_type': 'STAFF'}, format='json').status_code, 400)
 
     def test_staff_requires_both_flags_and_designation_and_retains_permissions(self):
         staff = Account.objects.create_user(self.mobile, AccountType.STAFF)

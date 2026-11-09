@@ -1,13 +1,12 @@
-import re
-
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.core.exceptions import ValidationError
 from django.db import connection, models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
+from config.india import INDIAN_MOBILE_PATTERN
 
 
-E164_PATTERN = re.compile(r"^\+[1-9][0-9]{1,14}$")
+E164_PATTERN = INDIAN_MOBILE_PATTERN
 
 
 class AccountType(models.TextChoices):
@@ -39,7 +38,7 @@ class AccountManager(BaseUserManager):
 
     def create_user(self, mobile_e164, account_type, **extra_fields):
         if not mobile_e164 or not E164_PATTERN.fullmatch(mobile_e164):
-            raise ValueError("mobile_e164 must be a canonical E.164 number")
+            raise ValueError("mobile_e164 must be a canonical Indian +91 mobile number")
         if account_type not in AccountType.values:
             raise ValueError("account_type is invalid")
 
@@ -82,6 +81,10 @@ class Account(AbstractBaseUser):
             models.CheckConstraint(
                 condition=Q(access_state__in=AccountAccessState.values),
                 name="account_valid_access_state",
+            ),
+            models.CheckConstraint(
+                condition=Q(mobile_e164__regex=r"^\+91[6-9][0-9]{9}$"),
+                name="account_indian_mobile",
             ),
         ]
 
@@ -137,6 +140,13 @@ class Account(AbstractBaseUser):
 
 
 class PersonalProfile(models.Model):
+    full_name = models.CharField(max_length=200, blank=True)
+    occupation = models.CharField(max_length=120, blank=True)
+    pin_code = models.CharField(max_length=6, blank=True)
+    locality = models.CharField(max_length=120, blank=True)
+    district = models.CharField(max_length=120, blank=True)
+    state = models.CharField(max_length=80, blank=True)
+
     account = models.OneToOneField(
         Account,
         primary_key=True,
@@ -146,8 +156,17 @@ class PersonalProfile(models.Model):
 
 
 class BusinessProfile(models.Model):
+    owner_name = models.CharField(max_length=200, blank=True)
+    business_email = models.EmailField(blank=True)
+    registered_address = models.CharField(max_length=400, blank=True)
+    registered_pin_code = models.CharField(max_length=6, blank=True)
+    registered_locality = models.CharField(max_length=120, blank=True)
+    registered_district = models.CharField(max_length=120, blank=True)
+    registered_state = models.CharField(max_length=80, blank=True)
     legal_name = models.CharField(max_length=200, blank=True)
     registration_number = models.CharField(max_length=100, blank=True)
+    gstin = models.CharField(max_length=15, blank=True)
+    pan = models.CharField(max_length=10, blank=True)
 
     account = models.OneToOneField(
         Account,
@@ -166,6 +185,8 @@ class BusinessProfile(models.Model):
                 condition=Q(verification_state__in=VerificationState.values),
                 name="business_valid_verification_state",
             ),
+            models.CheckConstraint(condition=Q(gstin='') | Q(gstin__regex=r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'), name='business_valid_gstin'),
+            models.CheckConstraint(condition=Q(pan='') | Q(pan__regex=r'^[A-Z]{5}[0-9]{4}[A-Z]$'), name='business_valid_pan'),
         ]
 
 

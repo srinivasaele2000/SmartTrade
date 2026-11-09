@@ -4,7 +4,9 @@ export const pages = [
   { id: 'review-requests', label: 'Review requests', title: 'Company review requests', description: 'Handle restricted review requests without changing company or account access.' },
   { id: 'catalogue', label: 'Catalogue', title: 'Catalogue moderation', description: 'Inspect company-owned products and record authorized moderation decisions.' },
   { id: 'dealers', label: 'Dealer network', title: 'Dealer network', description: 'Review businesses, branches, and branch-specific inventory.' },
-  { id: 'audit', label: 'Audit history', title: 'Audit history', description: 'Audit history viewing is not implemented in this release slice.' },
+  { id: 'enquiries', label: 'Enquiries', title: 'Enquiries and quotations', description: 'Inspect buyer enquiries and item-wise dealer quotation revisions.' },
+  { id: 'orders', label: 'Orders', title: 'Orders and invoices', description: 'Inspect order state, immutable item snapshots, and issued invoices.' },
+  { id: 'audit', label: 'Audit history', title: 'Audit history', description: 'Inspect available catalogue, authorization and listing audit histories.' },
 ] as const;
 export type PageId = typeof pages[number]['id'];
 export function pageFromHash(hash: string): PageId {

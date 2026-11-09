@@ -82,7 +82,7 @@ Dealer responses are projected into types containing only public branch address/
 
 Mobile now has login, explicit Personal/Business/Company registration, OTP entry, account/status and sign-out screens. Normal and opt-in development OTP use the existing `/auth/register`, `/auth/otp/request`, `/auth/login`, `/auth/me`, `/auth/refresh`, `/auth/logout` contracts. Development acknowledgements clearly say no SMS was sent and phone ownership remains unverified. Unknown accounts must explicitly register; mobile registration cannot create STAFF or grant roles. Backend blocking/permissions remain authoritative.
 
-Access and refresh tokens stay in React memory, never public environment values or local files. Session admission and each refresh load `/auth/me`; scheduled refresh replaces access tokens. Refresh failures clear the session. Logout clears local state and invokes server token-version revocation; failed server logout is clearly reported. Relaunch/reload requires sign-in. Sign-in from product-to-dealer discovery returns to that selected product/variant. Account type and verification status are separate from company/business approval.
+Access and refresh tokens are encrypted by Expo SecureStore, never placed in public environment values or ordinary files. App restart restores the encrypted session and immediately revalidates `/auth/me` when online; a network-only failure permits an explicitly labelled offline session for device-local files while protected server actions remain unavailable. Scheduled refresh replaces access tokens. Authentication or refresh failures clear persisted credentials. Logout removes SecureStore state before invoking server token-version revocation; failed server logout is clearly reported. Sign-in from product-to-dealer discovery returns to that selected product/variant. Account type and verification status are separate from company/business approval.
 
 ## Current implementation inventory
 
@@ -93,7 +93,7 @@ Access and refresh tokens stay in React memory, never public environment values 
 | Authentication | Login, development OTP, explicit account-type registration, active session admission, refresh and logout implemented |
 | Dealer discovery | Existing PIN-first location/stock filters and branch price comparison now reachable after sign-in |
 | Account screen | Actual account type, access state and mobile verification; no invented business verification |
-| Company management | Company-only dashboard, registration/profile, private document picker/upload, email confirmation, application and restricted review-request screens implemented |
+| Company management | Company-only dashboard, registration/profile, device-local private document vault, email confirmation, application and restricted review-request screens implemented; local documents cannot be submitted to staff |
 | Dealer management | BUSINESS-only dashboard/profile, paginated branches, read-only authorization status, authorized catalogue selection and listing/stock forms implemented |
 
 Existing company and dealer write APIs support most remaining forms. Dealer authorization status is now available through the owner business workspace context. Remaining API gaps are a public brand directory and server-side discovery variant filtering. Local company verification now uses the guarded development email simulation and explicitly configured local document policies; a real email provider is not required. Do not invent consent, upload limits, or verification shortcuts. No backend changes were necessary for this authentication milestone.
@@ -139,14 +139,14 @@ Existing paths used (relative to `/api/v1`):
 
 - `GET /companies/me`: company plus an additive owner-only `verification` context containing configured document policy, document metadata, latest application/decision, missing document types, review requests and allowed-action booleans. No storage paths/public URLs are returned. A specific COMPANY_NOT_REGISTERED 404 opens registration; other errors remain errors.
 - `POST /companies/register`, `PATCH /companies/me`: explicit company registration and permitted profile changes; status/ownership fields are not posted.
-- `POST /companies/me/documents`: native multipart upload with Bearer authorization using `expo-document-picker ~58.0.4`, the installed Expo SDK's declared version. The picker copies selection to app cache for upload. XHR reports actual transfer progress; 100% means waiting for server confirmation, not approval. Policy, size and MIME checks run before upload; signatures and authoritative validation remain on the backend. No public file links/sharing are introduced. Document rows show uploaded versus attached-to-application metadata.
+- Company files selected with `expo-document-picker` are copied into the app-private document directory and indexed in a separate local metadata file. Phase 8 performs no document upload. Existing backend document metadata is displayed only as historical server-received evidence and is never confused with device-only files.
 - `POST /companies/me/email-verification/request` and `/confirm`: guarded company email simulation when DEBUG, SMARTTRADE_ENABLE_DEV_EMAIL and loopback checks pass. Any non-empty test code records separate development audit evidence; no email is sent and email_verified_at remains unset. With simulation disabled, existing provider behavior remains unchanged and missing configuration fails closed.
 - `POST /companies/me/verification-submissions`: requires the actual server `can_submit` and displays returned case ID/status.
 - `POST /companies/me/review-requests`: displays the actual returned request state and does not restore access.
 
 No new route or migration was introduced. The previously missing policy/document/application read contract was reported before extending the existing GET response. Existing response.company and all write permissions remain intact. No retention period, upload limit, document taxonomy, consent text or email provider was invented/configured.
 
-Local company onboarding has now been tested using controlled PostgreSQL company records, native Android PDF selection/upload, local email simulation, submission and real staff browser review. See [Phase 1 validation](../../docs/company-phase1-validation.md) for exact coverage, development-only policy values and remaining limitations. No external provider is required for this local workflow.
+Earlier Phase 1 validation used controlled PostgreSQL records and the then-existing backend upload workflow. Phase 8 deliberately removes that upload path from mobile. New device-local documents cannot satisfy verification submission or be reviewed by staff until a future approved secure server-storage design exists. See [Phase 1 validation](../../docs/company-phase1-validation.md) for historical coverage; current behavior is defined by [Phase 8 readiness](../../docs/phase8-local-storage-readiness.md).
 
 Company milestone validation: mobile TypeScript passed; 31 Node tests passed; Android Hermes export passed; full PostgreSQL suite passed with 105 tests and zero skips; Django checks and migration consistency passed (no migrations needed). On the actual emulator, the existing COMPANY account completed development OTP sign-in, received the role-specific company entry, loaded the unregistered-company state from the API and opened the registration form. No company profile or marketplace sample records were created. API/Metro remain loopback-only and running. The native picker module loaded without a captured Android runtime error, but picker selection/upload was not exercised live because company/profile policy prerequisites are absent.
 
@@ -200,3 +200,12 @@ BUSINESS accounts reuse Dealer dashboard → Authorization for read-only brand/c
 Dealer dashboard → Listings reuses existing authorized brand/product/SKU and branch selection, with search/state filters, actual company/SKU/eligibility details, visible validation feedback and explicit retained-row reactivation. Only the dealer edits its price/stock; backend checks remain authoritative. Buyer discovery sends the selected variant before pagination and never exposes private branch contacts.
 
 [Phase 4 validation](../../docs/dealer-listings-phase4-validation.md) distinguishes actual Android listing lifecycle, admin moderation/search, live API adverse cases and automated PostgreSQL fixtures. No Phase 5 order/reservation/payment features are included.
+
+
+## Phase 5 buyer discovery
+
+The main catalogue now browses active categories and eligible public brands without asking buyers for database IDs. Product search covers names, codes, descriptions, brand/category text and active variant names/SKUs; category, brand, search and server pagination remain combinable. Product detail shows specifications and active variants, then carries the selected SKU into authenticated discovery before pagination.
+
+Dealer comparison remains login-required and displays only the backend's current eligible listing projection: dealer business, public branch address, explicit selling currency/price, stock status and returned quantity. PIN is evaluated first, then locality and district fallbacks. Private branch contacts remain deliberately absent because the current model has no separately consented public-contact fields.
+
+See [Phase 5 validation](../../docs/buyer-discovery-phase5-validation.md) for live PostgreSQL/API tests, Pixel_10_Pro journeys and regression commands. No cart, order, quotation, reservation, distance search or Phase 6 feature was added.

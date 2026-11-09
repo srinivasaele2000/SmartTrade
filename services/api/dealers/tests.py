@@ -10,23 +10,23 @@ from .models import AuthorizedDealerGrant, DealerAudit, DealerLocation, DealerPr
 
 class DealerTests(TestCase):
     def setUp(self):
-        self.owner = make_account('+14155550501', AccountType.BUSINESS)
+        self.owner = make_account('+919800000056', AccountType.BUSINESS)
         self.business = self.owner.business_profile
         self.business.legal_name = 'Dealer business'
         self.business.verification_state = 'VERIFIED'
         self.business.save()
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
-        self.company_owner = make_account('+14155550502', AccountType.COMPANY)
+        self.company_owner = make_account('+919800000057', AccountType.COMPANY)
         self.company = CompanyProfile.objects.create(owner_account=self.company_owner, legal_name='Supplier', company_email='supplier@example.test', verification_state='VERIFIED')
         self.company_client = APIClient()
         self.company_client.force_authenticate(self.company_owner)
         self.brand = Brand.objects.create(company=self.company, name='Supplier Brand')
         self.category = Category.objects.create(name='Hardware')
         self.link = BrandCategory.objects.create(brand=self.brand, category=self.category)
-        self.product = Product.objects.create(brand_category=self.link, name='Hammer', code='H1', unit='piece', state='PUBLISHED', catalogue_price='10', currency='USD')
+        self.product = Product.objects.create(brand_category=self.link, name='Hammer', code='H1', unit='piece', state='PUBLISHED', catalogue_price='10', currency='INR')
         self.variant = ProductVariant.objects.create(product=self.product, sku='RED', name='Red')
-        self.location_payload = dict(branch_name='Central', address='Market street', pin_code=' 560 001 ', locality=' central   market ', district='Bengaluru', state='Karnataka', country='in', contact_phone='+14155550501', contact_email='private@example.test', visibility_state='VISIBLE')
+        self.location_payload = dict(branch_name='Central', address='Market street', pin_code=' 560 001 ', locality=' central   market ', district='Bengaluru', state='Karnataka', country='in', contact_phone='+919800000056', contact_email='private@example.test', visibility_state='VISIBLE')
         self.location = self.create_location()
         self.grant(active=True)
         self.payload = dict(location=self.location, product=self.product.pk, selling_price='12.50', currency='INR', stock_status='IN_STOCK', quantity='3', state='PUBLISHED')
@@ -49,10 +49,18 @@ class DealerTests(TestCase):
     def discover(self, **filters):
         return self.client.get('/api/v1/dealers/listings', filters)
 
+    def test_discovery_rejects_invalid_pin_even_with_locality_fallback(self):
+        for pin in ['123', '012345', 'abcdef', '', '   ', '5600017']:
+            with self.subTest(pin=pin):
+                response = self.discover(pin_code=pin, locality='CENTRAL MARKET')
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('pin_code', response.data['field_errors'])
+        self.assertEqual(self.discover(pin_code=' 560 001 ').status_code, 200)
+
     def test_multiple_branches_prices_discovery_and_contact_privacy(self):
         first = self.create_listing()
         branch = self.create_location(branch_name='North', pin_code='560002', locality='North market')
-        self.create_listing(location=branch, selling_price='20.75', currency='USD', stock_status='OUT_OF_STOCK', quantity='0')
+        self.create_listing(location=branch, selling_price='20.75', currency='INR', stock_status='OUT_OF_STOCK', quantity='0')
         result = self.discover(pin_code='560 001', product=self.product.pk, brand=self.brand.pk, stock_status='IN_STOCK')
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.data['count'], 1)
@@ -64,7 +72,7 @@ class DealerTests(TestCase):
         self.assertNotIn('contact_phone', row['branch'])
         self.assertNotIn('contact_email', row['branch'])
         self.assertEqual(row['branch']['locality'], 'CENTRAL MARKET')
-        fallback = self.discover(pin_code='missing', locality=' north   market ')
+        fallback = self.discover(pin_code='999999', locality=' north   market ')
         self.assertEqual(fallback.data['match_level'], 'LOCALITY')
         self.assertEqual(fallback.data['results'][0]['location'], branch)
         self.assertEqual(self.discover(district='bengaluru').data['count'], 2)
@@ -72,7 +80,7 @@ class DealerTests(TestCase):
 
     def test_cross_dealer_ownership_and_variant_product_isolation(self):
         pk = self.create_listing()
-        other = make_account('+14155550503', AccountType.BUSINESS)
+        other = make_account('+919800000058', AccountType.BUSINESS)
         profile = other.business_profile
         profile.verification_state = 'VERIFIED'
         profile.save()
@@ -124,7 +132,7 @@ class DealerTests(TestCase):
         self.owner.access_state = 'BLOCKED'
         self.owner.save()
         self.assertEqual(self.client.patch(f'{self.base}/{pk}', {'selling_price': '9'}, format='json').status_code, 403)
-        customer = make_account('+14155550504', AccountType.PERSONAL)
+        customer = make_account('+919800000059', AccountType.PERSONAL)
         self.client.force_authenticate(customer)
         self.assertEqual(self.discover().data['count'], 0)
 
@@ -137,6 +145,9 @@ class DealerTests(TestCase):
         for extra in [{'selling_price': '-1'}, {'currency': 'usd'}, {'currency': ''}, {'quantity': '-1'}, {'stock_status': 'OUT_OF_STOCK', 'quantity': '2'}, {'stock_status': 'IN_STOCK', 'quantity': '0'}, {'stock_status': 'UNKNOWN', 'quantity': '1'}]:
             self.assertEqual(self.client.post(self.base, self.payload | {'location': branch} | extra, format='json').status_code, 400)
         self.assertEqual(self.client.post('/api/v1/businesses/me/locations', self.location_payload | {'country': 'IND'}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/businesses/me/locations', self.location_payload | {'pin_code': '012345'}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/businesses/me/locations', self.location_payload | {'state': 'Not a state'}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/businesses/me/locations', self.location_payload | {'contact_phone': '+12025550100'}, format='json').status_code, 400)
         self.assertEqual(self.discover(stock_status='BAD').status_code, 400)
         self.assertEqual(self.discover(product='BAD').status_code, 400)
 
@@ -148,7 +159,7 @@ class DealerTests(TestCase):
         self.assertEqual(self.client.patch(f'/api/v1/businesses/me/locations/{draft}', {'visibility_state': 'VISIBLE'}, format='json').status_code, 403)
         self.assertEqual(self.client.patch('/api/v1/businesses/me', {'verification_state': 'VERIFIED'}, format='json').status_code, 400)
         self.assertEqual(self.discover().data['count'], 0)
-        staff = make_account('+14155550505', AccountType.STAFF)
+        staff = make_account('+919800000060', AccountType.STAFF)
         grant_staff_permissions(staff, ['REVIEW_BUSINESS'])
         staff_client = APIClient()
         staff_client.force_authenticate(staff)
@@ -168,7 +179,7 @@ class DealerTests(TestCase):
         payload = {'brand': self.brand.pk, 'business': self.business.pk, 'active': True, 'reason': 'Grant'}
         path = '/api/v1/companies/me/dealer-authorizations'
         self.assertEqual(self.client.post(path, payload, format='json').status_code, 403)
-        other = make_account('+14155550506', AccountType.COMPANY)
+        other = make_account('+919800000061', AccountType.COMPANY)
         CompanyProfile.objects.create(owner_account=other, legal_name='Other Company', company_email='other@example.test', verification_state='VERIFIED')
         self.company_client.force_authenticate(other)
         self.assertEqual(self.company_client.post(path, payload, format='json').status_code, 400)
@@ -207,7 +218,7 @@ class DealerTests(TestCase):
         data = {'brand': self.brand.pk, 'business': self.business.pk, 'active': True, 'reason': 'Confirmation'}
         path = '/api/v1/companies/me/dealer-authorizations'
         self.assertEqual(self.company_client.post(path, data, format='json').status_code, 400)
-        staff = make_account('+14155550507', AccountType.STAFF)
+        staff = make_account('+919800000062', AccountType.STAFF)
         grant_staff_permissions(staff, ['REVIEW_BUSINESS'])
         self.client.force_authenticate(staff)
         self.assertEqual(self.client.post(path, data, format='json').status_code, 403)
@@ -222,7 +233,7 @@ class DealerTests(TestCase):
         self.assertEqual(self.client.post(self.base, self.payload | {'variant': self.variant.pk}, format='json').status_code, 403)
 
     def test_staff_permission_and_business_restore_does_not_unblock_account(self):
-        staff = make_account('+14155550508', AccountType.STAFF)
+        staff = make_account('+919800000063', AccountType.STAFF)
         grant_staff_permissions(staff, ['READ_REPORTS'])
         client = APIClient()
         client.force_authenticate(staff)
@@ -231,7 +242,7 @@ class DealerTests(TestCase):
         self.business.save()
         self.owner.access_state = 'BLOCKED'
         self.owner.save()
-        reviewer = make_account('+14155550509', AccountType.STAFF)
+        reviewer = make_account('+919800000064', AccountType.STAFF)
         grant_staff_permissions(reviewer, ['REVIEW_BUSINESS'])
         client.force_authenticate(reviewer)
         result = client.post(f'/api/v1/staff/dealers/businesses/{self.business.pk}/decision', {'action': 'RESTORE', 'reason': 'Business evidence accepted'}, format='json')
@@ -241,7 +252,7 @@ class DealerTests(TestCase):
         self.assertEqual(self.discover().status_code, 403)
 
     def test_different_company_product_requires_its_own_brand_grant(self):
-        other_owner = make_account('+14155550510', AccountType.COMPANY)
+        other_owner = make_account('+919800000065', AccountType.COMPANY)
         other_company = CompanyProfile.objects.create(owner_account=other_owner, legal_name='Second supplier', company_email='second@example.test', verification_state='VERIFIED')
         brand = Brand.objects.create(company=other_company, name='Second brand')
         link = BrandCategory.objects.create(brand=brand, category=self.category)
@@ -256,14 +267,14 @@ class DealerTests(TestCase):
         self.assertEqual(self.discover().data['count'], 0)
         self.assertEqual(self.client.patch(f'{self.base}/{pk}', {'state': 'PUBLISHED'}, format='json').status_code, 200)
         self.assertEqual(self.client.get(f'/api/v1/dealers/listings/{pk}').status_code, 200)
-        self.assertEqual(self.discover(pin_code='missing', locality='missing', district='missing').data['count'], 0)
+        self.assertEqual(self.discover(pin_code='999999', locality='missing', district='missing').data['count'], 0)
         self.assertEqual(self.discover(pin_code='  ').status_code, 400)
         self.assertEqual(self.client.patch(f'/api/v1/businesses/me/locations/{self.location}', {'visibility_state': 'PRIVATE_DRAFT'}, format='json').status_code, 200)
         self.assertEqual(self.discover().data['count'], 0)
         self.assertEqual(self.client.get(self.base, {'location': self.location}).data['count'], 1)
 
     def test_location_ownership_is_immutable_in_database(self):
-        other = make_account('+14155550511', AccountType.BUSINESS)
+        other = make_account('+919800000066', AccountType.BUSINESS)
         with self.assertRaises(IntegrityError), transaction.atomic():
             DealerLocation.objects.filter(pk=self.location).update(business=other.business_profile)
         self.assertEqual(self.client.patch(f'/api/v1/businesses/me/locations/{self.location}', {'business': other.business_profile.pk}, format='json').status_code, 400)
@@ -297,7 +308,7 @@ class DealerTests(TestCase):
         self.assertEqual(self.company_client.post(path, body | {'company': self.company.pk}, format='json').status_code, 400)
 
     def test_company_dealer_search_is_private_minimal_and_eligible_only(self):
-        pending = make_account('+14155550520', AccountType.BUSINESS)
+        pending = make_account('+919800000067', AccountType.BUSINESS)
         path = '/api/v1/companies/me/dealers'
         response = self.company_client.get(path, {'search': 'dealer', 'page_size': 1})
         self.assertEqual(response.status_code, 200)
@@ -337,7 +348,7 @@ class DealerTests(TestCase):
         self.assertEqual(self.company_client.post(path, body | {'active': True}, format='json').status_code, 400)
 
     def test_authorization_inspection_filters_and_history_permissions(self):
-        staff = make_account('+14155550521', AccountType.STAFF)
+        staff = make_account('+919800000068', AccountType.STAFF)
         grant_staff_permissions(staff, ['REVIEW_BUSINESS'])
         client = APIClient(); client.force_authenticate(staff)
         path = '/api/v1/staff/dealers/authorizations'
@@ -352,7 +363,7 @@ class DealerTests(TestCase):
             self.assertEqual(client.get(path, query).status_code, 400)
         self.assertEqual(self.company_client.get(path).status_code, 403)
         self.assertEqual(client.get('/api/v1/staff/dealers/authorization-audit').status_code, 403)
-        audit_staff = make_account('+14155550522', AccountType.STAFF)
+        audit_staff = make_account('+919800000069', AccountType.STAFF)
         grant_staff_permissions(audit_staff, ['READ_AUDIT'])
         client.force_authenticate(audit_staff)
         self.grant(False)
@@ -384,7 +395,7 @@ class DealerTests(TestCase):
         pk = self.create_listing()
         for path in ['/api/v1/dealers/listings', f'/api/v1/dealers/listings/{pk}']:
             self.assertIn('no-store', self.client.get(path)['Cache-Control'])
-        staff = make_account('+14155550523', AccountType.STAFF)
+        staff = make_account('+919800000070', AccountType.STAFF)
         grant_staff_permissions(staff, ['REVIEW_BUSINESS', 'READ_AUDIT'])
         self.client.force_authenticate(staff)
         for path in ['/api/v1/staff/dealers/authorizations', '/api/v1/staff/dealers/authorization-audit']:
@@ -419,7 +430,7 @@ class DealerTests(TestCase):
             self.assertEqual(self.client.get(self.base, values).status_code, 400)
         for values in [{'eligible': True}, {'company_name': 'Fake'}, {'variant_sku': 'Fake'}]:
             self.assertEqual(self.client.patch(f'{self.base}/{pk}', values, format='json').status_code, 400)
-        staff = make_account('+14155550530', AccountType.STAFF)
+        staff = make_account('+919800000071', AccountType.STAFF)
         grant_staff_permissions(staff, ['REVIEW_BUSINESS'])
         self.client.force_authenticate(staff)
         response = self.client.get('/api/v1/staff/dealers/listings', {'company': self.company.pk, 'business': self.business.pk, 'location': self.location, 'product': self.product.pk, 'brand': self.brand.pk, 'search': self.variant.sku, 'state': 'PUBLISHED'})
@@ -432,7 +443,7 @@ class DealerTests(TestCase):
         self.create_listing()
         first = self.create_listing(variant=self.variant.pk)
         branch = self.create_location(branch_name='Second test branch')
-        second = self.create_listing(location=branch, variant=self.variant.pk, currency='USD')
+        second = self.create_listing(location=branch, variant=self.variant.pk, currency='INR')
         page = self.client.get('/api/v1/dealers/listings', {'variant': self.variant.pk, 'page_size': 1})
         self.assertEqual(page.data['count'], 2)
         self.assertEqual(page.data['results'][0]['id'], first)
@@ -465,7 +476,7 @@ class DealerTests(TestCase):
         path = '/api/v1/staff/dealers/listing-audit'
         self.assertEqual(self.client.get(path).status_code, 403)
         self.assertEqual(APIClient().get(path).status_code, 401)
-        staff = make_account('+14155550531', AccountType.STAFF)
+        staff = make_account('+919800000072', AccountType.STAFF)
         grant_staff_permissions(staff, ['READ_AUDIT'])
         self.client.force_authenticate(staff)
         response = self.client.get(path, {'listing': pk, 'business': self.business.pk, 'location': self.location})

@@ -52,7 +52,7 @@ def grant_staff_permissions(staff, codes):
 class CompanyRegistrationTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.owner = make_account("+14155550201", AccountType.COMPANY)
+        self.owner = make_account("+919800000030", AccountType.COMPANY)
         self.client.force_authenticate(self.owner)
 
     def register_company(self):
@@ -76,8 +76,45 @@ class CompanyRegistrationTests(TestCase):
         duplicate = self.register_company()
         self.assertEqual(duplicate.status_code, 409)
 
+    def test_indian_business_identifiers_and_address_are_optional_but_validated(self):
+        response = self.client.post(
+            "/api/v1/companies/register",
+            {
+                "legal_name": "Northwind Tools Ltd",
+                "company_email": "verification@northwind.example",
+                "gstin": "29abcde1234f1z5",
+                "pan": "abcde1234f",
+                "pin_code": "560001",
+                "state_or_region": "karnataka",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["company"]["gstin"], "29ABCDE1234F1Z5")
+        self.assertEqual(response.data["company"]["pan"], "ABCDE1234F")
+        self.assertEqual(response.data["company"]["state_or_region"], "Karnataka")
+
+    def test_invalid_indian_business_identifiers_and_address_are_rejected(self):
+        for field, value in (
+            ("gstin", "INVALID"), ("pan", "INVALID"),
+            ("pin_code", "012345"), ("state_or_region", "Not a state"),
+        ):
+            response = self.client.post(
+                "/api/v1/companies/register",
+                {"legal_name": "Northwind Tools Ltd", "company_email": "verification@northwind.example", field: value},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400, (field, response.data))
+        self.assertFalse(CompanyProfile.objects.exists())
+
+    def test_backend_audit_timestamps_are_timezone_aware_utc(self):
+        self.register_company()
+        occurred_at = CompanyAuditEvent.objects.get(action="COMPANY_REGISTERED").occurred_at
+        self.assertTrue(timezone.is_aware(occurred_at))
+        self.assertEqual(occurred_at.utcoffset().total_seconds(), 0)
+
     def test_non_company_account_cannot_register_company(self):
-        personal = make_account("+14155550202", AccountType.PERSONAL)
+        personal = make_account("+919800000031", AccountType.PERSONAL)
         self.client.force_authenticate(personal)
         response = self.register_company()
         self.assertEqual(response.status_code, 403)
@@ -109,7 +146,7 @@ class CompanyRegistrationTests(TestCase):
     def test_company_owner_cannot_be_changed_through_model_save(self):
         self.register_company()
         profile = CompanyProfile.objects.get(owner_account=self.owner)
-        profile.owner_account = make_account("+14155550203", AccountType.COMPANY)
+        profile.owner_account = make_account("+919800000032", AccountType.COMPANY)
         with self.assertRaises(ValidationError):
             profile.save()
 
@@ -157,7 +194,7 @@ class CompanyVerificationTests(TestCase):
         self.addCleanup(self.file_policy.disable)
         self.addCleanup(self.temp_root.cleanup)
         self.client = APIClient()
-        self.owner = make_account("+14155550211", AccountType.COMPANY)
+        self.owner = make_account("+919800000033", AccountType.COMPANY)
         self.client.force_authenticate(self.owner)
         response = self.client.post(
             "/api/v1/companies/register",
@@ -242,7 +279,7 @@ class CompanyVerificationTests(TestCase):
     def test_company_review_requires_staff_permission_and_records_reason(self):
         submission = self.prepare_submission()
         self.assertEqual(submission.status_code, 201)
-        reviewer = make_account("+14155550212", AccountType.STAFF)
+        reviewer = make_account("+919800000034", AccountType.STAFF)
         grant_staff_permissions(reviewer, ["REVIEW_COMPANY"])
         staff_client = APIClient()
         staff_client.force_authenticate(reviewer)
@@ -280,7 +317,7 @@ class CompanyVerificationTests(TestCase):
             format="json",
         )
         self.assertEqual(company_response.status_code, 403)
-        reviewer = make_account("+14155550213", AccountType.STAFF)
+        reviewer = make_account("+919800000035", AccountType.STAFF)
         grant_staff_permissions(reviewer, ["REVIEW_COMPANY"])
         staff_client = APIClient()
         staff_client.force_authenticate(reviewer)
@@ -295,7 +332,7 @@ class CompanyVerificationTests(TestCase):
 
     def test_staff_can_reject_with_reason_without_blocking_owner_account(self):
         self.prepare_submission()
-        reviewer = make_account("+14155550218", AccountType.STAFF)
+        reviewer = make_account("+919800000036", AccountType.STAFF)
         grant_staff_permissions(reviewer, ["REVIEW_COMPANY"])
         staff_client = APIClient()
         staff_client.force_authenticate(reviewer)
@@ -321,7 +358,7 @@ class CompanyVerificationTests(TestCase):
         self.company.verification_state = CompanyVerificationState.VERIFIED
         self.company.save()
         self.assertTrue(self.company.can_publish_catalogue)
-        staff = make_account("+14155550214", AccountType.STAFF)
+        staff = make_account("+919800000037", AccountType.STAFF)
         grant_staff_permissions(staff, ["SUSPEND_COMPANY", "RESTORE_COMPANY", "HANDLE_REVIEW_REQUESTS"])
         staff_client = APIClient()
         staff_client.force_authenticate(staff)
@@ -389,7 +426,7 @@ class CompanyVerificationTests(TestCase):
         # request-finished signals without closing TestCase's transaction.
         self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.7\nregistration evidence")
         self.assertTrue(CompanyAuditEvent.objects.filter(action="COMPANY_DOCUMENT_DOWNLOADED", actor=self.owner).exists())
-        other = make_account("+14155550215", AccountType.COMPANY)
+        other = make_account("+919800000038", AccountType.COMPANY)
         other_client = APIClient()
         other_client.force_authenticate(other)
         self.assertEqual(other_client.get(f"/api/v1/companies/me/documents/{document_id}").status_code, 404)
@@ -397,7 +434,7 @@ class CompanyVerificationTests(TestCase):
         self.company.save()
         submitted = self.client.post("/api/v1/companies/me/verification-submissions")
         self.assertEqual(submitted.status_code, 201)
-        reviewer = make_account("+14155550216", AccountType.STAFF)
+        reviewer = make_account("+919800000039", AccountType.STAFF)
         grant_staff_permissions(reviewer, ["REVIEW_COMPANY", "VIEW_PRIVATE_DOCUMENTS"])
         reviewer_client = APIClient()
         reviewer_client.force_authenticate(reviewer)
@@ -414,7 +451,7 @@ class CompanyReviewRequestWorkflowTests(TestCase):
     def setUp(self):
         from .models import CompanyReviewRequest
 
-        self.owner = make_account('+14155550301', AccountType.COMPANY)
+        self.owner = make_account('+919800000040', AccountType.COMPANY)
         self.company = CompanyProfile.objects.create(
             owner_account=self.owner, legal_name='Review Company', company_email='review@example.test',
             verification_state='REJECTED', activity_state='SUSPENDED',
@@ -422,7 +459,7 @@ class CompanyReviewRequestWorkflowTests(TestCase):
         self.review_request = CompanyReviewRequest.objects.create(
             company=self.company, submitted_by=self.owner, reason='Please review the registration evidence.',
         )
-        self.staff = make_account('+14155550302', AccountType.STAFF)
+        self.staff = make_account('+919800000041', AccountType.STAFF)
         grant_staff_permissions(self.staff, ['HANDLE_REVIEW_REQUESTS'])
         self.client = APIClient()
         self.client.force_authenticate(self.staff)
@@ -455,7 +492,7 @@ class CompanyReviewRequestWorkflowTests(TestCase):
 
     def test_resolution_requires_reason_and_dedicated_permission(self):
         self.assertEqual(self.client.post(self.path, {'reason': '  '}, format='json').status_code, 400)
-        other = make_account('+14155550303', AccountType.STAFF)
+        other = make_account('+919800000042', AccountType.STAFF)
         grant_staff_permissions(other, ['REVIEW_COMPANY'])
         self.client.force_authenticate(other)
         self.assertEqual(self.client.get('/api/v1/staff/companies/review-requests').status_code, 403)
@@ -469,7 +506,7 @@ class CompanyReviewRequestWorkflowTests(TestCase):
 
 class CompanyStaffPermissionTests(TestCase):
     def test_staff_without_required_permission_cannot_read_verification_queue(self):
-        staff = make_account("+14155550220", AccountType.STAFF)
+        staff = make_account("+919800000043", AccountType.STAFF)
         grant_staff_permissions(staff, ["READ_REPORTS"])
         client = APIClient()
         client.force_authenticate(staff)
@@ -477,7 +514,7 @@ class CompanyStaffPermissionTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_company_account_cannot_access_staff_queue(self):
-        company_account = make_account("+14155550221", AccountType.COMPANY)
+        company_account = make_account("+919800000044", AccountType.COMPANY)
         client = APIClient()
         client.force_authenticate(company_account)
         response = client.get("/api/v1/staff/companies/verification-queue")
@@ -490,7 +527,7 @@ class CompanyStaffPermissionTests(TestCase):
 )
 class CompanyPostgreSQLGuardTests(TestCase):
     def test_database_rejects_non_company_owner(self):
-        personal = make_account("+14155550230", AccountType.PERSONAL)
+        personal = make_account("+919800000045", AccountType.PERSONAL)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 CompanyProfile.objects.bulk_create(
@@ -504,8 +541,8 @@ class CompanyPostgreSQLGuardTests(TestCase):
                 )
 
     def test_database_rejects_submission_by_non_owner(self):
-        owner = make_account("+14155550231", AccountType.COMPANY)
-        other = make_account("+14155550232", AccountType.COMPANY)
+        owner = make_account("+919800000046", AccountType.COMPANY)
+        other = make_account("+919800000047", AccountType.COMPANY)
         company = CompanyProfile.objects.create(
             owner_account=owner,
             legal_name="Owner company",
@@ -516,8 +553,8 @@ class CompanyPostgreSQLGuardTests(TestCase):
                 CompanyVerificationCase.objects.create(company=company, submitted_by=other)
 
     def test_database_rejects_document_uploaded_by_another_account(self):
-        owner = make_account("+14155550233", AccountType.COMPANY)
-        other = make_account("+14155550234", AccountType.COMPANY)
+        owner = make_account("+919800000048", AccountType.COMPANY)
+        other = make_account("+919800000049", AccountType.COMPANY)
         company = CompanyProfile.objects.create(
             owner_account=owner,
             legal_name="Document owner company",
@@ -536,7 +573,7 @@ class CompanyPostgreSQLGuardTests(TestCase):
                 )
 
     def test_database_rejects_company_audit_mutation(self):
-        owner = make_account("+14155550235", AccountType.COMPANY)
+        owner = make_account("+919800000050", AccountType.COMPANY)
         company = CompanyProfile.objects.create(
             owner_account=owner,
             legal_name="Audited company",
@@ -561,7 +598,7 @@ class DevelopmentCompanyEmailTests(TestCase):
         media = override_settings(MEDIA_ROOT=uploads.name)
         media.enable()
         self.addCleanup(media.disable)
-        self.owner = make_account("+12025550181", AccountType.COMPANY)
+        self.owner = make_account("+919800000051", AccountType.COMPANY)
         self.company = CompanyProfile.objects.create(owner_account=self.owner, legal_name="Local Email Test", company_email="company@example.test")
         self.client = APIClient(HTTP_HOST="localhost", REMOTE_ADDR="127.0.0.1")
         self.client.force_authenticate(self.owner)
@@ -628,7 +665,7 @@ class DevelopmentCompanyEmailTests(TestCase):
     def test_staff_queue_labels_simulation_without_real_ownership(self):
         self.confirm()
         CompanyVerificationCase.objects.create(company=self.company, submitted_by=self.owner)
-        staff = make_account("+12025550182", AccountType.STAFF)
+        staff = make_account("+919800000052", AccountType.STAFF)
         grant_staff_permissions(staff, ["REVIEW_COMPANY"])
         self.client.force_authenticate(staff)
         response = self.client.get("/api/v1/staff/companies/verification-queue")

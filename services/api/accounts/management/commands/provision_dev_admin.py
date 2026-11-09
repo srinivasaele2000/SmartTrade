@@ -8,9 +8,8 @@ from django.db import connection, transaction
 from accounts.models import Account, AccountType, StaffRoleAssignment
 from .bootstrap_superadmin import Command as BootstrapCommand, INITIAL_ADMIN_PERMISSIONS
 
-# NANPA reserved fictitious, non-working range; never send SMS to this identity.
-# https://nanpa.com/numbering/555-line-numbers
-DEVELOPMENT_MOBILE = '+12025550100'
+# Controlled local-only identity. Development guards prevent external delivery.
+DEVELOPMENT_MOBILE = '+919800000017'
 
 
 def assert_local_database():

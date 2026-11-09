@@ -24,6 +24,8 @@ INSTALLED_APPS = [
     "companies.apps.CompaniesConfig",
     "catalogue",
     "dealers",
+    "enquiries",
+    "orders",
     "health",
 ]
 

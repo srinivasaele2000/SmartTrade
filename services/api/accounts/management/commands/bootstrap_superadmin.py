@@ -1,4 +1,3 @@
-import re
 from getpass import getpass
 
 from django.core.management.base import BaseCommand, CommandError
@@ -12,12 +11,13 @@ from accounts.models import (
     StaffRoleAssignment,
     StaffRolePermission,
 )
+from config.india import INDIAN_MOBILE_PATTERN
 
 
-E164_PATTERN = re.compile(r"^\+[1-9][0-9]{1,14}$")
 INITIAL_ADMIN_PERMISSIONS = (
     "MANAGE_STAFF",
     "REVIEW_BUSINESS",
+    "REVIEW_TRADE_CONTACTS",
     "REVIEW_COMPANY",
     "HANDLE_REVIEW_REQUESTS",
     "VIEW_PRIVATE_DOCUMENTS",
@@ -34,15 +34,15 @@ class Command(BaseCommand):
     help = "Provision the first staff super-admin from a controlled local shell."
 
     def handle(self, *args, **options):
-        mobile = getpass("Initial staff mobile in E.164 format: ")
+        mobile = getpass("Initial staff mobile in +91XXXXXXXXXX format: ")
         account = self.provision(mobile)
         self.stdout.write(self.style.SUCCESS(
             f"Provisioned staff account ID {account.pk}. Mobile verification remains pending."
         ))
 
     def provision(self, mobile):
-        if not E164_PATTERN.fullmatch(mobile):
-            raise CommandError("Use a complete E.164 mobile number.")
+        if not INDIAN_MOBILE_PATTERN.fullmatch(mobile):
+            raise CommandError("Use a valid Indian mobile number in +91XXXXXXXXXX format.")
 
         try:
             with transaction.atomic():

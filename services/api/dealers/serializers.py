@@ -2,15 +2,43 @@ import re
 import unicodedata
 from rest_framework import serializers
 from accounts.models import BusinessProfile
+from accounts.profiles import validate_profile_location
 from catalogue.serializers import StrictSerializer
 from .models import DealerLocation, DealerProductListing, AuthorizedDealerGrant
+from config.india import GSTIN_PATTERN, INDIAN_MOBILE_PATTERN, INDIAN_PIN_PATTERN, PAN_PATTERN, canonical_indian_state
+
+
+BUSINESS_SUMMARY_FIELDS = ('id', 'legal_name', 'registration_number', 'gstin', 'pan', 'verification_state')
 
 
 class BusinessSerializer(StrictSerializer):
     class Meta:
         model = BusinessProfile
-        fields = ['id', 'legal_name', 'registration_number', 'verification_state']
+        fields = BUSINESS_SUMMARY_FIELDS + (
+            'owner_name', 'business_email', 'registered_address', 'registered_pin_code',
+            'registered_locality', 'registered_district', 'registered_state',
+        )
         read_only_fields = ['id', 'verification_state']
+
+    def validate(self, attrs):
+        return validate_profile_location(attrs, 'registered_')
+
+    def validate_gstin(self, value):
+        value = value.strip().upper()
+        if value and not GSTIN_PATTERN.fullmatch(value):
+            raise serializers.ValidationError('Use a valid 15-character GSTIN.')
+        return value
+
+    def validate_pan(self, value):
+        value = value.strip().upper()
+        if value and not PAN_PATTERN.fullmatch(value):
+            raise serializers.ValidationError('Use a valid 10-character PAN.')
+        return value
+
+
+class BusinessSummarySerializer(BusinessSerializer):
+    class Meta(BusinessSerializer.Meta):
+        fields = BUSINESS_SUMMARY_FIELDS
 
 
 class LocationSerializer(StrictSerializer):
@@ -28,10 +56,17 @@ class LocationSerializer(StrictSerializer):
                 attrs[field] = value
         if 'pin_code' in attrs:
             attrs['pin_code'] = ''.join(attrs['pin_code'].split())
-        if 'country' in attrs and not re.fullmatch('[A-Z]{2}', attrs['country']):
-            raise serializers.ValidationError({'country': 'Use a two-letter country code.'})
-        if attrs.get('contact_phone') and not re.fullmatch(r'\+[1-9][0-9]{1,14}', attrs['contact_phone']):
-            raise serializers.ValidationError({'contact_phone': 'Use E.164 format.'})
+            if not INDIAN_PIN_PATTERN.fullmatch(attrs['pin_code']):
+                raise serializers.ValidationError({'pin_code': 'Use a six-digit Indian PIN code.'})
+        if 'country' in attrs and attrs['country'] != 'IN':
+            raise serializers.ValidationError({'country': 'SmartTrade currently supports India (IN) only.'})
+        if 'state' in attrs:
+            canonical = canonical_indian_state(attrs['state'])
+            if canonical is None:
+                raise serializers.ValidationError({'state': 'Choose a valid Indian state or union territory.'})
+            attrs['state'] = canonical
+        if attrs.get('contact_phone') and not INDIAN_MOBILE_PATTERN.fullmatch(attrs['contact_phone']):
+            raise serializers.ValidationError({'contact_phone': 'Use a valid Indian mobile number in +91XXXXXXXXXX format.'})
         return attrs
 
 
@@ -72,8 +107,8 @@ class ListingSerializer(StrictSerializer):
             raise serializers.ValidationError({'variant': 'Variant must belong to the selected product.'})
         if value('selling_price') is not None and value('selling_price') < 0:
             raise serializers.ValidationError({'selling_price': 'Must be nonnegative.'})
-        if not re.fullmatch('[A-Z]{3}', value('currency') or ''):
-            raise serializers.ValidationError({'currency': 'Use an explicit uppercase three-letter currency code.'})
+        if value('currency') != 'INR':
+            raise serializers.ValidationError({'currency': 'SmartTrade currently supports INR only.'})
         qty, stock = value('quantity'), value('stock_status') or 'UNKNOWN'
         if qty is not None and (qty < 0 or stock == 'UNKNOWN' or (stock == 'IN_STOCK' and qty <= 0) or (stock == 'OUT_OF_STOCK' and qty != 0)):
             raise serializers.ValidationError({'quantity': 'Quantity must agree with stock status: positive for IN_STOCK, zero for OUT_OF_STOCK, omitted for UNKNOWN.'})

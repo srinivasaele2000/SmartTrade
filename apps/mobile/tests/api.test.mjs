@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApiClient, ApiError, mapProduct, mapListing, query } from '../src/api.ts';
+import { ApiClient, ApiError, mapBrand, mapProduct, mapListing, query } from '../src/api.ts';
 import { resourceReducer, inventoryLabel, matchLabel, variantListings } from '../src/resource.ts';
 
 // Contract fixtures are used only by isolated tests, never as application fallback data.
-const product = { id: 10, name: 'Tool', code: 'T1', brand_name: 'Brand', company_name: 'Company', category_name: 'Tools', description: '', specifications: {}, unit: 'piece', catalogue_price: '10.0000', currency: 'USD', variants: [{ id: 7, product: 10, sku: 'RED', name: 'Red', attributes: {}, active: true }] };
-const listing = { id: 1, business_id: 3, business_name: 'Dealer', location: 9, product: 10, product_name: 'Tool', variant: 7, selling_price: '12.5000', currency: 'INR', stock_status: 'IN_STOCK', quantity: '2.0000', branch: { id: 9, branch_name: 'Central', address: 'Street', pin_code: '12345', locality: 'CENTRAL', district: 'DISTRICT', state: 'STATE', country: 'IN', contact_phone: 'private' } };
+const product = { id: 10, name: 'Tool', code: 'T1', brand_name: 'Brand', company_name: 'Company', category_name: 'Tools', description: '', specifications: {}, unit: 'piece', catalogue_price: '10.0000', currency: 'INR', variants: [{ id: 7, product: 10, sku: 'RED', name: 'Red', attributes: {}, active: true }] };
+const listing = { id: 1, business_id: 3, business_name: 'Dealer', location: 9, product: 10, product_name: 'Tool', variant: 7, selling_price: '12.5000', currency: 'INR', stock_status: 'IN_STOCK', quantity: '2.0000', branch: { id: 9, branch_name: 'Central', address: 'Street', pin_code: '560001', locality: 'CENTRAL', district: 'BENGALURU', state: 'Karnataka', country: 'IN' } };
 const page = results => ({ count: results.length, next: null, previous: null, results });
 const response = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
 
@@ -42,6 +42,16 @@ test('categories and product details use actual endpoints', async () => {
   const api = new ApiClient('http://example.test/api/v1', async url => response(String(url).includes('/categories') ? page([{ id: 2, name: 'Tools', active: true }]) : product));
   assert.equal((await api.categories(1)).results[0].name, 'Tools'); assert.equal((await api.product(10)).id, 10);
 });
+test('public brands use the actual paginated endpoint and strict minimal mapping', async () => {
+  let requested;
+  const fixture = { id: 4, name: 'Brand', company_name: 'Company', categories: [{ id: 2, name: 'Tools' }] };
+  const api = new ApiClient('http://example.test/api/v1', async url => { requested = url; return response(page([fixture])); });
+  const result = await api.brands({ category: '2', search: 'Brand' }, 3);
+  assert.match(requested, /\/catalogue\/brands\?page=3&category=2&search=Brand$/);
+  assert.deepEqual(result.results[0], mapBrand(fixture));
+  assert.throws(() => mapBrand({ ...fixture, categories: null }), ApiError);
+  await assert.rejects(api.brands({ category: 'invalid' }, 1), /Category ID/);
+});
 test('missing session prevents all dealer network requests', async () => {
   let requests = 0;
   const api = new ApiClient('http://example.test/api/v1', async () => { requests++; return response({}); });
@@ -51,11 +61,11 @@ test('missing session prevents all dealer network requests', async () => {
 test('dealer requests carry bearer auth and only supported product/location filters', async () => {
   let captured;
   const api = new ApiClient('http://example.test/api/v1', async (url, init) => { captured = { url, init }; return response({ ...page([listing]), match_level: 'DISTRICT' }); });
-  const result = await api.dealers(10, { pin_code: '12345', locality: 'Central', district: 'District', stock_status: 'IN_STOCK' }, 2, 'test-only-issued-token');
+  const result = await api.dealers(10, { pin_code: '560001', locality: 'Central', district: 'Bengaluru', stock_status: 'IN_STOCK' }, 2, 'test-only-issued-token');
   const url = new URL(captured.url);
   assert.equal(captured.init.headers.Authorization, 'Bearer test-only-issued-token');
   assert.equal(url.searchParams.get('product'), '10'); assert.equal(url.searchParams.get('variant'), null);
-  assert.equal(url.searchParams.get('pin_code'), '12345'); assert.equal(url.searchParams.get('page'), '2');
+  assert.equal(url.searchParams.get('pin_code'), '560001'); assert.equal(url.searchParams.get('page'), '2');
   assert.equal(result.match_level, 'DISTRICT'); assert.match(matchLabel(result.match_level), /broader fallback/);
 });
 test('variant filtering stays within a fetched page without changing server counts', () => {
@@ -92,6 +102,10 @@ test('session admission verifies the server account status', async () => {
 test('404 product detail is unavailable rather than empty inventory', async () => {
   const api = new ApiClient('http://example.test/api/v1', async () => new Response('{}', { status: 404 }));
   await assert.rejects(api.product(10), error => error.status === 404 && /no longer available/.test(error.message));
+});
+test('non-product 404 errors do not masquerade as unavailable inventory', async () => {
+  const api = new ApiClient('http://example.test/api/v1', async () => new Response('{}', { status: 404 }));
+  await assert.rejects(api.brands({}, 1), error => error.status === 404 && /requested SmartTrade resource/.test(error.message));
 });
 test('abort signals reach transport without becoming successful empty results', async () => {
   const controller = new AbortController();

@@ -3,8 +3,16 @@
     "name": "SmartTrade",
     "slug": "smarttrade",
     "version": "0.1.0",
+    "android": {
+      "package": "in.smarttrade.localtest",
+      "versionCode": 1
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-sharing",
+      "expo-secure-store"
+    ]
   }
 }

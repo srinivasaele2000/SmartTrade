@@ -1,7 +1,16 @@
 from django.urls import path
-from . import views
+from . import onboarding, views
 
 urlpatterns = [
+    path('businesses/me/declarations', onboarding.Declarations.as_view()),
+    path('businesses/me/declaration-brands', onboarding.DeclarationBrands.as_view()),
+    path('businesses/me/brand-suggestions', onboarding.Suggestions.as_view()),
+    path('businesses/me/trade-contacts', onboarding.Contacts.as_view()),
+    path('businesses/me/trade-contacts/<int:pk>', onboarding.ContactDetail.as_view()),
+    path('staff/dealers/businesses/<int:pk>/onboarding', onboarding.StaffOnboarding.as_view()),
+    path('staff/dealers/businesses/<int:pk>/brand-suggestions/<int:suggestion_id>/review', onboarding.StaffSuggestionReview.as_view()),
+    path('staff/dealers/businesses/<int:pk>/duplicate-review', onboarding.StaffDuplicateReview.as_view()),
+    path('staff/dealers/businesses/<int:pk>/trade-contacts', onboarding.StaffContacts.as_view()),
     path('staff/dealers/listing-audit', views.StaffListingAudit.as_view()),
     path('companies/me/dealers', views.CompanyDealerSearch.as_view()),
     path('staff/dealers/authorizations', views.StaffAuthorizations.as_view()),

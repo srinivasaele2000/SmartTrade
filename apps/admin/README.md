@@ -86,13 +86,13 @@ Run Vite from `apps/admin`:
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open `http://127.0.0.1:5173/#verification`. Enter the designated staff mobile in E.164 format, choose **Send OTP**, enter any non-empty value, then **Verify and sign in**. The response and UI explicitly say development only and no SMS sent. The existing direct **Development Login** option remains available when separately enabled. The frontend uses its existing in-memory access/refresh session and loads the real staff permissions.
+Open `http://127.0.0.1:5173/#verification`. Enter the designated staff mobile in `+91XXXXXXXXXX` format, choose **Send OTP**, enter any non-empty value, then **Verify and sign in**. The response and UI explicitly say development only and no SMS sent. The existing direct **Development Login** option remains available when separately enabled. The frontend uses its existing in-memory access/refresh session and loads the real staff permissions.
 
 API sequence for marketplace accounts (relative to `/api/v1`):
 
 1. For a new number, `POST /auth/register` with `mobile_e164` and `account_type` equal to PERSONAL, BUSINESS or COMPANY. Registration remains explicit and returns 201 with an unverified account. STAFF is rejected. Existing mobile numbers return 409; never change their type to work around this.
 2. `POST /auth/otp/request` with `mobile_e164` returns 202, `authentication_mode: development_otp`, and a no-SMS message. Unknown numbers may request, but this does not create accounts.
-3. `POST /auth/login` with `mobile_e164` and any non-empty `code` returns the existing JWT response plus `authentication_mode: development_otp`. Existing E.164 and code-length validation still apply. Unknown accounts receive 401 ACCOUNT_NOT_REGISTERED and must register first; empty/whitespace codes receive 400. Blocked/inactive accounts remain blocked.
+3. `POST /auth/login` with `mobile_e164` and any non-empty `code` returns the existing JWT response plus `authentication_mode: development_otp`. Existing Indian mobile and code-length validation still apply. Unknown accounts receive 401 ACCOUNT_NOT_REGISTERED and must register first; empty/whitespace codes receive 400. Blocked/inactive accounts remain blocked.
 4. Use the returned access token only in memory for normal permitted endpoints; never paste it into logs. `/auth/refresh` and `/auth/logout` preserve token-version validation/revocation.
 
 `GET /auth/otp/request` is a local development capability probe: 200 only when enabled and loopback, otherwise 404 DEV_OTP_DISABLED. Normal POST endpoints retain their real-provider behavior when development mode is off; without any provider they return 503 AUTH_PROVIDER_UNAVAILABLE. With DEBUG false, the simulation cannot be selected, even if its flag or the provider import path is accidentally configured.

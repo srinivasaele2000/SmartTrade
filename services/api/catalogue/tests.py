@@ -9,7 +9,7 @@ from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, Pro
 
 class CatalogueTests(TestCase):
     def setUp(self):
-        self.owner = make_account('+14155550401', AccountType.COMPANY)
+        self.owner = make_account('+919800000018', AccountType.COMPANY)
         self.company = CompanyProfile.objects.create(owner_account=self.owner, legal_name='Catalogue owner', company_email='catalogue@example.test', verification_state='VERIFIED')
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
@@ -43,6 +43,62 @@ class CatalogueTests(TestCase):
         self.assertEqual(event.snapshot['state'], 'PUBLISHED')
         self.assertIsNotNone(event.occurred_at)
 
+    def test_public_discovery_searches_codes_skus_and_related_text_with_filters(self):
+        first = self.create_product(
+            state='PUBLISHED', description='Forged striking tool for masonry work'
+        )
+        variant = self.client.post(
+            f'{self.base}/{first}/variants',
+            {'sku': 'HX-ULTRA-42', 'name': 'Heavy duty', 'attributes': {'weight': '2kg'}},
+            format='json',
+        )
+        self.assertEqual(variant.status_code, 201)
+        other_category = Category.objects.create(name='Safety equipment')
+        other_brand = Brand.objects.create(company=self.company, name='Shield Brand')
+        other_link = BrandCategory.objects.create(brand=other_brand, category=other_category)
+        self.client.post(
+            self.base,
+            {'brand_category': other_link.pk, 'name': 'Safety glasses', 'code': 'SAFE-1', 'unit': 'pair', 'state': 'PUBLISHED'},
+            format='json',
+        )
+
+        for search in ['HAM-1', 'HX-ULTRA-42', 'masonry', 'Tools Brand', 'Tools', 'heavy duty']:
+            result = self.public.get('/api/v1/catalogue/products', {
+                'search': search, 'brand': self.brand.pk, 'category': self.category.pk, 'page_size': 1,
+            })
+            self.assertEqual(result.status_code, 200, result.data)
+            self.assertEqual(result.data['count'], 1, search)
+            self.assertEqual(result.data['results'][0]['id'], first)
+        self.assertEqual(self.public.get('/api/v1/catalogue/products', {'search': 'HX missing'}).data['count'], 0)
+        ProductVariant.objects.filter(pk=variant.data['id']).update(active=False)
+        self.assertEqual(self.public.get('/api/v1/catalogue/products', {'search': 'HX-ULTRA-42'}).data['count'], 0)
+
+    def test_public_brands_are_minimal_paginated_and_only_include_eligible_catalogues(self):
+        self.create_product(state='PUBLISHED')
+        hidden_brand = Brand.objects.create(company=self.company, name='Draft Only Brand')
+        hidden_link = BrandCategory.objects.create(brand=hidden_brand, category=self.category)
+        Product.objects.create(brand_category=hidden_link, name='Draft item', code='DRAFT', unit='piece')
+        draft_category = Category.objects.create(name='Draft association')
+        draft_association = BrandCategory.objects.create(brand=self.brand, category=draft_category)
+        Product.objects.create(brand_category=draft_association, name='Unpublished category item', code='DRAFT-CAT', unit='piece')
+
+        response = self.public.get('/api/v1/catalogue/brands', {
+            'category': self.category.pk, 'search': 'Catalogue owner', 'page_size': 1,
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0], {
+            'id': self.brand.pk,
+            'name': self.brand.name,
+            'company_name': self.company.legal_name,
+            'categories': [{'id': self.category.pk, 'name': self.category.name}],
+        })
+        self.assertEqual(self.public.get('/api/v1/catalogue/brands', {'category': draft_category.pk}).data['count'], 0)
+        self.assertEqual(self.public.get('/api/v1/catalogue/brands', {'category': 'invalid'}).status_code, 400)
+        self.company.activity_state = 'SUSPENDED'
+        self.company.save()
+        self.assertEqual(self.public.get('/api/v1/catalogue/brands').data['count'], 0)
+
     def test_pending_rejected_suspended_and_blocked_are_denied_writes(self):
         pk = self.create_product(state='PUBLISHED')
         for verification, activity in [('PENDING', 'ACTIVE'), ('REJECTED', 'ACTIVE'), ('VERIFIED', 'SUSPENDED')]:
@@ -63,7 +119,7 @@ class CatalogueTests(TestCase):
 
     def test_cross_company_and_client_controlled_fields_rejected(self):
         pk = self.create_product()
-        other = make_account('+14155550402', AccountType.COMPANY)
+        other = make_account('+919800000019', AccountType.COMPANY)
         company = CompanyProfile.objects.create(owner_account=other, legal_name='Other', company_email='other@example.test', verification_state='VERIFIED')
         self.client.force_authenticate(other)
         self.assertEqual(self.client.post(self.base, self.payload | {'code': 'OTHER'}, format='json').status_code, 403)
@@ -86,7 +142,7 @@ class CatalogueTests(TestCase):
         pk = self.create_product(state='PUBLISHED')
         path = f'/api/v1/staff/catalogue/products/{pk}/moderation'
         self.assertEqual(self.client.post(path, {'action': 'HIDE', 'reason': 'Test'}, format='json').status_code, 403)
-        staff = make_account('+14155550403', AccountType.STAFF)
+        staff = make_account('+919800000020', AccountType.STAFF)
         grant_staff_permissions(staff, ['MODERATE_PRODUCTS'])
         self.client.force_authenticate(staff)
         self.assertEqual(self.client.post(path, {'action': 'HIDE', 'reason': ' '}, format='json').status_code, 400)
@@ -103,7 +159,7 @@ class CatalogueTests(TestCase):
     def test_category_and_brand_prerequisites(self):
         path = '/api/v1/staff/catalogue/categories'
         self.assertEqual(self.client.post(path, {'name': 'Hardware'}, format='json').status_code, 403)
-        staff = make_account('+14155550404', AccountType.STAFF)
+        staff = make_account('+919800000021', AccountType.STAFF)
         grant_staff_permissions(staff, ['MANAGE_TAXONOMY'])
         self.client.force_authenticate(staff)
         self.assertEqual(self.client.post(path, {'name': 'Hardware'}, format='json').status_code, 201)
@@ -144,7 +200,7 @@ class CatalogueTests(TestCase):
 
     def test_unauthenticated_and_dealer_writes_denied(self):
         self.assertEqual(self.public.post(self.base, self.payload, format='json').status_code, 401)
-        dealer = make_account('+14155550405', AccountType.BUSINESS)
+        dealer = make_account('+919800000022', AccountType.BUSINESS)
         self.client.force_authenticate(dealer)
         self.assertEqual(self.client.post(self.base, self.payload, format='json').status_code, 403)
 
@@ -180,7 +236,7 @@ class CatalogueTests(TestCase):
             self.company.verification_state, self.company.activity_state = verification, activity
             self.company.save()
             self.assertEqual(self.client.patch(path, {'name': 'Denied'}, format='json').status_code, 403)
-        other = make_account('+14155550406', AccountType.COMPANY)
+        other = make_account('+919800000023', AccountType.COMPANY)
         CompanyProfile.objects.create(owner_account=other, legal_name='Other owner', company_email='other@example.test', verification_state='VERIFIED')
         self.client.force_authenticate(other)
         self.assertEqual(self.client.patch(path, {'name': 'Stolen'}, format='json').status_code, 404)
@@ -189,7 +245,7 @@ class CatalogueTests(TestCase):
         pk = self.create_product(state='PUBLISHED')
         path = f'/api/v1/staff/catalogue/categories/{self.category.pk}'
         self.assertEqual(self.client.patch(path, {'active': False, 'reason': 'test'}, format='json').status_code, 403)
-        staff = make_account('+14155550407', AccountType.STAFF)
+        staff = make_account('+919800000024', AccountType.STAFF)
         grant_staff_permissions(staff, ['MANAGE_TAXONOMY'])
         self.client.force_authenticate(staff)
         self.assertEqual(self.client.patch(path, {'active': False}, format='json').status_code, 400)
@@ -204,14 +260,14 @@ class CatalogueTests(TestCase):
 
     def test_staff_brand_inspection_and_audit_have_separate_permissions(self):
         pk = self.create_product()
-        staff = make_account('+14155550408', AccountType.STAFF)
+        staff = make_account('+919800000025', AccountType.STAFF)
         grant_staff_permissions(staff, ['MODERATE_PRODUCTS'])
         self.client.force_authenticate(staff)
         response = self.client.get('/api/v1/staff/catalogue/brands')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['results'][0]['company_name'], self.company.legal_name)
         self.assertEqual(self.client.get('/api/v1/staff/catalogue/audit').status_code, 403)
-        permission_staff = make_account('+14155550409', AccountType.STAFF)
+        permission_staff = make_account('+919800000026', AccountType.STAFF)
         grant_staff_permissions(permission_staff, ['READ_AUDIT'])
         self.client.force_authenticate(permission_staff)
         response = self.client.get('/api/v1/staff/catalogue/audit', {'product': pk, 'page_size': 1})

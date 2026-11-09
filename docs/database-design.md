@@ -6,7 +6,7 @@ This is the PostgreSQL relational model for Release 1. The account/authenticatio
 
 | Table | Important columns and relationships |
 |---|---|
-| `Account` | `id` PK; `mobile_e164` canonical E.164 `NOT NULL UNIQUE`; immutable `account_type` enum `PERSONAL/BUSINESS/COMPANY/STAFF`; `access_state` enum `ACTIVE/BLOCKED`; `mobile_verified_at`; `token_version`; Django password field is unusable for mobile OTP accounts. Blocking/logout increments token version; raw JWTs and OTP codes are not persisted. |
+| `Account` | `id` PK; `mobile_e164` canonical Indian `+91XXXXXXXXXX` `NOT NULL UNIQUE`; immutable `account_type` enum `PERSONAL/BUSINESS/COMPANY/STAFF`; `access_state` enum `ACTIVE/BLOCKED`; `mobile_verified_at`; `token_version`; Django password field is unusable for mobile OTP accounts. Blocking/logout increments token version; raw JWTs and OTP codes are not persisted. |
 | `PersonalProfile` | `account_id` PK/FK to `Account`; full name, occupation, PIN/area/district/state, and optional location. Exists only for `PERSONAL`. |
 | `BusinessProfile` | `id` PK; `account_id` `UNIQUE NOT NULL` FK to `Account`; business name, owner/authorized person, GST/license, email, address, independent verification state. Exists only for `BUSINESS`. |
 | `BusinessTradeWorkerContactSubmission` | FK to `BusinessProfile` and submitting `BUSINESS` account; non-null `permission_confirmed_at` and confirmation actor. One row represents a submission batch, so the business confirms permission for each submitted batch. |
@@ -47,7 +47,7 @@ Company owners and representatives are `COMPANY` accounts with a `CompanyUserPro
 
 ### Accounts
 
-1. Store phone numbers in a single normalized format, proposed E.164, and enforce `UNIQUE NOT NULL` on `Account.mobile_e164`. Normalize/validate before insertion. This unique constraint covers personal, business, company, and staff accounts because all share `Account`.
+1. Store phone numbers in canonical Indian `+91XXXXXXXXXX` format and enforce `UNIQUE NOT NULL` on `Account.mobile_e164`. Validate before insertion; do not silently infer `+91`. This unique constraint covers personal, business, company, and staff accounts because all share `Account`.
 2. `account_type` is one enum value, not a many-to-many role list. It cannot be supplied/changed by ordinary clients.
 3. Account subtype tables have `account_id` as PK/FK (or a unique FK for `BusinessProfile`). A deferred constraint trigger validates at transaction commit that exactly one matching subtype exists: PERSONAL/PersonalProfile, BUSINESS/BusinessProfile, COMPANY/CompanyUserProfile, STAFF/StaffProfile. `CompanyProfile` is a separate organization owned by a company-type account and is not the COMPANY subtype row. This cross-table subtype rule cannot be expressed as a plain `CHECK` constraint.
 4. Account type changes are prohibited. A different marketplace role requires a separate account and globally unique mobile number. Staff provisioning is separate and privileged. A company-type account can reference at most one company for its lifetime.

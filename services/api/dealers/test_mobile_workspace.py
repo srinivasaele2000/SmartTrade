@@ -8,14 +8,14 @@ from .models import AuthorizedDealerGrant
 
 class DealerMobileWorkspaceTests(TestCase):
     def setUp(self):
-        self.owner = Account.objects.create_user('+12025550141', 'BUSINESS')
+        self.owner = Account.objects.create_user('+919800000053', 'BUSINESS')
         self.dealer = self.owner.business_profile
         self.dealer.legal_name = 'Test dealer'
         self.dealer.verification_state = 'VERIFIED'
         self.dealer.save()
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
-        self.company_owner = Account.objects.create_user('+12025550142', 'COMPANY')
+        self.company_owner = Account.objects.create_user('+919800000054', 'COMPANY')
         self.company = CompanyProfile.objects.create(owner_account=self.company_owner, legal_name='Test supplier', company_email='test@example.test', verification_state='VERIFIED')
         self.brand = Brand.objects.create(company=self.company, name='Test brand')
         category = Category.objects.create(name='Test category')
@@ -30,7 +30,7 @@ class DealerMobileWorkspaceTests(TestCase):
         return response.data['workspace']
 
     def test_read_context_is_owner_scoped_and_cannot_grant_authorization(self):
-        other = Account.objects.create_user('+12025550143', 'BUSINESS')
+        other = Account.objects.create_user('+919800000055', 'BUSINESS')
         other.business_profile.verification_state = 'VERIFIED'
         other.business_profile.save()
         AuthorizedDealerGrant.objects.create(company=self.company, brand=self.brand, business=other.business_profile, actor=self.company_owner, reason='Other dealer')
@@ -54,10 +54,10 @@ class DealerMobileWorkspaceTests(TestCase):
         self.assertFalse(self.workspace()['authorizations'][0]['eligible'])
 
     def test_counts_distinguish_published_and_discoverable_records(self):
-        response = self.client.post('/api/v1/businesses/me/locations', {'branch_name': 'Branch', 'address': 'Address', 'pin_code': '12345', 'locality': 'Area', 'district': 'District', 'state': 'State', 'country': 'IN', 'visibility_state': 'VISIBLE'}, format='json')
+        response = self.client.post('/api/v1/businesses/me/locations', {'branch_name': 'Branch', 'address': 'Address', 'pin_code': '560001', 'locality': 'Area', 'district': 'Bengaluru', 'state': 'Karnataka', 'country': 'IN', 'visibility_state': 'VISIBLE'}, format='json')
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.workspace()['branch_count'], 1)
-        response = self.client.post('/api/v1/businesses/me/listings', {'location': response.data['id'], 'product': self.product.pk, 'selling_price': '10', 'currency': 'USD', 'state': 'PUBLISHED'}, format='json')
+        response = self.client.post('/api/v1/businesses/me/listings', {'location': response.data['id'], 'product': self.product.pk, 'selling_price': '10', 'currency': 'INR', 'state': 'PUBLISHED'}, format='json')
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.workspace()['published_listing_count'], 1)
         self.assertEqual(self.workspace()['discoverable_listing_count'], 1)

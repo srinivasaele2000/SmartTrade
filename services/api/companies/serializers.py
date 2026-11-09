@@ -3,9 +3,38 @@ from rest_framework import serializers
 
 from .models import CompanyDocument, CompanyProfile, CompanyVerificationCase
 from .email_verification import development_verified
+from config.india import GSTIN_PATTERN, INDIAN_PIN_PATTERN, PAN_PATTERN, canonical_indian_state
 
 
-class CompanyRegistrationSerializer(serializers.ModelSerializer):
+class IndiaCompanyFieldsMixin:
+    def validate_pin_code(self, value):
+        value = ''.join(value.split())
+        if value and not INDIAN_PIN_PATTERN.fullmatch(value):
+            raise serializers.ValidationError('Use a six-digit Indian PIN code.')
+        return value
+
+    def validate_state_or_region(self, value):
+        if not value.strip():
+            return ''
+        canonical = canonical_indian_state(value)
+        if canonical is None:
+            raise serializers.ValidationError('Choose a valid Indian state or union territory.')
+        return canonical
+
+    def validate_gstin(self, value):
+        value = value.strip().upper()
+        if value and not GSTIN_PATTERN.fullmatch(value):
+            raise serializers.ValidationError('Use a valid 15-character GSTIN.')
+        return value
+
+    def validate_pan(self, value):
+        value = value.strip().upper()
+        if value and not PAN_PATTERN.fullmatch(value):
+            raise serializers.ValidationError('Use a valid 10-character PAN.')
+        return value
+
+
+class CompanyRegistrationSerializer(IndiaCompanyFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
         fields = (
@@ -13,6 +42,8 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
             "trading_name",
             "registration_number",
             "tax_registration_number",
+            "gstin",
+            "pan",
             "authorized_person_name",
             "company_email",
             "address_line",
@@ -35,6 +66,8 @@ class CompanyProfileResponseSerializer(serializers.ModelSerializer):
             "trading_name",
             "registration_number",
             "tax_registration_number",
+            "gstin",
+            "pan",
             "authorized_person_name",
             "company_email",
             "email_verified_at",

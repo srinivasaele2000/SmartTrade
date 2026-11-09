@@ -61,7 +61,7 @@ The live connection was confirmed as smarttrade_dev / smarttrade_app before writ
 | Brand create/edit | Android created Phase 2 Controlled Brand, then edited it to Phase 2 Reviewed Brand. Staff browser displayed the same owned brand. PASS |
 | Category association | Admin browser created Phase 2 Validation Tools; Android associated its owned brand. Browser inspected the association. PASS |
 | Product create | Android created PHASE2-LOCAL-001 in DRAFT. Live public detail returned 404. PASS |
-| Product edit/publication | Android saved description, specifications, explicit USD catalogue price and PUBLISHED state. PostgreSQL values checked; public detail returned 200. PASS |
+| Product edit/publication | Android saved description, specifications, explicit INR catalogue price (reconciled by the India-only audit) and PUBLISHED state. PostgreSQL values checked; public detail returned 200. PASS |
 | Variant create/edit | Android created and edited PHASE2-SKU-001 with attributes; admin displayed the same variant. PASS |
 | Duplicate SKU | Actual authenticated create returned 400; original SKU remained intact. Automated tests also cover duplicate edits and immutable product identity. PASS |
 | Invalid specifications | Native form rejected malformed JSON without reporting success. Feedback visibility improved. PASS |

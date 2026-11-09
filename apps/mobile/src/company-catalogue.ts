@@ -14,10 +14,9 @@ export function productPayload(form: ProductForm, association?: number) {
   if (!form.name.trim() || !form.code.trim() || !form.unit.trim()) throw new ApiError('Product name, code and unit are required.');
   if (form.name.trim().length > 200 || form.code.trim().length > 100 || form.unit.trim().length > 40) throw new ApiError('Product field exceeds its allowed length.');
   if (!['DRAFT', 'PUBLISHED', 'ARCHIVED'].includes(form.state)) throw new ApiError('Invalid publication state.');
-  const amount = form.catalogue_price.trim(); const currency = form.currency.trim();
-  if ((amount === '') !== (currency === '')) throw new ApiError('Provide both catalogue price and currency, or leave both empty.');
-  if (amount && (!/^\d{1,14}(\.\d{1,4})?$/.test(amount) || !/^[A-Z]{3}$/.test(currency))) throw new ApiError('Use a nonnegative price (up to four decimal places) and three-letter uppercase currency.');
-  return { name: form.name.trim(), code: form.code.trim(), description: form.description.trim(), unit: form.unit.trim(), specifications: objectInput(form.specifications, 'Specifications'), catalogue_price: amount || null, currency, state: form.state, ...(association === undefined ? {} : { brand_category: association }) };
+  const amount = form.catalogue_price.trim();
+  if (amount && !/^\d{1,14}(\.\d{1,4})?$/.test(amount)) throw new ApiError('Use a nonnegative INR price with up to four decimal places.');
+  return { name: form.name.trim(), code: form.code.trim(), description: form.description.trim(), unit: form.unit.trim(), specifications: objectInput(form.specifications, 'Specifications'), catalogue_price: amount || null, currency: amount ? 'INR' : '', state: form.state, ...(association === undefined ? {} : { brand_category: association }) };
 }
 export function variantPayload(form: { name: string; sku: string; attributes: string; active: boolean }) {
   if (!form.name.trim() || !form.sku.trim() || form.name.trim().length > 160 || form.sku.trim().length > 100) throw new ApiError('Variant name and SKU are required and must fit their allowed lengths.');

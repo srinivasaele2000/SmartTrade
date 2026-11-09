@@ -1,4 +1,5 @@
 export type Category = { id: number; name: string; active: boolean };
+export type Brand = { id: number; name: string; company_name: string; categories: { id: number; name: string }[] };
 export type Variant = { id: number; product: number; sku: string; name: string; attributes: Record<string, unknown>; active: boolean };
 export type Product = {
   id: number; name: string; code: string; brand_id?: number; company_id?: number; brand_name: string; company_name: string; category_name: string;
@@ -14,6 +15,7 @@ export type Listing = {
 export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 export type Discovery = Page<Listing> & { match_level: string };
 export type CatalogueFilters = { search?: string; category?: string; brand?: string };
+export type BrandFilters = { search?: string; category?: string };
 export type DealerFilters = { variant?: string; pin_code?: string; locality?: string; district?: string; stock_status?: string };
 
 export class ApiError extends Error {
@@ -31,9 +33,11 @@ const nullable = (value: unknown): string | null => value === null ? null : text
 const array = (value: unknown): unknown[] => { if (!Array.isArray(value)) throw new ApiError('Unexpected API list.'); return value; };
 export function mapProduct(value: unknown): Product {
   const p = object(value);
+  const price = nullable(p.catalogue_price), currency = text(p.currency);
+  if ((price === null && currency !== '') || (price !== null && currency !== 'INR')) throw new ApiError('Unexpected catalogue currency.');
   return {
     id: number(p.id), name: text(p.name), code: text(p.code), brand_id: typeof p.brand_id === 'number' ? p.brand_id : undefined, company_id: typeof p.company_id === 'number' ? p.company_id : undefined, brand_name: text(p.brand_name), company_name: text(p.company_name), category_name: text(p.category_name),
-    description: text(p.description), specifications: object(p.specifications), unit: text(p.unit), catalogue_price: nullable(p.catalogue_price), currency: text(p.currency),
+    description: text(p.description), specifications: object(p.specifications), unit: text(p.unit), catalogue_price: price, currency,
     variants: array(p.variants).map(value => { const v = object(value); return { id: number(v.id), product: number(v.product), name: text(v.name), sku: text(v.sku), attributes: object(v.attributes), active: v.active === true }; }).filter(v => v.active),
   };
 }
@@ -41,11 +45,20 @@ export function mapListing(value: unknown): Listing {
   const item = object(value), b = object(item.branch);
   const stock = text(item.stock_status);
   if (!['IN_STOCK', 'OUT_OF_STOCK', 'UNKNOWN'].includes(stock)) throw new ApiError('Unexpected stock status.');
+  if (text(item.currency) !== 'INR') throw new ApiError('Unexpected dealer listing currency.');
+  if (text(b.country) !== 'IN' || !/^[1-9][0-9]{5}$/.test(text(b.pin_code))) throw new ApiError('Unexpected dealer branch location.');
   // Explicit projection prevents private contacts from entering mobile view models.
   return {
     id: number(item.id), business_id: number(item.business_id), business_name: text(item.business_name), location: number(item.location), product: number(item.product), product_name: text(item.product_name),
     variant: item.variant === null ? null : number(item.variant), selling_price: text(item.selling_price), currency: text(item.currency), stock_status: stock as Listing['stock_status'], quantity: nullable(item.quantity),
     branch: { id: number(b.id), branch_name: text(b.branch_name), address: text(b.address), pin_code: text(b.pin_code), locality: text(b.locality), district: text(b.district), state: text(b.state), country: text(b.country) },
+  };
+}
+export function mapBrand(value: unknown): Brand {
+  const brand = object(value);
+  return {
+    id: number(brand.id), name: text(brand.name), company_name: text(brand.company_name),
+    categories: array(brand.categories).map(value => { const category = object(value); return { id: number(category.id), name: text(category.name) }; }),
   };
 }
 function mapPage<T>(value: unknown, map: (value: unknown) => T): Page<T> {
@@ -81,7 +94,10 @@ export class ApiClient {
       }
       if (response.status === 401) throw new ApiError('Your session is no longer valid. Sign in again to discover dealers.', 401);
       if (response.status === 403) throw new ApiError('This account cannot access dealer discovery.', 403);
-      if (response.status === 404) throw new ApiError('This product is no longer available.', 404);
+      if (response.status === 404) {
+        if (/^\/catalogue\/products\/\d+$/.test(path)) throw new ApiError('This product is no longer available.', 404);
+        throw new ApiError('The requested SmartTrade resource is not available.', 404);
+      }
       throw new ApiError(response.status >= 500 ? 'SmartTrade is temporarily unavailable. Retry shortly.' : 'The search could not be completed. Check your filters.', response.status);
     }
     if (response.status === 204) return undefined;
@@ -97,6 +113,10 @@ export class ApiClient {
   async product(id: number, signal?: AbortSignal) { return mapProduct(await this.get(`/catalogue/products/${id}`, signal)); }
   async categories(page: number, signal?: AbortSignal) {
     return mapPage(await this.get(`/catalogue/categories?page=${page}`, signal), value => { const c = object(value); return { id: number(c.id), name: text(c.name), active: c.active === true }; });
+  }
+  async brands(filters: BrandFilters, page: number, signal?: AbortSignal) {
+    if (filters.category && !/^\d+$/.test(filters.category.trim())) throw new ApiError('Category ID must contain digits only.');
+    return mapPage(await this.get(`/catalogue/brands?${query(filters, page)}`, signal), mapBrand);
   }
   async dealers(product: number, filters: DealerFilters, page: number, token: string | null, signal?: AbortSignal): Promise<Discovery> {
     if (!token) throw new ApiError('Sign in is required to discover dealer branches.', 401);

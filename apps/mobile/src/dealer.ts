@@ -1,23 +1,26 @@
 import { ApiClient, ApiError, type Page, type Product } from './api.ts';
+import { GSTIN, INDIAN_MOBILE, INDIAN_PIN, INDIAN_STATES, PAN } from './india.ts';
 
 export type Authorization = { id: number; brand: number; brand_name: string; company: number; company_name: string; active: boolean; eligible: boolean; company_verification_state: string; company_activity_state: string; updated_at: string };
-export type Business = { id: number; legal_name: string; registration_number: string; verification_state: string; workspace: { branch_count: number; published_listing_count: number; discoverable_listing_count: number; can_edit: boolean; can_publish_branches: boolean; can_manage_listings: boolean; authorizations: Authorization[] } };
+export type Business = { id: number; legal_name: string; registration_number: string; gstin: string; pan: string; verification_state: string; workspace: { branch_count: number; published_listing_count: number; discoverable_listing_count: number; can_edit: boolean; can_publish_branches: boolean; can_manage_listings: boolean; authorizations: Authorization[] } };
 export const branchFields = [
-  ['branch_name', 'Branch name', 160], ['address', 'Address', 400], ['pin_code', 'PIN / postal code', 20],
-  ['locality', 'Locality', 120], ['district', 'District', 120], ['state', 'State', 120], ['country', 'Country code', 2],
-  ['contact_name', 'Private contact name', 160], ['contact_phone', 'Private contact phone (E.164)', 16], ['contact_email', 'Private contact email', 254],
+  ['branch_name', 'Branch name', 160], ['address', 'Address', 400], ['pin_code', 'Indian PIN code', 6],
+  ['locality', 'Locality', 120], ['district', 'District', 120], ['state', 'Indian state / union territory', 120], ['country', 'Country', 2],
+  ['contact_name', 'Private contact name', 160], ['contact_phone', 'Private Indian mobile (+91)', 13], ['contact_email', 'Private contact email', 254],
 ] as const;
 export type BranchInput = Record<typeof branchFields[number][0], string> & { active: boolean; visibility_state: 'PRIVATE_DRAFT' | 'VISIBLE' };
 export type OwnedBranch = BranchInput & { id: number; business: number; admin_hidden: boolean };
 export type ListingFilters = { search?: string; state?: string; stock_status?: string; location?: string };
 export type OwnedListing = { company_name?: string; product_code?: string; variant_sku?: string | null; variant_name?: string | null; eligible?: boolean; id: number; location: number; branch_name: string; product: number; product_name: string; variant: number | null; brand_id: number; brand_name: string; company_id: number; selling_price: string; currency: string; stock_status: 'IN_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN'; quantity: string | null; state: 'PUBLISHED' | 'WITHDRAWN'; company_catalogue_price: string | null; company_catalogue_currency: string };
 export type InventoryInput = { selling_price: string; currency: string; stock_status: OwnedListing['stock_status']; quantity: string; state: OwnedListing['state'] };
-export const blankBranch = (): BranchInput => ({ ...Object.fromEntries(branchFields.map(([key]) => [key, ''])), active: true, visibility_state: 'PRIVATE_DRAFT' }) as BranchInput;
-export const blankInventory = (): InventoryInput => ({ selling_price: '', currency: '', stock_status: 'UNKNOWN', quantity: '', state: 'WITHDRAWN' });
+export const blankBranch = (): BranchInput => ({ ...Object.fromEntries(branchFields.map(([key]) => [key, key === 'country' ? 'IN' : ''])), active: true, visibility_state: 'PRIVATE_DRAFT' }) as BranchInput;
+export const blankInventory = (): InventoryInput => ({ selling_price: '', currency: 'INR', stock_status: 'UNKNOWN', quantity: '', state: 'WITHDRAWN' });
 export function validateBranch(value: BranchInput): string[] {
   const errors = branchFields.filter(([key,, max]) => value[key].trim().length > max || (!key.startsWith('contact_') && !value[key].trim())).map(([,label]) => `${label} is required and must fit the stated length.`);
-  if (!/^[A-Za-z]{2}$/.test(value.country.trim())) errors.push('Use an explicit two-letter country code.');
-  if (value.contact_phone && !/^\+[1-9][0-9]{1,14}$/.test(value.contact_phone)) errors.push('Private phone must use E.164 format.');
+  if (value.country.trim().toUpperCase() !== 'IN') errors.push('SmartTrade currently supports India only.');
+  if (!INDIAN_PIN.test(value.pin_code.trim())) errors.push('Use a six-digit Indian PIN code.');
+  if (!INDIAN_STATES.some(state => state.toLowerCase() === value.state.trim().toLowerCase())) errors.push('Choose a valid Indian state or union territory.');
+  if (value.contact_phone && !INDIAN_MOBILE.test(value.contact_phone)) errors.push('Private phone must use +91XXXXXXXXXX format.');
   if (value.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.contact_email)) errors.push('Private email is invalid.');
   return errors;
 }
@@ -25,7 +28,7 @@ const decimal = /^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/;
 export function validateInventory(value: InventoryInput): string[] {
   const errors: string[] = [];
   if (!decimal.test(value.selling_price)) errors.push('Selling price must be nonnegative, with up to 14 whole digits and 4 decimals.');
-  if (!/^[A-Z]{3}$/.test(value.currency)) errors.push('Enter an explicit uppercase three-letter currency.');
+  if (value.currency !== 'INR') errors.push('SmartTrade currently supports INR only.');
   if (!['IN_STOCK', 'OUT_OF_STOCK', 'UNKNOWN'].includes(value.stock_status)) errors.push('Choose a stock status.');
   if (!['PUBLISHED', 'WITHDRAWN'].includes(value.state)) errors.push('Choose a listing state.');
   if (value.quantity !== '') {
@@ -51,9 +54,11 @@ export async function ownedPage<T>(api: ApiClient, token: string, kind: 'locatio
   if (!Array.isArray(value.results) || typeof value.count !== 'number') throw new ApiError('Dealer list response is incomplete.');
   return value;
 }
-export async function saveBusiness(api: ApiClient, token: string, legal_name: string, registration_number: string) {
+export async function saveBusiness(api: ApiClient, token: string, legal_name: string, registration_number: string, gstin: string, pan: string) {
   if (legal_name.length > 200 || registration_number.length > 100) throw new ApiError('Business name allows up to 200 characters; registration number allows up to 100.');
-  const value = await api.get('/businesses/me', undefined, token, { method: 'PATCH', body: JSON.stringify({ legal_name: legal_name.trim(), registration_number: registration_number.trim() }) }); confirmed(value); return value;
+  if (gstin && !GSTIN.test(gstin.trim().toUpperCase())) throw new ApiError('Use a valid 15-character GSTIN.');
+  if (pan && !PAN.test(pan.trim().toUpperCase())) throw new ApiError('Use a valid 10-character PAN.');
+  const value = await api.get('/businesses/me', undefined, token, { method: 'PATCH', body: JSON.stringify({ legal_name: legal_name.trim(), registration_number: registration_number.trim(), gstin: gstin.trim().toUpperCase(), pan: pan.trim().toUpperCase() }) }); confirmed(value); return value;
 }
 export async function saveBranch(api: ApiClient, token: string, form: BranchInput, id?: number) {
   const errors = validateBranch(form); if (errors.length) throw new ApiError(errors.join(' '));
@@ -63,7 +68,7 @@ export async function saveBranch(api: ApiClient, token: string, form: BranchInpu
 export async function saveListing(api: ApiClient, token: string, form: InventoryInput, selected: { location: number; product: number; variant: number | null }, id?: number) {
   const errors = validateInventory(form); if (errors.length) throw new ApiError(errors.join(' '));
   if (!id && (!selected.location || !selected.product)) throw new ApiError('Select an owned branch and authorized catalogue product.');
-  const data = { selling_price: form.selling_price, currency: form.currency, stock_status: form.stock_status, state: form.state, quantity: form.quantity === '' ? null : form.quantity, ...(!id ? selected : {}) };
+  const data = { selling_price: form.selling_price, currency: 'INR', stock_status: form.stock_status, state: form.state, quantity: form.quantity === '' ? null : form.quantity, ...(!id ? selected : {}) };
   const value = await api.get(`/businesses/me/listings${id ? `/${id}` : ''}`, undefined, token, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(data) }); confirmed(value); return value;
 }
 export async function withdrawListing(api: ApiClient, token: string, id: number) {

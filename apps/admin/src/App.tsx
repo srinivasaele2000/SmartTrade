@@ -2,11 +2,15 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import ReviewRequests from "./ReviewRequests";
 import Catalogue from "./Catalogue";
 import Dealers from "./Dealers";
+import Enquiries from "./Enquiries";
+import Orders from "./Orders";
+import AuditHistory from './AuditHistory';
 import { ApiError, apiResponse, ensureList, onSessionExpired, requestApi } from "./api";
 import { pages, pageFromHash } from "./navigation";
 
 import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession } from './auth';
 import type { StaffAccount as Account, LoginResponse, OtpAcknowledgement } from './auth';
+import { istDateTime } from './india';
 type DocumentItem = {
   id: number;
   document_type: string;
@@ -21,6 +25,8 @@ type Company = {
   trading_name: string;
   registration_number: string;
   tax_registration_number: string;
+  gstin: string;
+  pan: string;
   authorized_person_name: string;
   company_email: string;
   email_verified_at: string | null;
@@ -53,7 +59,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/+$/
 const apiRequest = <T,>(path: string, token?: string, init: RequestInit = {}) => requestApi<T>(API_BASE, path, token, init);
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return istDateTime(value);
 }
 
 function App() {
@@ -329,7 +335,7 @@ function App() {
         </section>
 
         {sessionMessage && <p className="action-message error" role="status">{sessionMessage}</p>}
-        {page === 'overview' ? <section id="overview" className="queue-section"><h2>Administration workflows</h2><p>The API badge reports process health only. Staff access and permissions are checked separately; it does not indicate OTP configuration or database readiness.</p><div className="cards">{pages.filter(item => item.id !== 'overview').map(item => <a className="queue-card" key={item.id} href={`#${item.id}`}><strong>{item.label}</strong><span>{item.id === 'audit' ? 'History viewer not implemented' : accessToken ? 'Open workflow · backend permissions apply' : 'Staff sign-in required'}</span></a>)}</div></section> : page === 'audit' ? <section id="audit" className="state-panel"><h2>Audit history viewer is not implemented</h2><p>The combined audit viewer is not implemented. Catalogue history is available in Catalogue, and authorization history in Dealer network, to staff with READ_AUDIT permission. This page does not display audit records.</p></section> : !apiConfigured ? (
+        {page === 'overview' ? <section id="overview" className="queue-section"><h2>Administration workflows</h2><p>The API badge reports process health only. Staff access and permissions are checked separately; it does not indicate OTP configuration or database readiness.</p><div className="cards">{pages.filter(item => item.id !== 'overview').map(item => <a className="queue-card" key={item.id} href={`#${item.id}`}><strong>{item.label}</strong><span>{accessToken ? 'Open workflow · backend permissions apply' : 'Staff sign-in required'}</span></a>)}</div></section> : !apiConfigured ? (
           <section className="state-panel error-panel" aria-live="polite">
             <h2>API configuration required</h2>
             <p>Set <code>VITE_API_BASE_URL</code> in the admin environment to the API base path, such as the local development API. Restart the Vite server after changing it.</p>
@@ -345,8 +351,8 @@ function App() {
             <div>
             {import.meta.env.DEV && devAuthEnabled && <div className="state-panel"><h3>Local development authentication</h3><p>Uses only the server-designated existing staff account. No phone verification or permissions are granted.</p><button className="button button-quiet" type="button" disabled={loginBusy} onClick={() => void developmentLogin()}>Development Login</button></div>}
             <form className="signin-form" onSubmit={otpRequested ? signIn : requestOtp}>
-              <label htmlFor="staff-mobile">Staff mobile number (E.164)</label>
-              <input id="staff-mobile" type="tel" autoComplete="tel" pattern="[+][1-9][0-9]{1,14}" maxLength={16} title="Use a complete E.164 number: + followed by country code and number, without spaces." placeholder="+<country code><number>" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
+              <label htmlFor="staff-mobile">Staff mobile number (+91)</label>
+              <input id="staff-mobile" type="tel" autoComplete="tel" pattern="[+]91[6-9][0-9]{9}" maxLength={13} title="Use an Indian mobile number in +91XXXXXXXXXX format." placeholder="+91XXXXXXXXXX" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
               {otpRequested && <>
                 <label htmlFor="staff-otp">Verification code</label>
                 <input id="staff-otp" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} required />
@@ -391,7 +397,9 @@ function App() {
                   <dl className="detail-grid">
                     <dt>Trading name</dt><dd>{selectedCase.company.trading_name || "Not provided"}</dd>
                     <dt>Registration number</dt><dd>{selectedCase.company.registration_number || "Not provided"}</dd>
-                    <dt>Tax registration</dt><dd>{selectedCase.company.tax_registration_number || "Not provided"}</dd>
+                    <dt>GSTIN</dt><dd>{selectedCase.company.gstin || "Not provided"}</dd>
+                    <dt>PAN</dt><dd>{selectedCase.company.pan || "Not provided"}</dd>
+                    <dt>Legacy tax registration reference</dt><dd>{selectedCase.company.tax_registration_number || "Not provided"}</dd>
                     <dt>Authorized person</dt><dd>{selectedCase.company.authorized_person_name || "Not provided"}</dd>
                     <dt>Company email</dt><dd>{selectedCase.company.company_email}</dd>
                     <dt>Email verified</dt><dd>{selectedCase.company.email_verified_at ? formatDate(selectedCase.company.email_verified_at) : selectedCase.email_verification_mode === "development_simulated" ? "Local simulation only; ownership unverified" : "Not verified"}</dd>
@@ -405,7 +413,7 @@ function App() {
                   {selectedCase.documents.length === 0 ? <p className="muted">No document metadata was returned for this case.</p> : <ul className="document-list">
                     {selectedCase.documents.map((item) => <li key={item.id}><span><strong>{item.document_type}</strong><small>{item.original_filename} · {(item.size_bytes / 1024).toFixed(0)} KB</small></span><button className="button button-quiet" disabled={documentBusy === item.id || selectedCase.assigned_reviewer_account_id !== account?.id} onClick={() => void downloadDocument(selectedCase, item)}>{documentBusy === item.id ? "Loading…" : "Download securely"}</button></li>)}
                   </ul>}
-                  <p className="permission-hint">Document downloads require this case to be assigned to you and the <code>VIEW_PRIVATE_DOCUMENTS</code> staff permission.</p>
+                  <p className="permission-hint">Document downloads require this case to be assigned to you and the <code>VIEW_PRIVATE_DOCUMENTS</code> staff permission. Phase 8 device-local files never appear here; only files previously received by the backend are reviewable.</p>
                 </div>
                 <div className="detail-card review-actions">
                   <div className="section-heading compact-heading"><div><h3>Review decision</h3><p>Approval or rejection requires a recorded reason.</p></div></div>
@@ -426,6 +434,9 @@ function App() {
         {accessToken && page === 'review-requests' && <ReviewRequests baseUrl={API_BASE} token={accessToken} canRestore={Boolean(account?.staff_profile?.permissions.includes("RESTORE_COMPANY"))} />}
         {accessToken && page === 'catalogue' && <Catalogue baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'dealers' && <Dealers baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
+        {accessToken && page === 'enquiries' && <Enquiries baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
+        {accessToken && page === 'audit' && <AuditHistory baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
+        {accessToken && page === 'orders' && <Orders baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         <footer>Company verification and private-document access are authorized by the backend for each request.</footer>
       </main>
     </div>

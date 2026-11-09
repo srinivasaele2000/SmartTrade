@@ -8,6 +8,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounts.models import AccountType, StaffProfile
+from config.india import INDIAN_STATES_AND_UTS, canonical_indian_state
 
 
 class CompanyVerificationState(models.TextChoices):
@@ -49,6 +50,8 @@ class CompanyProfile(models.Model):
     trading_name = models.CharField(max_length=200, blank=True)
     registration_number = models.CharField(max_length=100, blank=True)
     tax_registration_number = models.CharField(max_length=100, blank=True)
+    gstin = models.CharField(max_length=15, blank=True)
+    pan = models.CharField(max_length=10, blank=True)
     authorized_person_name = models.CharField(max_length=200, blank=True)
     company_email = models.EmailField()
     email_verified_at = models.DateTimeField(null=True, blank=True)
@@ -81,11 +84,22 @@ class CompanyProfile(models.Model):
                 condition=Q(activity_state__in=CompanyActivityState.values),
                 name="company_valid_activity_state",
             ),
+            models.CheckConstraint(condition=Q(pin_code='') | Q(pin_code__regex=r'^[1-9][0-9]{5}$'), name='company_valid_indian_pin'),
+            models.CheckConstraint(condition=Q(state_or_region='') | Q(state_or_region__in=INDIAN_STATES_AND_UTS), name='company_valid_indian_state'),
+            models.CheckConstraint(condition=Q(gstin='') | Q(gstin__regex=r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'), name='company_valid_gstin'),
+            models.CheckConstraint(condition=Q(pan='') | Q(pan__regex=r'^[A-Z]{5}[0-9]{4}[A-Z]$'), name='company_valid_pan'),
         ]
 
     def clean(self):
         if self.owner_account_id and self.owner_account.account_type != AccountType.COMPANY:
             raise ValidationError({"owner_account": "A company must be owned by a COMPANY account."})
+        if self.state_or_region:
+            canonical = canonical_indian_state(self.state_or_region)
+            if canonical is None:
+                raise ValidationError({'state_or_region': 'Choose a valid Indian state or union territory.'})
+            self.state_or_region = canonical
+        self.gstin = self.gstin.strip().upper()
+        self.pan = self.pan.strip().upper()
 
     @property
     def can_publish_catalogue(self):

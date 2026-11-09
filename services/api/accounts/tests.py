@@ -27,13 +27,13 @@ def create_account(mobile, account_type=AccountType.PERSONAL, **fields):
 
 class AccountModelTests(TestCase):
     def test_mobile_number_is_unique_across_account_types(self):
-        create_account("+14155550101", AccountType.PERSONAL)
+        create_account("+919800000006", AccountType.PERSONAL)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                create_account("+14155550101", AccountType.BUSINESS)
+                create_account("+919800000006", AccountType.BUSINESS)
 
     def test_account_type_cannot_be_changed(self):
-        account = create_account("+14155550102")
+        account = create_account("+919800000007")
         account.account_type = AccountType.COMPANY
         with self.assertRaises(ValidationError):
             account.save()
@@ -45,7 +45,7 @@ class AccountModelTests(TestCase):
         "requires DB_ENGINE=postgresql to exercise the account-type trigger",
     )
     def test_database_rejects_direct_account_type_update(self):
-        account = create_account("+14155550104")
+        account = create_account("+919800000008")
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 Account.objects.filter(pk=account.pk).update(
@@ -53,7 +53,7 @@ class AccountModelTests(TestCase):
                 )
 
     def test_blocking_account_invalidates_existing_tokens(self):
-        account = create_account("+14155550103")
+        account = create_account("+919800000009")
         old_version = account.token_version
         account.access_state = AccountAccessState.BLOCKED
         account.save()
@@ -69,12 +69,12 @@ class AccountSubtypeConstraintPostgreSQLTests(TransactionTestCase):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 Account.objects.create(
-                    mobile_e164="+14155550130",
+                    mobile_e164="+919800000010",
                     account_type=AccountType.PERSONAL,
                 )
 
     def test_account_cannot_have_a_second_subtype_profile(self):
-        account = create_account("+14155550131", AccountType.PERSONAL)
+        account = create_account("+919800000011", AccountType.PERSONAL)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 BusinessProfile.objects.create(account=account)
@@ -87,11 +87,11 @@ class RegistrationAPITests(TestCase):
     def test_registration_creates_pending_profile_without_claiming_verification(self):
         response = self.client.post(
             "/api/v1/auth/register",
-            {"mobile_e164": "+14155550110", "account_type": "BUSINESS"},
+            {"mobile_e164": "+919800000012", "account_type": "BUSINESS"},
             format="json",
         )
         self.assertEqual(response.status_code, 201)
-        account = Account.objects.get(mobile_e164="+14155550110")
+        account = Account.objects.get(mobile_e164="+919800000012")
         self.assertIsNone(account.mobile_verified_at)
         self.assertTrue(hasattr(account, "business_profile"))
         self.assertEqual(response.data["account"]["mobile_verified"], False)
@@ -107,20 +107,29 @@ class RegistrationAPITests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Account.objects.exists())
 
+    def test_registration_rejects_foreign_e164_mobile(self):
+        response = self.client.post(
+            "/api/v1/auth/register",
+            {"mobile_e164": "+12025550100", "account_type": "PERSONAL"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Account.objects.exists())
+
     def test_registration_rejects_staff_self_signup(self):
         response = self.client.post(
             "/api/v1/auth/register",
-            {"mobile_e164": "+14155550111", "account_type": "STAFF"},
+            {"mobile_e164": "+919800000013", "account_type": "STAFF"},
             format="json",
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Account.objects.exists())
 
     def test_registration_returns_conflict_for_duplicate_mobile(self):
-        create_account("+14155550112", AccountType.PERSONAL)
+        create_account("+919800000014", AccountType.PERSONAL)
         response = self.client.post(
             "/api/v1/auth/register",
-            {"mobile_e164": "+14155550112", "account_type": "COMPANY"},
+            {"mobile_e164": "+919800000014", "account_type": "COMPANY"},
             format="json",
         )
         self.assertEqual(response.status_code, 409)
@@ -130,7 +139,7 @@ class RegistrationAPITests(TestCase):
 class AuthenticationAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.account = create_account("+14155550120")
+        self.account = create_account("+919800000015")
 
     @override_settings(SMARTTRADE_OTP_PROVIDER="")
     def test_login_fails_closed_when_real_provider_is_not_configured(self):
@@ -262,7 +271,7 @@ class AuthenticationAPITests(TestCase):
         self.assertEqual(refresh_response.status_code, 401, refresh_response.data)
 
     def test_disabled_staff_account_is_not_active(self):
-        staff = create_account("+14155550121", AccountType.STAFF)
+        staff = create_account("+919800000016", AccountType.STAFF)
         profile = StaffProfile.objects.get(account=staff)
         profile.state = StaffState.DISABLED
         profile.save()

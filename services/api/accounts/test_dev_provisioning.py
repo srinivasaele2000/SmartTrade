@@ -31,7 +31,7 @@ class DevelopmentProvisioningTests(TestCase):
         self.assertEqual(StaffRoleAssignment.objects.count(), 0)
 
     def test_unrelated_staff_prevents_provisioning(self):
-        Account.objects.create_user('+12025550101', AccountType.STAFF)
+        Account.objects.create_user('+919800000005', AccountType.STAFF)
         with self.assertRaises(CommandError):
             self.provision()
         self.assertEqual(Account.objects.count(), 1)

@@ -1,6 +1,6 @@
 # Dealer branches, company authorization and inventory
 
-This slice extends the existing `accounts.BusinessProfile` BUSINESS subtype with legal name and registration number. It does not create another account/profile concept. `DealerLocation` belongs to that business; `DealerProductListing` references a canonical catalogue Product and optional ProductVariant. Company catalogue price and dealer branch selling price are separate fields and may use different explicit currencies. No price conversion, tax, shipping, discount, reservation or aggregate-stock behavior is inferred.
+This slice extends the existing `accounts.BusinessProfile` BUSINESS subtype with legal name and registration number. It does not create another account/profile concept. `DealerLocation` belongs to that business; `DealerProductListing` references a canonical catalogue Product and optional ProductVariant. Company catalogue price and dealer branch selling price are separate fields, and both use INR. No price conversion, tax, shipping, discount, reservation or aggregate-stock behavior is inferred.
 
 ## Implemented endpoints
 
@@ -22,7 +22,7 @@ All paths start with `/api/v1`, omit a trailing slash, and use existing Bearer J
 | `/staff/dealers/locations/{id}/moderation` | POST | `REVIEW_BUSINESS`; explicit Boolean `hidden`, required `reason`. Staff visibility restriction is independent of owner activation. |
 | `/staff/dealers/listings` | GET | `REVIEW_BUSINESS`; optional numeric `business` and `location` filters. Staff inspect stock/prices but cannot impersonate dealer inventory edits. |
 
-Lists use `count`, `next`, `previous`, `results`, default 20 per page with `page_size` up to 100. Discovery also returns `match_level`: PIN_CODE, LOCALITY, DISTRICT, NO_LOCATION_MATCH or UNFILTERED. Provided PIN matches take priority; if absent/unmatched, a provided locality is tried, then a provided district. No undisclosed geographic expansion occurs; no GPS radius is assumed. Product/brand/stock filters remain applied through fallback. Search/store normalization applies NFKC, uppercase and collapsed whitespace to location search fields; PIN codes also remove whitespace. Country uses a two-letter uppercase format check, not a complete country registry. Contact phone, when supplied, requires E.164.
+Lists use `count`, `next`, `previous`, `results`, default 20 per page with `page_size` up to 100. Discovery also returns `match_level`: PIN_CODE, LOCALITY, DISTRICT, NO_LOCATION_MATCH or UNFILTERED. Provided PIN matches take priority; if absent/unmatched, a provided locality is tried, then a provided district. No undisclosed geographic expansion occurs; no GPS radius is assumed. Product/brand/stock filters remain applied through fallback. Search/store normalization applies NFKC, uppercase and collapsed whitespace to location search fields. Branches require a six-digit Indian PIN code, a recognized Indian state or union territory, country `IN`, and any supplied phone in canonical `+91XXXXXXXXXX` format.
 
 ## Eligibility and retained history
 
@@ -36,7 +36,7 @@ Lists use `count`, `next`, `previous`, `results`, default 20 per page with `page
 
 ## Stock, constraints and audit
 
-Prices use the catalogue's technical storage precision of 18 digits/four decimal places, nonnegative amounts, and explicit uppercase three-letter currency format. This is not ISO registry validation or a regional rounding policy. Quantity uses the same precision and is optional. IN_STOCK quantity, if supplied, must be positive; OUT_OF_STOCK quantity, if supplied, must be zero; UNKNOWN must omit quantity. There is no reservation or stock deduction engine. Listing state defaults to WITHDRAWN.
+Prices use the catalogue's technical storage precision of 18 digits/four decimal places, are nonnegative, and use INR only. This is not a tax or regional rounding policy. Quantity uses the same precision and is optional. IN_STOCK quantity, if supplied, must be positive; OUT_OF_STOCK quantity, if supplied, must be zero; UNKNOWN must omit quantity. There is no reservation or stock deduction engine. Listing state defaults to WITHDRAWN.
 
 Two partial unique constraints handle nullable variants deliberately: `(location, product)` without variant and `(location, product, variant)` with variant. A product-level row and variant rows do not imply aggregated stock. PostgreSQL guards enforce immutable ownership/identity, variant-product consistency, company-brand grant consistency, company-owner grant actor and current publication eligibility. These supplement backend checks; no client-supplied owner or audit actor is trusted.
 

@@ -43,7 +43,7 @@ class Product(models.Model):
             models.UniqueConstraint(fields=['brand_category', 'code'], name='catalogue_product_code'),
             models.CheckConstraint(condition=Q(state__in=['DRAFT', 'PUBLISHED', 'ARCHIVED']), name='catalogue_product_state'),
             models.CheckConstraint(condition=Q(moderation_state__in=['VISIBLE', 'HIDDEN', 'SUSPENDED']), name='catalogue_moderation_state'),
-            models.CheckConstraint(condition=Q(catalogue_price__isnull=True, currency='') | Q(catalogue_price__isnull=False, catalogue_price__gte=0, currency__regex=r'^[A-Z]{3}$'), name='catalogue_price_currency_pair'),
+            models.CheckConstraint(condition=Q(catalogue_price__isnull=True, currency='') | Q(catalogue_price__isnull=False, catalogue_price__gte=0, currency='INR'), name='catalogue_price_currency_pair'),
         ]
 
 

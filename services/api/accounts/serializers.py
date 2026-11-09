@@ -1,11 +1,10 @@
-import re
-
 from rest_framework import serializers
 
 from .models import AccountType
+from config.india import INDIAN_MOBILE_PATTERN
 
 
-E164_PATTERN = re.compile(r"^\+[1-9][0-9]{1,14}$")
+E164_PATTERN = INDIAN_MOBILE_PATTERN
 MARKETPLACE_ACCOUNT_TYPES = (
     (AccountType.PERSONAL, "Personal"),
     (AccountType.BUSINESS, "Business"),
@@ -20,7 +19,7 @@ class AccountRegistrationSerializer(serializers.Serializer):
     def validate_mobile_e164(self, value):
         if not E164_PATTERN.fullmatch(value):
             raise serializers.ValidationError(
-                "Use a complete E.164 mobile number, including the country code."
+                "Use a valid Indian mobile number in +91XXXXXXXXXX format."
             )
         return value
 
@@ -31,7 +30,7 @@ class OTPRequestSerializer(serializers.Serializer):
     def validate_mobile_e164(self, value):
         if not E164_PATTERN.fullmatch(value):
             raise serializers.ValidationError(
-                "Use a complete E.164 mobile number, including the country code."
+                "Use a valid Indian mobile number in +91XXXXXXXXXX format."
             )
         return value
 

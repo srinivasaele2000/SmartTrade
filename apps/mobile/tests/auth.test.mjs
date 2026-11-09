@@ -10,18 +10,18 @@ test('registration accepts only marketplace account types and canonical mobile f
   const calls = [];
   const api = new ApiClient('http://example.test/api/v1', async (url, init) => { calls.push([url, JSON.parse(init.body)]); return json({ account: {} }, 201); });
   assert.equal(mobileValid('invalid'), false);
-  for (const type of ['PERSONAL', 'BUSINESS', 'COMPANY']) await register(api, '+12025550101', type);
+  for (const type of ['PERSONAL', 'BUSINESS', 'COMPANY']) await register(api, '+919800000005', type);
   assert.deepEqual(calls.map(call => call[1].account_type), ['PERSONAL', 'BUSINESS', 'COMPANY']);
   assert.ok(calls.every(call => call[0].endsWith('/auth/register')));
-  await assert.rejects(register(api, '+12025550101', 'STAFF'), /Choose/);
-  await assert.rejects(register(api, 'invalid', 'PERSONAL'), /E.164/);
+  await assert.rejects(register(api, '+919800000005', 'STAFF'), /Choose/);
+  await assert.rejects(register(api, 'invalid', 'PERSONAL'), /Indian mobile/);
   assert.equal(calls.length, 3);
 });
 test('OTP acknowledgement distinguishes no-SMS development from configured provider', async () => {
   const api = new ApiClient('http://example.test/api/v1', async () => json({ status: 'accepted', authentication_mode: 'development_otp' }, 202));
-  assert.match(await requestOtp(api, '+12025550101'), /no SMS.*unverified/);
+  assert.match(await requestOtp(api, '+919800000005'), /no SMS.*unverified/);
   api.transport = async () => json({ status: 'accepted' }, 202);
-  assert.match(await requestOtp(api, '+12025550101'), /provider/);
+  assert.match(await requestOtp(api, '+919800000005'), /provider/);
 });
 test('login sends a nonempty code only to the existing login endpoint', async () => {
   let calls = 0;
@@ -30,14 +30,14 @@ test('login sends a nonempty code only to the existing login endpoint', async ()
     assert.equal(JSON.parse(init.body).code, 'arbitrary');
     return json(issued);
   });
-  assert.deepEqual(await login(api, '+12025550101', 'arbitrary'), issued);
-  await assert.rejects(login(api, '+12025550101', '   '), /non-empty/);
+  assert.deepEqual(await login(api, '+919800000005', 'arbitrary'), issued);
+  await assert.rejects(login(api, '+919800000005', '   '), /non-empty/);
   assert.equal(calls, 1);
 });
 test('field errors, blocked accounts and provider failures are surfaced', async () => {
   for (const status of [400, 401, 403, 503]) {
     const api = new ApiClient('http://example.test/api/v1', async () => json({ message: 'Request refused', field_errors: { account_type: ['Not allowed'] } }, status));
-    await assert.rejects(login(api, '+12025550101', 'code'), error => error.status === status && /Request refused.*Not allowed/.test(error.message));
+    await assert.rejects(login(api, '+919800000005', 'code'), error => error.status === status && /Request refused.*Not allowed/.test(error.message));
   }
 });
 test('session validates actual active profile, never inferred permissions', async () => {

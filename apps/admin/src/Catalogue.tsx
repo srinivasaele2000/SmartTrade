@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import CatalogueTools from './CatalogueTools';
+import { inr } from './india';
 
 type Product = { id: number; name: string; code: string; company_name: string; brand_name: string; category_name: string; state: string; moderation_state: string; description: string; unit: string; specifications: Record<string, unknown>; catalogue_price: string | null; currency: string; variants: { id: number; sku: string; name: string; active: boolean; attributes: Record<string, unknown> }[] };
 type Page = { count: number; results: Product[] };
@@ -68,7 +69,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
     {loading ? <p role="status">Loading catalogue…</p> : !error && data.results.length === 0 ? <div className="state-panel">No products match this catalogue search.</div> : !error && data.results.map(product => <article key={product.id} className="detail-card">
       <h3>{product.name} · {product.code}</h3><p>{product.company_name} / {product.brand_name} / {product.category_name}</p>
       <p>Publication: {product.state} · Moderation: {product.moderation_state}</p>
-      <p>{product.catalogue_price === null ? 'Catalogue price not provided' : `${product.currency} ${product.catalogue_price}`} · Unit: {product.unit}</p>
+      <p>{product.catalogue_price === null ? 'Catalogue price not provided' : inr(product.catalogue_price)} · Unit: {product.unit}</p>
       <p className="request-reason">{product.description || 'No description provided.'}</p>
       <details><summary>Product specifications</summary><pre>{JSON.stringify(product.specifications,null,2)}</pre></details><ul>{product.variants.map(variant => <li key={variant.id}>{variant.sku}: {variant.name} ({variant.active ? 'active' : 'inactive'}) · {JSON.stringify(variant.attributes)}</li>)}</ul>
       <button className="button button-quiet" disabled={saving} onClick={() => { setSelected(product); setReason(''); }}>Review product</button>

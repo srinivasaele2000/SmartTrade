@@ -8,7 +8,7 @@ from .models import (Account, AccountType, StaffState, StaffRole, StaffPermissio
 @override_settings(DEBUG=True, SMARTTRADE_ENABLE_DEV_AUTH=True, ALLOWED_HOSTS=['localhost', '127.0.0.1', 'testserver'])
 class DevelopmentAuthenticationTests(TestCase):
     def setUp(self):
-        self.staff = Account.objects.create_user('+14155550900', AccountType.STAFF)
+        self.staff = Account.objects.create_user('+919800000001', AccountType.STAFF)
         self.settings_override = override_settings(SMARTTRADE_DEV_AUTH_STAFF_ID=str(self.staff.pk))
         self.settings_override.enable()
         self.addCleanup(self.settings_override.disable)
@@ -50,7 +50,7 @@ class DevelopmentAuthenticationTests(TestCase):
         self.assertEqual(self.client.post('/api/v1/auth/dev-login', {}).status_code, 400)
 
     def test_non_staff_missing_and_invalid_designation(self):
-        other = Account.objects.create_user('+14155550901', AccountType.PERSONAL)
+        other = Account.objects.create_user('+919800000002', AccountType.PERSONAL)
         for value in (str(other.pk), '', 'invalid', '9999999999999999999999999999'):
             with override_settings(SMARTTRADE_DEV_AUTH_STAFF_ID=value):
                 self.assertEqual(self.login().status_code, 403)
@@ -115,7 +115,7 @@ class DevelopmentAuthenticationTests(TestCase):
         self.staff.save()
         self.assertEqual(self.client.get('/api/v1/auth/me').status_code, 401)
 
-    @override_settings(SMARTTRADE_OTP_PROVIDER='')
+    @override_settings(SMARTTRADE_OTP_PROVIDER='', SMARTTRADE_ENABLE_DEV_OTP=False)
     def test_normal_otp_remains_unavailable(self):
         for path, data in (('otp/request', {'mobile_e164': self.staff.mobile_e164}), ('login', {'mobile_e164': self.staff.mobile_e164, 'code': 'not-a-real-code'})):
             self.assertEqual(self.client.post('/api/v1/auth/' + path, data, format='json').status_code, 503)

@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import { restoreCompanyActivity } from './company-actions';
+import { istDateTime } from './india';
 
 type ReviewRequest = {
   id: number; company_id: number; company_name: string; submitted_at: string;
@@ -65,7 +66,7 @@ export default function ReviewRequests({ baseUrl, token, canRestore = false }: {
     {loading ? <p role="status">Loading review requests…</p> : !error && items.length === 0 ? <div className="state-panel">No open company review requests.</div> : !error && items.map(item => <article className="detail-card" key={item.id}>
       <h3>{item.company_name}</h3>
       <p>Company {item.company_id} · {item.verification_state} · {item.activity_state}</p>
-      <p>Submitted {new Date(item.submitted_at).toLocaleString()}</p>
+      <p>Submitted {istDateTime(item.submitted_at)}</p>
       <p className="request-reason">{item.reason}</p>
       {selected === item.id ? <form onSubmit={resolve}>
         <label htmlFor={`resolution-${item.id}`}>Resolution reason</label>

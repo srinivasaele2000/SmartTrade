@@ -1,11 +1,12 @@
 import type { Listing } from './api';
 
-export type Resource<T> = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; data: T };
-export type ResourceAction<T> = { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; data: T };
-export function resourceReducer<T>(_state: Resource<T>, action: ResourceAction<T>): Resource<T> {
+export type Resource<T> = { status: 'loading'; data?: T } | { status: 'error'; message: string; data?: T } | { status: 'ready'; data: T };
+export type ResourceAction<T> = { type: 'loading'; retainData?: boolean } | { type: 'error'; message: string; retainData?: boolean } | { type: 'ready'; data: T };
+export function resourceReducer<T>(state: Resource<T>, action: ResourceAction<T>): Resource<T> {
   if (action.type === 'ready') return { status: 'ready', data: action.data };
-  if (action.type === 'error') return { status: 'error', message: action.message };
-  return { status: 'loading' };
+  const retained = action.retainData && state.data !== undefined ? { data: state.data } : {};
+  if (action.type === 'error') return { status: 'error', message: action.message, ...retained };
+  return { status: 'loading', ...retained };
 }
 export function variantListings(items: Listing[], variant: number | null) { return variant === null ? items : items.filter(item => item.variant === variant); }
 export function inventoryLabel(item: Listing): string {

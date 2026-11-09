@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ApiClient } from '../src/api.ts';
 import { blankBranch, blankInventory, validateBranch, validateInventory, canChooseProduct, business, ownedPage, saveBranch, saveBusiness, saveListing, withdrawListing, reactivateListing } from '../src/dealer.ts';
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
-const branch = { ...blankBranch(), branch_name: 'Branch', address: 'Street', pin_code: '12345', locality: 'Area', district: 'District', state: 'State', country: 'in' };
+const branch = { ...blankBranch(), branch_name: 'Branch', address: 'Street', pin_code: '560001', locality: 'Area', district: 'Bengaluru', state: 'Karnataka', country: 'IN' };
 const inventory = { ...blankInventory(), selling_price: '12.5000', currency: 'INR', stock_status: 'IN_STOCK', quantity: '2' };
 
 test('branch form validates required location and private contact fields without guessing country', () => {
@@ -24,9 +24,9 @@ test('branch create and edit send owner-write fields only and preserve deactivat
   assert.equal(JSON.parse(calls[1][1].body).active, false);
 });
 test('business form never submits verification or authorization fields', async () => {
-  const api = new ApiClient('http://example.test/api/v1', async (url, init) => { assert.deepEqual(JSON.parse(init.body), { legal_name: 'Dealer', registration_number: 'REG' }); return json({ id: 1 }); });
-  await saveBusiness(api, 'token', 'Dealer', 'REG');
-  await assert.rejects(saveBusiness(api, 'token', 'x'.repeat(201), ''), /Business name/);
+  const api = new ApiClient('http://example.test/api/v1', async (url, init) => { assert.deepEqual(JSON.parse(init.body), { legal_name: 'Dealer', registration_number: 'REG', gstin: '', pan: '' }); return json({ id: 1 }); });
+  await saveBusiness(api, 'token', 'Dealer', 'REG', '', '');
+  await assert.rejects(saveBusiness(api, 'token', 'x'.repeat(201), '', '', ''), /Business name/);
 });
 test('inventory enforces explicit currency, decimal precision and stock quantity agreement', () => {
   assert.deepEqual(validateInventory(inventory), []);

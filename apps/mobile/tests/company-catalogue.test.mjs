@@ -6,8 +6,9 @@ test('product payload includes only writable canonical fields and validates pric
  const form={...emptyProduct(),name:' Product ',code:'CODE',unit:'piece',specifications:'{"size":"large"}'};
  assert.equal(productPayload(form,8).brand_category,8);assert.equal(productPayload(form).name,'Product');assert.equal(productPayload(form).catalogue_price,null);
  assert.equal('brand_category' in productPayload(form),false);
- for(const change of [{name:''},{specifications:'[]'},{specifications:'invalid'},{catalogue_price:'1',currency:''},{catalogue_price:'-1',currency:'USD'},{catalogue_price:'1.12345',currency:'USD'},{catalogue_price:'1',currency:'usd'}])assert.throws(()=>productPayload({...form,...change}));
- assert.equal(productPayload({...form,catalogue_price:'12.5000',currency:'USD'}).catalogue_price,'12.5000');
+ for(const change of [{name:''},{specifications:'[]'},{specifications:'invalid'},{catalogue_price:'-1'},{catalogue_price:'1.12345'}])assert.throws(()=>productPayload({...form,...change}));
+ assert.equal(productPayload({...form,catalogue_price:'12.5000',currency:'INR'}).currency,'INR');
+ assert.equal(productPayload({...form,catalogue_price:'12.5000',currency:'USD'}).currency,'INR');
 });
 test('variant validation preserves per-product identity and explicit active state',()=>{
  const value=variantPayload({name:' Large ',sku:'SKU-1',attributes:'{"size":"large"}',active:false});assert.deepEqual(value,{name:'Large',sku:'SKU-1',attributes:{size:'large'},active:false});assert.equal('product' in value,false);

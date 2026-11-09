@@ -1,3 +1,4 @@
+import {buttonModule} from './button-adapter.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -5,6 +6,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as dealer from '../src/dealer.ts';
 import * as api from '../src/api.ts';
+import * as india from '../src/india.ts';
 
 // Reuse the monorepo's existing matching React/ReactDOM installations. Render
 // the actual TSX component with native host adapters and isolated API fixtures;
@@ -25,9 +27,10 @@ function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'rea
     native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, ...(name === 'TextInput' ? { value: props.value, readOnly: true } : {}) }, props.children);
   }
   native.StyleSheet = { create: value => value };
-  const imports = {
+  const imports = { './Button':buttonModule(React,native,jsx),
+    './Onboarding': {DealerContacts: () => null, DealerDeclarations: () => null, IdentityFields: () => null},
     react: { ...React, useState: value => React.useState(value === 'Dashboard' ? tab : value) },
-    'react/jsx-runtime': jsx, 'react-native': native, './dealer': dealer, './api': api,
+    'react/jsx-runtime': jsx, 'react-native': native, './dealer': dealer, './api': api, './india': india, './LocalFileVault': { default: props => React.createElement('div', null, props.title, props.description) },
     './session': { useSession: () => ({ account: { account_type: role, access_state: 'ACTIVE' }, token: 'isolated-test-token', clearSession() {} }) },
     './useResource': { useResource: () => ({ state: states[calls++ % 4], retry() {} }) },
   };
@@ -39,6 +42,13 @@ test('actual component gates non-business identities and displays real aggregate
   assert.match(render({ role: 'PERSONAL' }), /active BUSINESS account/);
   assert.match(render(), /Branches: 0/);
   assert.match(render(), /Currently discoverable listings: 0/);
+});
+
+test('dealer local documents remain available without profile API data',()=>{
+ const html=render({tab:'Documents',profile:{status:'error',message:'Offline'}});
+ assert.match(html,/Dealer documents on this device/);
+ assert.match(html,/Offline/);
+ assert.doesNotMatch(render({role:'PERSONAL',tab:'Documents',profile:{status:'error',message:'Offline'}}),/Dealer documents on this device/);
 });
 test('actual component has separate loading, failed and empty branch states', () => {
   assert.match(render({ profile: { status: 'loading' } }), /Loading dealer workspace/);
@@ -60,5 +70,5 @@ test('existing dealer authorization component displays revoked status and compan
 });
 
 test('inventory component displays canonical SKU, discovery status and eligible reactivation control',()=>{
- const data=structuredClone(base);data.workspace.can_manage_listings=true;data.workspace.authorizations=[{eligible:true,brand:2,company:3}];const row={id:9,product_name:'Fixture product',branch_name:'Central',brand_name:'Brand',company_name:'Company',brand_id:2,company_id:3,variant:7,variant_sku:'SKU-RED',selling_price:'12.50',currency:'USD',stock_status:'UNKNOWN',quantity:null,state:'WITHDRAWN',eligible:false};const html=render({tab:'Listings',profile:{status:'ready',data},inventoryRows:[row]});assert.match(html,/SKU-RED/);assert.match(html,/Not currently eligible/);assert.match(html,/Reactivate listing 9/);assert.match(html,/Search dealer listings/);
+ const data=structuredClone(base);data.workspace.can_manage_listings=true;data.workspace.authorizations=[{eligible:true,brand:2,company:3}];const row={id:9,product_name:'Fixture product',branch_name:'Central',brand_name:'Brand',company_name:'Company',brand_id:2,company_id:3,variant:7,variant_sku:'SKU-RED',selling_price:'12.50',currency:'INR',stock_status:'UNKNOWN',quantity:null,state:'WITHDRAWN',eligible:false};const html=render({tab:'Listings',profile:{status:'ready',data},inventoryRows:[row]});assert.match(html,/SKU-RED/);assert.match(html,/Not currently eligible/);assert.match(html,/Reactivate listing 9/);assert.match(html,/Search dealer listings/);
 });

@@ -1,5 +1,7 @@
 # SmartTrade
 
+SmartTrade Release 1 currently operates as an India-only marketplace. Accounts use canonical `+91` mobile numbers, branches use Indian PIN/state data, and all catalogue and dealer prices use INR. Backend timestamps are stored in UTC and clients display IST. See [India-only compliance baseline](docs/india-compliance-audit.md).
+
 The mobile buyer journey now includes API-backed public catalogue/categories, product detail/variants, and authentication-gated dealer comparison screens. See [mobile setup and validation](apps/mobile/README.md) for exact launch commands, emulator/USB networking, tested behavior and the current real-sign-in boundary.
 
 Dealer business profiles now support multiple branches, branch-specific canonical-product listings, selling prices/stock, company-issued brand authorization, authenticated discovery and audited staff review. See the [dealer API contract](services/api/dealers/README.md). Company catalogue prices remain separate from dealer selling prices, and dealer discovery requires login.
@@ -29,7 +31,7 @@ SmartTrade is a marketplace for official company product catalogues and local de
 - Multiple dealer locations and authenticated discovery by PIN code, locality, and district; optional GPS nearby fallback must be labelled.
 - Separate staff/admin identities with least-privilege roles, private file access, and audit history.
 - Company activity suspension hides its catalogue and disables company-scoped activity while preserving all records. It does not block associated accounts; otherwise permitted sign-in/account-level functions, suspension status, and restricted review requests remain available unless an account is independently blocked.
-- Registration fee collection is disabled. Quotations, invoices, service-provider profiles, jobs, and employment features remain deferred.
+- Registration fee collection is disabled. Service-provider profiles, jobs, employment features, payments, and external integrations remain deferred. Enquiries, quotations, orders, and invoices are implemented as local Release 1 development workflows.
 
 Business permission confirmation is required to submit trade-worker contacts, and each contact must separately opt in before a later public service-provider profile is created. Release 1 does not create those profiles automatically. File limits are configurable; retention periods, consent wording, search radius, and other open operational values remain unspecified in [decisions](docs/decisions.md).
 
@@ -217,3 +219,10 @@ Company mobile grant/revoke, privacy-limited dealer search, existing dealer auth
 ## Dealer listings and stock management — Phase 4
 
 The existing dealer listing lifecycle is now verified on Android, with explicit reactivation, searchable inspection, listing audit history and variant-aware buyer pagination. See [Phase 4 validation](docs/dealer-listings-phase4-validation.md) for actual API/UI coverage, changed files and current-model limitations. No Phase 5 development is included.
+
+
+## Buyer discovery experience — Phase 5
+
+Public category, brand and product browsing supports combined catalogue filters and code/SKU/related-text search. Authenticated product-to-branch discovery retains PIN-first fallback, selected-SKU filtering, branch-specific inventory and live backend eligibility. See [Phase 5 validation](docs/buyer-discovery-phase5-validation.md) for actual Pixel_10_Pro evidence, API contracts, regression results and privacy limits. Phase 6 adds enquiries and revisioned quotations. Phase 7 converts an accepted quotation into one immutable-snapshot order and supports explicit India-only invoice issuance; payments remain out of scope.
+
+Phase 8 adds app-private, device-local file persistence for company/dealer working documents, product-image working files, and downloaded invoices. These files are not uploaded or visible to staff/other devices. See [Phase 8 local-storage readiness](docs/phase8-local-storage-readiness.md) for limitations and future server-migration requirements.

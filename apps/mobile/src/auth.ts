@@ -1,17 +1,24 @@
 import { ApiClient, ApiError } from './api.ts';
+import { INDIAN_MOBILE } from './india.ts';
 
 export type AccountType = 'PERSONAL' | 'BUSINESS' | 'COMPANY';
-export type Account = { id: number; account_type: AccountType | 'STAFF'; access_state: string; mobile_verified: boolean };
+export type Account = {
+  id: number;
+  account_type: AccountType | 'STAFF';
+  access_state: string;
+  mobile_verified: boolean;
+  staff_profile?: {state: string; roles: string[]} | null;
+};
 export type Tokens = { access: string; refresh: string; expires_in: number; authentication_mode?: string };
-export const mobileValid = (value: string) => /^\+[1-9][0-9]{1,14}$/.test(value.trim());
+export const mobileValid = (value: string) => INDIAN_MOBILE.test(value.trim());
 
 export async function register(api: ApiClient, mobile: string, type: AccountType) {
-  if (!mobileValid(mobile)) throw new ApiError('Enter an E.164 number with + and country code.');
+  if (!mobileValid(mobile)) throw new ApiError('Enter an Indian mobile number in +91XXXXXXXXXX format.');
   if (!['PERSONAL', 'BUSINESS', 'COMPANY'].includes(type)) throw new ApiError('Choose Personal, Business or Company.');
   return api.post('/auth/register', { mobile_e164: mobile.trim(), account_type: type });
 }
 export async function requestOtp(api: ApiClient, mobile: string) {
-  if (!mobileValid(mobile)) throw new ApiError('Enter an E.164 number with + and country code.');
+  if (!mobileValid(mobile)) throw new ApiError('Enter an Indian mobile number in +91XXXXXXXXXX format.');
   const value = await api.post('/auth/otp/request', { mobile_e164: mobile.trim() }) as { status?: string; authentication_mode?: string };
   if (value.status !== 'accepted') throw new ApiError('OTP request was not acknowledged.');
   return value.authentication_mode === 'development_otp'
