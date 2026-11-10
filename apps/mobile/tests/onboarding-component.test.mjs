@@ -24,10 +24,11 @@ function render(name, states, role = 'BUSINESS', editable = true) {
     }, props.children),
   ]));
   native.StyleSheet = {create: value => value};
+  native.Animated = {View: native.View, Value: class {interpolate() {return '0%';}}};
   let index = 0;
   const imports = {
     react: React, 'react/jsx-runtime': jsx, 'react-native': native,
-    './Button': buttonModule(React, native, jsx), './api': api, './india': india,
+    './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button': buttonModule(React, native, jsx), './api': api, './india': india,
     './session': {useSession: () => ({account: {account_type: role}, token: 'fixture-token'})},
     './useResource': {useResource: () => ({state: states[index++]})},
   };
@@ -59,9 +60,24 @@ test('dealer declarations distinguish empty brands and suggestions from authoriz
 
 test('contact progress is server-driven and saving is disabled before consent', () => {
   const html = render('DealerContacts', [ready({...emptyPage, minimum_required: 10})]);
-  assert.match(html, /0 of 10 minimum contacts/);
+  assert.match(html, /0 of 10 added/);
+  assert.match(html, /Build your electrician &amp; contractor network/);
+  assert.match(html, /I have permission from this person to share their business contact details/);
   const saveButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].find(([button]) => button.includes('Save contact'));
   assert.ok(saveButton);
   assert.match(saveButton[0], /<button\b[^>]*disabled=""/);
   assert.match(render('DealerContacts', [{status: 'error', message: 'Network unavailable'}]), /Network unavailable/);
+});
+
+test('the completed contacts milestone replaces progress without implying automatic verification', () => {
+  const below = render('DealerContacts', [ready({...emptyPage, count: 9, minimum_required: 10})]);
+  assert.match(below, /9 of 10 added/);
+  assert.doesNotMatch(below, /Network Milestone Completed/);
+  for (const count of [10, 11]) {
+    const html = render('DealerContacts', [ready({...emptyPage, count, minimum_required: 10})]);
+    assert.match(html, /Network Milestone Completed/);
+    assert.match(html, new RegExp(count + ' of 10 contacts added'));
+    assert.match(html, /Approval still requires staff review/);
+    assert.doesNotMatch(html, /Trade-worker contacts/);
+  }
 });

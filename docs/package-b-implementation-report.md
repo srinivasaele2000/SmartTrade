@@ -81,3 +81,12 @@ Applied the two reviewed additive Package B migrations to `smarttrade_dev`. Buil
 The subsequent 07-11-2026 diagnostic confirmed that the form was already visible and restored USB forwarding after reconnection. The installed artifact hash still matched. Two bounded attempts to replace the mobile field did not produce the controlled account value, so the OTP request was not submitted. Authenticated phone acceptance remains blocked at text entry. See the sign-in diagnostic table in `package-b-physical-device-validation.md`.
 
 After manual sign-in, physical My account navigation succeeded. The active session was COMPANY, so the Personal profile option was correctly absent. The existing session was preserved. Physical Personal and Dealer verification still awaits the controlled role sessions. The physical validation report links the account screenshot and records the HTTP authentication results.
+
+## Admin review verification
+
+Both Admin review flows passed fixture-based verification. The Admin component rendered the submitting business ID, suggestion name and context, moderation actions, duplicate signals, and review history. The API accepted approval, rejection, and mapping with a reason, preserved canonical brand ownership, and created zero dealer authorization grants. These review routes require `REVIEW_BUSINESS`. Private contact access separately requires `REVIEW_TRADE_CONTACTS`.
+
+Duplicate alerts required exact normalized GSTIN or registration references, or a match across business name, registered address, and PIN. A one-character GSTIN difference, a different registration reference, and address-only or wrong-PIN matches produced no alerts. Distinct and Follow-up decisions retained separate audit events with actor, reason, and timestamp. PostgreSQL rejected attempts to update or delete either event.
+
+All 30 Admin tests and all 9 PostgreSQL onboarding tests passed. Moderation was exercised through API tests and the Admin interface through component rendering. No live browser decisions were submitted.
+

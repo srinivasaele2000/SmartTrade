@@ -111,3 +111,24 @@ The in-place install on physical phone `5e106900` succeeded and the installed AP
 [Sanitized API evidence](evidence/dealer-draft-retention/refresh-requests.log)
 
 ADB interaction retries were needed to confirm the brand selection and to dismiss the keyboard that Android reopened on return. The values were inspected on the same draft before and after the recorded refresh. Leaving Declarations discarded the draft and left the controlled Dealer on Contacts. Read-only comparisons confirmed the protected profiles, grants, branches, listings, declarations, suggestions, contacts and taxonomy were unchanged. No Git commands were run.
+## Trade-worker contacts follow-up
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Empty state and progress | Passed on phone | The controlled Dealer saw “No contacts saved” and “0 of 10 minimum contacts for verification submission.” |
+| Explicit consent | Passed on phone | Save contact was disabled before confirmation, enabled after confirmation, and disabled again when the draft was edited. |
+| Indian mobile validation | Passed on phone | The synthetic input `123` triggered “Use an Indian mobile number in +91 format.” The app rejected it before making a save request. [Phone screenshot](evidence/package-b/dealer-trade-contacts.png) |
+| Private endpoint | Passed | An anonymous request to `/api/v1/businesses/me/trade-contacts` returned HTTP 401. The isolated backend test also verified owner isolation and separate staff permission. |
+| Successful submission, UTC timestamp, and updated progress | Blocked on phone. Passed in disposable PostgreSQL. | The API test returned HTTP 201, confirmed a UTC offset of zero, and verified the count advanced to 1 of 10. A valid submission on the phone would write to `smarttrade_dev`, which this task prohibited. |
+
+Phone `5e106900` was left signed in as **Phase 3 Controlled Dealer** on **Dealer workspace → Contacts**. The form was empty, consent was unchecked, Save contact was disabled, and progress remained at 0 of 10.
+
+## Admin review verification
+
+| Admin review workflow | Result | Evidence |
+| --- | --- | --- |
+| Other-brand suggestions | Passed in Admin component and API tests | The UI showed the submitting business ID, suggestion name and context. Approval, mapping and rejection succeeded with a reason. Blank reasons were rejected. Canonical ownership and authorization grant count stayed the same. |
+| Duplicate business review | Passed in Admin component and PostgreSQL API tests | Exact normalized matches triggered alerts. Near or partial matches did not. Distinct and Follow-up produced separate history entries. PostgreSQL rejected audit updates and deletions. |
+
+Admin actions used disposable fixtures. Live browser submissions and physical phone interaction were outside this verification. The Admin suite passed 30 tests and the PostgreSQL onboarding suite passed 9.
+

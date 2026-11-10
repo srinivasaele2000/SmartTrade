@@ -22,13 +22,13 @@ function render({ role = 'COMPANY', tab = 'Dashboard', state = {status:'ready',d
  const native = {};
  for (const name of ['Text', 'View', 'ScrollView', 'Pressable', 'TextInput', 'ActivityIndicator']) native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, ...(name === 'TextInput' ? { value: props.value, readOnly: !props.editable } : {}) }, props.children);
  native.StyleSheet = { create: value => value };
- const imports = { './Button':buttonModule(React,native,jsx), './india': india, './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, './LocalFileVault': {default:props=>React.createElement('div',null,props.title,props.description)}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
+ const imports = { './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button':buttonModule(React,native,jsx), './india': india, './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, './LocalFileVault': {default:props=>React.createElement('div',null,props.title,props.description)}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
  const module={exports:{}};
  new Function('require','module','exports',compiled)(name=>{if(!(name in imports))throw new Error(name);return imports[name];},module,module.exports);
  return renderToStaticMarkup(React.createElement(module.exports.default,{api:new api.ApiClient('http://example.test/api/v1')}));
 }
 test('company component enforces role and has loading, failure and registration states',()=>{
- assert.match(render({role:'PERSONAL'}),/active COMPANY account/);
+ assert.match(render({role:'PERSONAL'}),/active company account/);
  assert.match(render({state:{status:'loading'}}),/Loading company status/);
  assert.match(render({state:{status:'error',message:'Connection failed'}}),/Retry company request/);
  assert.match(render({state:{status:'ready',data:null}}),/Complete company registration/);
@@ -38,10 +38,10 @@ test('email simulation is visibly labelled and does not claim ownership verifica
 });
 test('documents and application respect server policy and submission capabilities',()=>{
  assert.match(render({tab:'Documents'}),/Company documents on this device/);
- assert.match(render({tab:'Documents'}),/cannot see files listed only in the local section/);
+ assert.match(render({tab:'Documents'}),/Files saved only on your phone are private/);
  assert.match(render({tab:'Application'}),/disabled=""[^>]*>.*?Submit verification application/);
  const restricted=structuredClone(base);restricted.company.activity_state='SUSPENDED';restricted.verification.can_request_review=true;
- assert.match(render({tab:'Application',state:{status:'ready',data:restricted}}),/Restricted review request/);
+ assert.match(render({tab:'Application',state:{status:'ready',data:restricted}}),/Ask us to review this decision/);
  assert.match(render({state:{status:'ready',data:restricted}}),/Your account is not automatically blocked/);
 });
 

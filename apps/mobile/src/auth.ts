@@ -1,9 +1,10 @@
 import { ApiClient, ApiError } from './api.ts';
-import { INDIAN_MOBILE } from './india.ts';
+import { INDIAN_MOBILE, MOBILE_HELP } from './india.ts';
 
 export type AccountType = 'PERSONAL' | 'BUSINESS' | 'COMPANY';
 export type Account = {
   id: number;
+  mobile_e164?: string;
   account_type: AccountType | 'STAFF';
   access_state: string;
   mobile_verified: boolean;
@@ -13,17 +14,17 @@ export type Tokens = { access: string; refresh: string; expires_in: number; auth
 export const mobileValid = (value: string) => INDIAN_MOBILE.test(value.trim());
 
 export async function register(api: ApiClient, mobile: string, type: AccountType) {
-  if (!mobileValid(mobile)) throw new ApiError('Enter an Indian mobile number in +91XXXXXXXXXX format.');
+  if (!mobileValid(mobile)) throw new ApiError(MOBILE_HELP);
   if (!['PERSONAL', 'BUSINESS', 'COMPANY'].includes(type)) throw new ApiError('Choose Personal, Business or Company.');
   return api.post('/auth/register', { mobile_e164: mobile.trim(), account_type: type });
 }
 export async function requestOtp(api: ApiClient, mobile: string) {
-  if (!mobileValid(mobile)) throw new ApiError('Enter an Indian mobile number in +91XXXXXXXXXX format.');
+  if (!mobileValid(mobile)) throw new ApiError(MOBILE_HELP);
   const value = await api.post('/auth/otp/request', { mobile_e164: mobile.trim() }) as { status?: string; authentication_mode?: string };
-  if (value.status !== 'accepted') throw new ApiError('OTP request was not acknowledged.');
+  if (value.status !== 'accepted') throw new ApiError('We could not send a code. Please try again.');
   return value.authentication_mode === 'development_otp'
-    ? 'LOCAL DEVELOPMENT: no SMS sent. Enter any non-empty code. Phone ownership remains unverified.'
-    : 'If the account is eligible, the provider has accepted the request.';
+    ? 'Test sign-in: no SMS was sent. Enter any code to continue. Your number stays unverified.'
+    : 'If this number can sign in, you’ll receive a code by SMS.';
 }
 export async function login(api: ApiClient, mobile: string, code: string): Promise<Tokens> {
   if (!mobileValid(mobile) || !code.trim()) throw new ApiError('Enter a valid mobile number and a non-empty code.');

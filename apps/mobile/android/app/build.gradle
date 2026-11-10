@@ -2,6 +2,23 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Expo inlines these public values into the bundle. Rebuild when the demo
+// personas or API URL change, even if the JavaScript source is unchanged.
+tasks.configureEach { task ->
+    if (task.name.startsWith("createBundle") && task.name.endsWith("JsAndAssets")) {
+        [
+            "EXPO_PUBLIC_API_URL",
+            "EXPO_PUBLIC_ENABLE_DEMO_ROLES",
+            "EXPO_PUBLIC_DEMO_BUYER_MOBILE",
+            "EXPO_PUBLIC_DEMO_DEALER_MOBILE",
+            "EXPO_PUBLIC_DEMO_COMPANY_MOBILE",
+            "EXPO_PUBLIC_DEMO_STAFF_MOBILE",
+        ].each { key ->
+            task.inputs.property(key, providers.environmentVariable(key).orElse(""))
+        }
+    }
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**

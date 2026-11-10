@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { INDIAN_MOBILE, INDIAN_PIN, indianNumber, inr, istDateTime } from '../src/india.ts';
+import { displayIndianMobile, indianMobileDigits, indianPinDigits, INDIAN_MOBILE, INDIAN_PIN, indianNumber, inr, istDateTime } from '../src/india.ts';
+
+test('Indian input formatting keeps a single country prefix and accepts a six-digit PIN', () => {
+  const digits = indianMobileDigits('+91 98765 43210');
+  assert.equal(displayIndianMobile(digits), '98765 43210');
+  assert.equal(INDIAN_MOBILE.test('+91' + digits), true);
+  assert.equal(INDIAN_MOBILE.test('+91' + indianMobileDigits('98765')), false);
+  assert.equal(indianMobileDigits('+7 98765 43210'), '');
+  assert.equal(indianPinDigits('560 001'), '560001');
+  assert.equal(INDIAN_PIN.test(indianPinDigits('560')), false);
+});
 
 test('India identifiers and display formatting are deterministic', () => {
   assert.equal(INDIAN_MOBILE.test('+919876543210'), true);

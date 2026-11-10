@@ -7,6 +7,8 @@ import ts from 'typescript';
 import * as apiModule from '../src/api.ts';
 import * as resourceModule from '../src/resource.ts';
 import * as indiaModule from '../src/india.ts';
+import * as browseModule from '../src/catalogue-browse.ts';
+import * as demoRoles from '../src/demo-roles.ts';
 
 const requireAdmin = createRequire(new URL('../../admin/package.json', import.meta.url));
 const React = requireAdmin('react');
@@ -16,6 +18,8 @@ const source = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
 const identitySource = readFileSync(new URL('../src/RoleIdentity.tsx', import.meta.url), 'utf8');
 const identityCompiled = ts.transpileModule(identitySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
+const browseCardsSource = readFileSync(new URL('../src/CatalogueBrowseCards.tsx', import.meta.url), 'utf8');
+const browseCardsCompiled = ts.transpileModule(browseCardsSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 
 const product = { id: 10, name: 'Impact driver', code: 'ID-10', brand_name: 'BuildCo', company_name: 'Supplier', category_name: 'Tools', description: 'Cordless driver', specifications: { voltage: '18V' }, unit: 'piece', catalogue_price: '50.0000', currency: 'INR', variants: [{ id: 7, product: 10, sku: 'ID-RED', name: 'Red kit', attributes: { color: 'red' }, active: true }] };
 const page = results => ({ count: results.length, next: null, previous: null, results });
@@ -39,8 +43,18 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
   new Function('require', 'module', 'exports', identityCompiled)(name => ({
     'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': icons,
   })[name], identity, identity.exports);
-  const imports = { './src/Button':buttonModule(React,native,jsx),
+  const button = buttonModule(React, native, jsx);
+  const catalogueMedia = {CatalogueImage: () => null, CataloguePdf: () => null};
+  const cards = {exports: {}};
+  new Function('require', 'module', 'exports', browseCardsCompiled)(name => ({
+    'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': new Proxy({}, {get: () => () => null}),
+    './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule,
+  })[name], cards, cards.exports);
+  const imports = { './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
     './src/RoleIdentity': identity.exports,
+    './src/CatalogueMedia': catalogueMedia,
+    './src/CatalogueBrowseCards': cards.exports,
+    './src/catalogue-browse': browseModule,
     './src/Onboarding': {PersonalProfile: () => null},
     react: {...React, useState: value => React.useState(value?.name === 'catalogue' ? {name: screen} : value)},
     'react/jsx-runtime': jsx,
@@ -55,6 +69,9 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/DealerWorkspace': { default: () => null },
     './src/EnquiryWorkspace': { default: () => null },
     './src/OrderWorkspace': { default: () => null },
+    './src/OfflineDocumentsScreen': { default: () => null },
+    './src/DemoRoleSwitcher': { default: () => null },
+    './src/demo-roles': demoRoles,
   };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', compiled)(name => { if (!(name in imports)) throw new Error(`Unexpected dependency ${name}`); return imports[name]; }, module, module.exports);
@@ -69,7 +86,7 @@ test('authenticated header and account dashboard identify each role and signed-o
     ['PERSONAL', 'BUYER', 'ShoppingBag', '#174888'],
     ['BUSINESS', 'DEALER', 'Store', '#15543B'],
     ['COMPANY', 'COMPANY', 'Building2', '#552780'],
-    ['STAFF', 'PLATFORM ADMIN', 'ShieldCheck', '#843D0B'],
+    ['STAFF', 'PLATFORM ADMIN', 'ShieldCheck', '#8A241B'],
   ]) {
     const account = {...base, account_type: code, staff_profile: code === 'STAFF' ? {state: 'ACTIVE', roles: ['PLATFORM_ADMIN']} : null};
     const html = render(account, 'account', 'light');
@@ -82,11 +99,12 @@ test('authenticated header and account dashboard identify each role and signed-o
   assert.match(render({...base, account_type: 'STAFF'}, 'account', 'light'), /Account role: STAFF/);
   assert.match(render({...base, account_type: 'COMPANY'}, 'catalogue', 'dark'), /data-palette="#E8D3FF"/);
   assert.doesNotMatch(render(null, 'catalogue', 'light'), /Account role:/);
+  assert.match(render({...base, account_type: 'PERSONAL'}, 'account', 'light'), /Offline Documents/);
 });
 
 test('buyer catalogue renders real category and brand selectors plus product metadata', () => {
   const components = moduleWith([
-    ready(page([product])),
+    ready(page([{...product, catalogue_pdf_url: '/media/catalogue/test'}])),
     ready(page([{ id: 2, name: 'Tools', active: true }])),
     ready(page([{ id: 4, name: 'BuildCo', company_name: 'Supplier', categories: [{ id: 2, name: 'Tools' }] }])),
   ]);
@@ -95,6 +113,13 @@ test('buyer catalogue renders real category and brand selectors plus product met
   assert.match(html, /BuildCo · Supplier/);
   assert.match(html, /Impact driver/);
   assert.match(html, /ID-10/);
+  assert.match(html, /Shop by category/);
+  assert.match(html, /With Catalogue/);
+  assert.match(html, /Authorized Only/);
+  assert.match(html, /PDF available/);
+  assert.match(html, /View details for Impact driver/);
+  assert.match(html, /GST not specified/);
+  assert.doesNotMatch(html, /In stock at a dealer|Authorized dealer<|incl\. GST/);
 });
 
 test('product detail renders specifications and variant SKU selection', () => {

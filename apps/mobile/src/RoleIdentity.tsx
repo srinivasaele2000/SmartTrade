@@ -6,17 +6,21 @@ const identities = {
   PERSONAL: {label: 'BUYER', Icon: ShoppingBag, light: ['#E7F0FF', '#174888'], dark: ['#162E52', '#C4DAFF']},
   BUSINESS: {label: 'DEALER', Icon: Store, light: ['#DBF1E5', '#15543B'], dark: ['#17382B', '#B2E7CB']},
   COMPANY: {label: 'COMPANY', Icon: Building2, light: ['#EFE6FF', '#552780'], dark: ['#36234D', '#E8D3FF']},
-  STAFF: {label: 'STAFF', Icon: ShieldCheck, light: ['#FFEBD5', '#843D0B'], dark: ['#4B2B17', '#FFD3A7']},
+  STAFF: {label: 'STAFF', Icon: ShieldCheck, light: ['#FCE9E7', '#8A241B'], dark: ['#481C1B', '#FFD1CC']},
 } as const;
 
 export function RoleIdentity({account, heading = false}: {account: Account | null; heading?: boolean}) {
-  const dark = useColorScheme() === 'dark';
   if (!account) return null;
-  const identity = identities[account.account_type];
-  if (!identity) return null;
   const admin = account.account_type === 'STAFF' && account.staff_profile?.state === 'ACTIVE' &&
     Array.isArray(account.staff_profile.roles) &&
     account.staff_profile.roles.includes('PLATFORM_ADMIN');
+  return <RoleBadge role={account.account_type} admin={admin} heading={heading} />;
+}
+
+export function RoleBadge({role, heading = false, admin = false}: {role: Account['account_type']; heading?: boolean; admin?: boolean}) {
+  const dark = useColorScheme() === 'dark';
+  const identity = identities[role];
+  if (!identity) return null;
   const label = admin ? 'PLATFORM ADMIN' : identity.label;
   const [backgroundColor, color] = dark ? identity.dark : identity.light;
   const Icon = identity.Icon;
@@ -30,8 +34,8 @@ export function RoleIdentity({account, heading = false}: {account: Account | nul
 }
 
 const styles = StyleSheet.create({
-  badge: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', gap: 8, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7},
+  badge: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', gap: 8, borderRadius: 24, paddingHorizontal: 11, paddingVertical: 7},
   heading: {paddingHorizontal: 14, paddingVertical: 10},
-  label: {fontSize: 13, fontWeight: '800', flexShrink: 1},
+  label: {fontSize: 13, fontWeight: '800', letterSpacing: 0.35, flexShrink: 1},
   headingLabel: {fontSize: 23},
 });

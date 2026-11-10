@@ -17,8 +17,8 @@ function render(canReviewContacts) {
   const fixture = {
     profile: {legal_name: 'Fixture dealer', registered_address: 'Registered address fixture'},
     declarations: {categories: ['Electrical'], brands: []},
-    suggestions: [{id: 1, name: 'Review fixture', status: 'PENDING'}],
-    duplicates: [], reviews: [],
+    suggestions: [{id: 1, name: 'Review fixture', context: 'Dealer submitted context', status: 'PENDING'}],
+    duplicates: [{business: 13, signals: ['GSTIN'], fingerprint: 'fixture', decision: null}], reviews: [],
   };
   let stateIndex = 0;
   const imports = {
@@ -36,4 +36,15 @@ test('staff review renders private contact access only with the dedicated permis
   assert.match(without, /Map to existing brand/);
   assert.doesNotMatch(without, /Load private contacts/);
   assert.match(render(true), /Load private contacts/);
+});
+
+test('onboarding review identifies the submitting business and exposes both review flows', () => {
+  const html = render(false);
+  assert.match(html, /Onboarding review · business 9/);
+  assert.match(html, /Review fixture/);
+  assert.match(html, /Dealer submitted context/);
+  for (const label of ['Approve for follow-up', 'Reject', 'Map to existing brand', 'Business 13 · GSTIN',
+    'Record distinct businesses', 'Flag for follow-up', 'Recent review history']) {
+    assert.ok(html.includes(label), label);
+  }
 });

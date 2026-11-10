@@ -8,6 +8,7 @@
 secrets/
 local-secrets/
 private_uploads/
+/services/api/media/
 
 # Private keys and certificates
 *.pem

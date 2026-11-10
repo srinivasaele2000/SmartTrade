@@ -1,5 +1,20 @@
 export const INDIAN_MOBILE = /^\+91[6-9][0-9]{9}$/;
 export const INDIAN_PIN = /^[1-9][0-9]{5}$/;
+export const MOBILE_HELP = 'Enter a valid 10-digit mobile number';
+export const PIN_HELP = 'Enter 6-digit postal PIN code';
+
+export function indianMobileDigits(value: string): string {
+  if (value.trim().startsWith('+') && !value.trim().startsWith('+91')) return '';
+  const digits = value.replace(/\D/g, '');
+  return (digits.startsWith('91') && (value.trim().startsWith('+91') || digits.length === 12)
+    ? digits.slice(2) : digits).slice(0, 10);
+}
+
+export function displayIndianMobile(digits: string): string {
+  return [digits.slice(0, 5), digits.slice(5)].filter(Boolean).join(' ');
+}
+
+export const indianPinDigits = (value: string) => value.replace(/\D/g, '').slice(0, 6);
 export const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 export const PAN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 export const INDIAN_STATES = [

@@ -1,6 +1,8 @@
 from django.urls import include, path
+from catalogue.media import public_media
 
 urlpatterns = [
+    path("media/catalogue/<uuid:key>", public_media, name="catalogue-media"),
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/", include("companies.urls")),
     path("api/v1/", include("catalogue.urls")),

@@ -1,9 +1,10 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import CatalogueTools from './CatalogueTools';
+import {ProductMediaCard, type Attachment} from './ProductMedia';
 import { inr } from './india';
 
-type Product = { id: number; name: string; code: string; company_name: string; brand_name: string; category_name: string; state: string; moderation_state: string; description: string; unit: string; specifications: Record<string, unknown>; catalogue_price: string | null; currency: string; variants: { id: number; sku: string; name: string; active: boolean; attributes: Record<string, unknown> }[] };
+type Product = { image_attachment?: Attachment | null; pdf_attachment?: Attachment | null; id: number; name: string; code: string; company_name: string; brand_name: string; category_name: string; state: string; moderation_state: string; description: string; unit: string; specifications: Record<string, unknown>; catalogue_price: string | null; currency: string; variants: { id: number; sku: string; name: string; active: boolean; attributes: Record<string, unknown> }[] };
 type Page = { count: number; results: Product[] };
 
 export default function Catalogue({ token, baseUrl, permissions = [] }: { token: string; baseUrl: string; permissions?: string[] }) {
@@ -81,6 +82,21 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
       <label htmlFor="moderation-reason">Reason (required)</label><textarea id="moderation-reason" rows={3} required maxLength={4000} value={reason} disabled={saving} onChange={event => setReason(event.target.value)} />
       <div className="decision-buttons"><button className="button button-primary" disabled={saving || !reason.trim()}>Record moderation</button><button className="button button-quiet" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
     </form>}
+    {selected && permissions.includes('MODERATE_PRODUCTS') && (
+      <section aria-label="Official product media" key={selected.id}>
+        <h3>Official media for {selected.name}</h3>
+        {(['image', 'catalogue-pdf'] as const).map(kind => {
+          const field = kind === 'image' ? 'image_attachment' : 'pdf_attachment';
+          const update = (product: Product, attachment: Attachment | null) =>
+            product.id === selected.id ? {...product, [field]: attachment} : product;
+          return <ProductMediaCard key={kind} kind={kind} baseUrl={baseUrl} token={token}
+            productId={selected.id} attachment={selected[field] ?? null} onChange={attachment => {
+              setSelected(previous => previous ? update(previous, attachment) : previous);
+              setData(previous => ({...previous, results: previous.results.map(product => update(product, attachment))}));
+            }} />;
+        })}
+      </section>
+    )}
     <form className="detail-card" onSubmit={createCategory}><h3>Create catalogue category</h3><p>Requires MANAGE_TAXONOMY permission.</p><label htmlFor="new-category">Category name</label><input id="new-category" required maxLength={120} disabled={saving} value={category} onChange={event => setCategory(event.target.value)} /><button className="button button-primary" disabled={saving || !category.trim()}>Create category</button>{categoryMessage && <p className={`action-message ${categoryMessage.kind}`} role={categoryMessage.kind === 'error' ? 'alert' : 'status'}>{categoryMessage.text}</p>}</form>
     <CatalogueTools token={token} baseUrl={baseUrl} permissions={permissions} />
   </section>;

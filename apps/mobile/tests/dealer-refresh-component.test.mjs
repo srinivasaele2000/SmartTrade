@@ -58,8 +58,10 @@ function workspace() {
   const native = {StyleSheet: {create: styles => styles}};
   for (const name of ['View','Text','ScrollView','ActivityIndicator','TextInput']) native[name] = name;
   const imports = {
+    'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
+    './DealerActivity': {DealerActivity: () => null},
     react: React, 'react/jsx-runtime': {jsx, jsxs: jsx, Fragment: 'fragment'}, 'react-native': native,
-    './Button': {Button: props => jsx('button', props)},
+    './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button': {Button: props => jsx('button', props)},
     './api': api, './india': india, './dealer': dealer, './resource': resource,
     './session': {useSession: () => ({account, token, revalidateSession})},
     './LocalFileVault': {default: () => null},
@@ -157,6 +159,22 @@ test('Dealer workspace preserves category, brand and suggestion drafts through t
   await h.settle();
   expectDraft();
   assert.equal(h.button('Save declarations').disabled, false);
+});
+
+test('location segments switch between registered details and branch management without discarding the draft', async () => {
+  const h = workspace();
+  await h.settle();
+  h.button('Profile').onPress();
+  await h.settle();
+  assert.equal(h.button('Registered Office').selected, true);
+  h.input('Registered address').onChangeText('Unsaved address');
+  h.button('Branch Locations').onPress();
+  await h.settle();
+  assert.equal(h.button('Branch Locations').selected, true);
+  assert.ok(h.button('Create branch'));
+  h.button('Registered Office').onPress();
+  await h.settle();
+  assert.equal(h.input('Registered address').value, 'Unsaved address');
 });
 
 test('Dealer profile refetch preserves edited identity fields and updates a clean field group', async () => {

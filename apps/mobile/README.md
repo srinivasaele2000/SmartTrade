@@ -28,6 +28,8 @@ Copy-Item .env.example .env.local
 
 Set `EXPO_PUBLIC_API_URL` in the ignored `.env.local` to an API base reachable **from the device**, including `/api/v1`. The app has no localhost fallback and shows a configuration error when unset. These variables are public build configuration, never a place for tokens/passwords. Restart Expo after changing configuration.
 
+For local UI demos, set `EXPO_PUBLIC_ENABLE_DEMO_ROLES=true` and the four controlled persona numbers shown in `.env.example`. The USB APK build reads the same names from `local-secrets/android/usb-build.env`. Use a loopback API URL and the existing USB reverse route. The action appears under My Account only when the local API advertises an enabled development sign-in method. Staff uses the server-designated identity and its existing permissions. Staff can preview the mobile identity badge, while administration stays in the web console. Leave the demo flag off for distributable builds.
+
 
 
 For an Android emulator, use `http://10.0.2.2:8000/api/v1`. `10.0.2.2` routes to the Windows host's loopback; Django can remain on `127.0.0.1:8000`.

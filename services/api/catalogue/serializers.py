@@ -1,5 +1,6 @@
 import re
 from rest_framework import serializers
+from .media import attachment, media_metadata, media_url
 from .models import Brand, BrandCategory, Category, Product, ProductVariant
 
 
@@ -77,6 +78,26 @@ class ProductSerializer(StrictSerializer):
     brand_name = serializers.CharField(source='brand_category.brand.name', read_only=True)
     company_name = serializers.CharField(source='brand_category.brand.company.legal_name', read_only=True)
     category_name = serializers.CharField(source='brand_category.category.name', read_only=True)
+    primary_image_url = serializers.SerializerMethodField()
+    catalogue_pdf_url = serializers.SerializerMethodField()
+    image_attachment = serializers.SerializerMethodField()
+    pdf_attachment = serializers.SerializerMethodField()
+
+    def get_primary_image_url(self, product):
+        return media_url(self.context.get('request'), attachment(product, 'image'))
+
+    def get_catalogue_pdf_url(self, product):
+        return media_url(self.context.get('request'), attachment(product, 'catalogue-pdf'))
+
+    def _staff_attachment(self, product, kind):
+        item = attachment(product, kind) if self.context.get('staff_media') else None
+        return media_metadata(item) if item else None
+
+    def get_image_attachment(self, product):
+        return self._staff_attachment(product, 'image')
+
+    def get_pdf_attachment(self, product):
+        return self._staff_attachment(product, 'catalogue-pdf')
 
     def get_variants(self, instance):
         variants = instance.variants.all()
@@ -86,7 +107,7 @@ class ProductSerializer(StrictSerializer):
 
     class Meta:
         model = Product
-        fields = ['id', 'brand_category', 'brand_id', 'company_id', 'brand_name', 'company_name', 'category_name', 'name', 'code', 'description', 'specifications', 'unit', 'catalogue_price', 'currency', 'state', 'moderation_state', 'updated_at', 'variants']
+        fields = ['id', 'brand_category', 'brand_id', 'company_id', 'brand_name', 'company_name', 'category_name', 'name', 'code', 'description', 'specifications', 'unit', 'catalogue_price', 'currency', 'state', 'moderation_state', 'updated_at', 'variants', 'primary_image_url', 'catalogue_pdf_url', 'image_attachment', 'pdf_attachment']
         read_only_fields = ['id', 'moderation_state', 'updated_at']
 
     def validate_specifications(self, value):

@@ -1,8 +1,9 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
-import {ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {StickyBottomBar} from './StickyBottomBar';
+import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
+import {AccessibilityInfo, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {ApiClient, type Page} from './api';
 import {Button} from './Button';
-import {INDIAN_MOBILE, INDIAN_PIN, INDIAN_STATES, istDateTime} from './india';
+import {displayIndianMobile, indianMobileDigits, indianPinDigits, INDIAN_MOBILE, INDIAN_PIN, INDIAN_STATES, istDateTime, MOBILE_HELP, PIN_HELP} from './india';
 import {useSession} from './session';
 import {useResource} from './useResource';
 
@@ -19,13 +20,39 @@ const businessFields = {
   registered_state: 'Registered state or union territory',
 };
 
-function Field({label, value, set, disabled = false}: {
-  label: string; value: string; set: (value: string) => void; disabled?: boolean;
+function Field({label, value, set, disabled = false, postalPin = false, mobile = false}: {
+  label: string; value: string; set: (value: string) => void; disabled?: boolean; postalPin?: boolean; mobile?: boolean;
 }) {
+  const [touched, setTouched] = useState(false);
+  const input = <TextInput accessibilityLabel={mobile ? label + ', country code plus 91' : label}
+    value={mobile ? displayIndianMobile(indianMobileDigits(value)) : value}
+    onChangeText={mobile ? text => set(text ? '+91' + indianMobileDigits(text) : '') : postalPin ? text => set(indianPinDigits(text)) : set}
+    onBlur={() => setTouched(true)} editable={!disabled} maxLength={postalPin ? 6 : undefined}
+    keyboardType={mobile ? 'phone-pad' : postalPin ? 'number-pad' : 'default'} placeholder={mobile ? '98765 43210' : undefined}
+    autoCorrect={false} style={[styles.input, mobile && styles.phoneInput]} />;
   return <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
-    <TextInput accessibilityLabel={label} value={value} onChangeText={set} editable={!disabled}
-      autoCorrect={false} style={styles.input} />
+    {mobile ? <View style={styles.row}><Text style={styles.prefix}>+91</Text>{input}</View> : input}
+    {mobile && touched && !INDIAN_MOBILE.test(value) && <Text style={styles.error}>{MOBILE_HELP}</Text>}
+    {postalPin && <Text style={value && !INDIAN_PIN.test(value) ? styles.error : undefined}>{PIN_HELP}</Text>}
+  </View>;
+}
+
+function ContactProgress({count, goal}: {count: number; goal: number}) {
+  const percent = goal > 0 ? Math.min(100, count / goal * 100) : 0;
+  const [progress] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then(reduceMotion => {
+      if (!active) return;
+      if (reduceMotion) progress.setValue(percent);
+      else Animated.timing(progress, {toValue: percent, duration: 300, useNativeDriver: false}).start();
+    }).catch(() => {if (active) progress.setValue(percent);});
+    return () => {active = false; progress.stopAnimation();};
+  }, [percent, progress]);
+  return <View accessibilityRole="progressbar" accessibilityLabel="Trade-worker contacts"
+    accessibilityValue={{min: 0, max: goal, now: Math.min(count, goal), text: `${count} of ${goal} added`}} style={styles.progressTrack}>
+    <Animated.View style={[styles.progressFill, {width: progress.interpolate({inputRange: [0, 100], outputRange: ['0%', '100%']})}]} />
   </View>;
 }
 
@@ -71,7 +98,7 @@ export function IdentityFields({api, token, personal = false, editable = true}: 
   return <View style={styles.card}>
     <Text style={styles.heading}>{personal ? 'Personal profile' : 'Business identity and registered address'}</Text>
     {personal ? <Text>Account mobile: {record.mobile_e164}</Text> : <Text>Registered address is separate from operating branches. Identifiers are not government verified.</Text>}
-    {Object.entries(fields).map(([key, label]) => <Field key={key} label={label} value={draft[key] ?? ''}
+    {Object.entries(fields).map(([key, label]) => <Field key={key} label={label} value={draft[key] ?? ''} postalPin={key.endsWith('pin_code')}
       disabled={!editable || action.busy} set={value => {
         dirty.current = true;
         setDraft(previous => ({...previous, [key]: value}));
@@ -159,7 +186,7 @@ export function DealerDeclarations({api, token, editable}: Props) {
           setBrands(previous => previous.filter(value => value.id !== brand.id));
         }} />)}
       <Text>Tap a selected brand to remove it before saving.</Text>
-      <Field label="Search canonical brands" value={search} set={setSearch} />
+      <Field label="Search catalogue brands" value={search} set={setSearch} />
       <Button variant="secondary" title="Search brands" onPress={() => {setQuery(search.trim()); setBrandPage(1);}} />
       {choices.state.status === 'ready' ? <>
         {choices.state.data.results.length === 0 && <Text>No matching catalogue brands.</Text>}
@@ -198,7 +225,7 @@ export function DealerDeclarations({api, token, editable}: Props) {
   </View>;
 }
 
-export function DealerContacts({api, token, editable}: Props) {
+export function DealerContacts({api, token, editable, header}: Props & {header?: ReactNode}) {
   const [number, setPage] = useState(1), [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState<ContactDraft>(blankContact);
   const [editing, setEditing] = useState<number | null>(null);
@@ -207,13 +234,27 @@ export function DealerContacts({api, token, editable}: Props) {
   const resource = useResource(useCallback(signal => api.get(dealerPath + '/trade-contacts?page=' + number, signal, token) as Promise<Page<Contact> & {minimum_required: number}>, [api, token, number, revision]));
   const disabled = !editable || action.busy;
   function reset() {setEditing(null); setDraft(blankContact); setConsent(false);}
-  return <View style={styles.card}>
+  return <View style={styles.screen}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.contactContent}>
+  {header}<View style={styles.card}>
     <Text style={styles.heading}>Private trade-worker contacts</Text>
     <Text>Only you and authorized staff can see these contacts. Confirm permission from each worker. SmartTrade does not independently verify consent or contact the worker.</Text>
     <Button variant="tertiary" title="Refresh contacts" disabled={action.busy} onPress={() => setRevision(n => n + 1)} />
     {resource.state.status === 'ready' ? <>
-      <Text>{resource.state.data.count} of {resource.state.data.minimum_required} minimum contacts for verification submission.</Text>
-      {resource.state.data.results.length === 0 && <Text>No contacts saved.</Text>}
+      {resource.state.data.minimum_required > 0 && resource.state.data.count >= resource.state.data.minimum_required
+        ? <View style={[styles.milestone, styles.celebration]} accessibilityLiveRegion="polite">
+          <View style={styles.row}>
+            <Text accessible={false} style={styles.celebrationIcon}>✓</Text>
+            <Text accessibilityRole="header" style={[styles.heading, styles.celebrationTitle]}>Network Milestone Completed</Text>
+          </View>
+          <Text style={styles.label}>{resource.state.data.count} of {resource.state.data.minimum_required} contacts added</Text>
+          <Text>You’ve met the trade contact requirement. Keep your business details up to date for verification. Approval still requires staff review.</Text>
+        </View>
+        : <View style={styles.milestone}>
+        {resource.state.data.count === 0 && <Text style={styles.heading}>Build your electrician &amp; contractor network</Text>}
+        <Text>Add trade workers you regularly work with. Reach the minimum to submit your dealer profile for review.</Text>
+        <Text style={styles.label}>{resource.state.data.count} of {resource.state.data.minimum_required} added</Text>
+        <ContactProgress count={resource.state.data.count} goal={resource.state.data.minimum_required} />
+      </View>}
       {resource.state.data.results.map(item => <View key={item.id} style={styles.card}>
         <Text>{item.name} · {item.trade} · {item.mobile_e164}</Text>
         <Text>{item.location || 'Location not provided'}</Text>
@@ -238,25 +279,39 @@ export function DealerContacts({api, token, editable}: Props) {
       <Pager value={resource.state.data} number={number} change={setPage} />
     </> : <Text>{resource.state.status === 'error' ? resource.state.message : 'Loading contacts…'}</Text>}
     <Text style={styles.heading}>{editing ? 'Edit contact' : 'Add contact'}</Text>
-    {(Object.entries({name: 'Worker name', mobile_e164: 'Worker mobile (+91)', trade: 'Trade or occupation', location: 'Location (optional)'}) as [keyof ContactDraft, string][])
-      .map(([key, label]) => <Field key={key} label={label} value={draft[key]} disabled={disabled}
+    {(Object.entries({name: 'Worker name', mobile_e164: 'Worker mobile number', trade: 'Trade or occupation', location: 'Location (optional)'}) as [keyof ContactDraft, string][])
+      .map(([key, label]) => <Field key={key} label={label} value={draft[key]} disabled={disabled} mobile={key === 'mobile_e164'}
         set={value => {setDraft(previous => ({...previous, [key]: value})); setConsent(false);}} />)}
-    <Button variant="navigation" selected={consent} disabled={disabled} title="I have permission to save these details"
-      onPress={() => setConsent(value => !value)} />
+    <Pressable accessibilityRole="checkbox" accessibilityState={{checked: consent, disabled}} disabled={disabled}
+      style={styles.consent} onPress={() => setConsent(value => !value)}>
+      <Text accessible={false} style={styles.label}>{consent ? '☑' : '☐'}</Text>
+      <Text style={styles.consentText}>I have permission from this person to share their business contact details.</Text>
+    </Pressable>
+    {editing !== null && <Button variant="secondary" title="Cancel edit" disabled={action.busy} onPress={reset} />}
+    <Feedback {...action} />
+  </View></ScrollView><StickyBottomBar>
     <Button variant="primary" title="Save contact" disabled={disabled || !consent} loading={action.busy}
       onPress={() => void action.save(async () => {
-        if (!INDIAN_MOBILE.test(draft.mobile_e164.trim())) throw new Error('Use an Indian mobile number in +91 format.');
+        if (!INDIAN_MOBILE.test(draft.mobile_e164.trim())) throw new Error(MOBILE_HELP);
         const body = {...draft, mobile_e164: draft.mobile_e164.trim(), consent};
         if (editing) await api.get(dealerPath + '/trade-contacts/' + editing, undefined, token, {method: 'PATCH', body: JSON.stringify(body)});
         else await api.post(dealerPath + '/trade-contacts', body, token);
         reset(); setRevision(n => n + 1);
       }, 'Contact saved with permission confirmation.')} />
-    {editing !== null && <Button variant="secondary" title="Cancel edit" disabled={action.busy} onPress={reset} />}
-    <Feedback {...action} />
-  </View>;
+  </StickyBottomBar></View>;
 }
 
 const styles = StyleSheet.create({
+  screen: {flex: 1}, contactContent: {padding: 20, gap: 16},
+  phoneInput: {flex: 1}, prefix: {padding: 12, borderRadius: 8, backgroundColor: '#edf7f0', color: '#17392d', fontWeight: '700'},
+  milestone: {padding: 14, gap: 8, borderRadius: 10, backgroundColor: '#edf7f0'},
+  celebration: {borderColor: '#77aa8a', borderWidth: 1, backgroundColor: '#e0f3e7'},
+  celebrationIcon: {color: '#fff', backgroundColor: '#14553e', borderRadius: 18, width: 36, lineHeight: 36, textAlign: 'center', fontSize: 21, fontWeight: '800'},
+  celebrationTitle: {flex: 1},
+  progressTrack: {height: 8, borderRadius: 4, backgroundColor: '#d0e2d7', overflow: 'hidden'},
+  progressFill: {height: '100%', backgroundColor: '#24734f'},
+  consent: {minHeight: 48, flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 8},
+  consentText: {flex: 1, color: '#17392d'},
   content: {padding: 16},
   card: {backgroundColor: '#fff', borderColor: '#dce7e0', borderWidth: 1, borderRadius: 14, padding: 16, gap: 12},
   heading: {fontSize: 19, fontWeight: '700', color: '#17392d'},

@@ -23,7 +23,7 @@ export async function apiResponse(base: string, path: string, token?: string, in
   let response: Response;
   try {
     response = await fetch(`${base}${path}`, { ...init, headers: {
-      Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers,
     } });
   } catch (error) {

@@ -201,3 +201,21 @@ Session-code review: on profile 401/403, stored refresh is attempted; definitive
 Only this report and sanitized evidence were intentionally updated in this follow-up. No business records, source code, authentication permissions, configuration, emulator state, commits, pushes or deployments changed. Remaining action: an uninterrupted physical-phone testing window with responsive app input is needed to complete Buyer invoice and Company restoration acceptance.
 
 Final migration consistency rerun with local PostgreSQL access: `.venv\Scripts\python.exe scripts/manage-local.py makemigrations --check --dry-run` — **PASS, No changes detected**, no database-history warning. Final normal `git diff --check` — **PASS**. Reviewed final diff statistics: pre-existing application changes remain; this follow-up introduced no source/configuration edits.
+
+## Physical acceptance follow-up — 09-11-2026
+
+Tested on physical phone `5e106900` using the installed SmartTrade release and the local API over USB.
+
+| Acceptance check | Result | Evidence |
+| --- | --- | --- |
+| Buyer invoice save and repeat | Passed | Controlled Buyer account 7 opened its existing invoice on order 1. `GET /api/v1/orders/1/invoice/download` returned HTTP 200 and 2,013 bytes. The device vault showed one PDF entry. A repeat tap with USB forwarding removed presented the same local PDF filename, and the backend logged one download during the check. |
+| Native PDF viewing | Not passed | The invoice action launched Android's share chooser with the saved PDF. No PDF reader displaying the document was observed. No external sharing or printing was performed. |
+| Company restart and outage recovery | Passed | The controlled Company session survived an online cold launch, a background and foreground cycle with USB forwarding interrupted, and a second cold launch while forwarding was removed. During that launch the app reported that the local session was retained and would retry revalidation. After restoring the reverse tunnel, `/api/v1/auth/me` and `/api/v1/companies/me` returned HTTP 200 without another login, and the Company workspace showed the verified profile. |
+
+The phone was left in the authenticated Phase 1 Controlled Company workspace with USB forwarding restored. The issued invoice and other business records were not changed.
+
+## Android invoice viewer follow-up
+
+**Passed on phone `5e106900`.** Installed the signed ARM64 invoice viewer release as an update. The Buyer order action opened Android's PDF viewer directly, and the viewer exposed the existing invoice's first page. Reopening from the app-private vault also worked with USB forwarding disconnected. Android reported `ACTION_VIEW`, `application/pdf`, a content URI, and the read grant flag. The backend recorded no additional invoice download. USB forwarding was restored.
+
+The invoice and catalogue actions now use the same PDF viewer helper. All 121 mobile tests and the TypeScript check passed. The earlier Company restart and recovery result still stands.

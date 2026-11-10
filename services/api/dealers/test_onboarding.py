@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -101,6 +104,9 @@ class OnboardingTests(TestCase):
                 payload['brand'] = self.brand.pk
             self.assertEqual(self.client.post(review, payload, format='json').status_code, 403)
             self.authorize_staff('REVIEW_BUSINESS')
+            listed = self.client.get(self.staff_base + '/onboarding').data['suggestions'][0]
+            self.assertEqual((listed['id'], listed['name'], listed['context']),
+                             (suggestion.data['id'], name, 'Catalogue reference'))
             self.assertEqual(self.client.post(review, {**payload, 'reason': ''}, format='json').status_code, 400)
             result = self.client.post(review, payload, format='json')
             self.assertEqual(result.status_code, 200, result.data)
@@ -109,6 +115,8 @@ class OnboardingTests(TestCase):
         self.assertEqual(BrandSuggestion.objects.get(status='MAPPED').canonical_brand, self.brand)
         self.assertEqual(DealerAudit.objects.filter(action='BRAND_SUGGESTION_REVIEWED', actor=self.staff).count(), 3)
         self.assertEqual(Brand.objects.count(), 1)
+        self.brand.refresh_from_db()
+        self.assertEqual(self.brand.company_id, self.company.pk)
         self.assertFalse(AuthorizedDealerGrant.objects.exists())
 
     def test_contact_consent_duplicate_removal_and_restricted_review(self):
@@ -120,10 +128,12 @@ class OnboardingTests(TestCase):
         response = self.client.post(url, {**data, 'consent': True}, format='json')
         self.assertEqual(response.status_code, 201, response.data)
         self.assertTrue(response.data['consent_confirmed'])
-        self.assertTrue(response.data['consent_confirmed_at'])
+        timestamp = datetime.fromisoformat(response.data['consent_confirmed_at'])
+        self.assertEqual(timestamp.utcoffset(), timedelta(0))
         self.assertNotIn('consent', response.data)
         pk = response.data['id']
-        self.assertEqual(self.client.get(url).data['minimum_required'], 10)
+        contacts = self.client.get(url).data
+        self.assertEqual((contacts['count'], contacts['minimum_required']), (1, 10))
         self.assertEqual(self.client.post(url, {**data, 'consent': True}, format='json').status_code, 400)
         self.assertEqual(self.client.patch(f'{url}/{pk}', {'trade': 'Plumber'}, format='json').status_code, 400)
         self.assertEqual(self.client.patch(f'{url}/{pk}', {'trade': 'Plumber', 'consent': True}, format='json').status_code, 200)
@@ -159,12 +169,43 @@ class OnboardingTests(TestCase):
         self.assertEqual(self.client.post(self.staff_base + '/duplicate-review', payload, format='json').status_code, 200)
         result = self.client.get(self.staff_base + '/onboarding').data['duplicates'][0]
         self.assertEqual(result['decision']['outcome'], 'DISTINCT')
+        follow_up = {**payload, 'outcome': 'NEEDS_FOLLOW_UP', 'reason': 'Check registration reference'}
+        self.assertEqual(self.client.post(self.staff_base + '/duplicate-review', follow_up, format='json').status_code, 200)
+        details = self.client.get(self.staff_base + '/onboarding').data
+        self.assertEqual(details['duplicates'][0]['decision']['outcome'], 'NEEDS_FOLLOW_UP')
+        history = details['reviews']
+        self.assertEqual([row['snapshot']['outcome'] for row in history], ['NEEDS_FOLLOW_UP', 'DISTINCT'])
+        self.assertEqual([row['reason'] for row in history], [follow_up['reason'], payload['reason']])
+        self.assertTrue(all(row['actor'] == self.staff.pk and row['at'] for row in history))
+        if connection.vendor == 'postgresql':
+            events = DealerAudit.objects.filter(business=self.dealer, action='DUPLICATE_REVIEWED')
+            with self.assertRaisesMessage(IntegrityError, 'Dealer audit is append-only'), transaction.atomic():
+                events.update(reason='Attempt to overwrite history')
+            with self.assertRaisesMessage(IntegrityError, 'Dealer audit is append-only'), transaction.atomic():
+                events.delete()
         other.registration_number = 'Firm 43'
         other.save()
         self.assertEqual(self.client.post(self.staff_base + '/duplicate-review', payload, format='json').status_code, 409)
         self.dealer.refresh_from_db()
         self.assertEqual(self.dealer.verification_state, 'PENDING')
         self.assertEqual(Account.objects.filter(pk__in=[self.owner.pk, self.other.pk]).count(), 2)
+
+    def test_duplicate_gstin_requires_exact_normalized_match(self):
+        other = self.other.business_profile
+        self.dealer.gstin = '29ABCDE1234F1Z5'
+        self.dealer.save()
+        self.authorize_staff('REVIEW_BUSINESS')
+        url = self.staff_base + '/onboarding'
+        other.gstin = '29ABCDE1234F1Z6'
+        other.save()
+        self.assertEqual(self.client.get(url).data['duplicates'], [])
+        self.client.force_authenticate(self.other)
+        updated = self.client.patch(self.base, {'gstin': '29abcde1234f1z5'}, format='json')
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data['gstin'], self.dealer.gstin)
+        self.client.force_authenticate(self.staff)
+        matches = self.client.get(url).data['duplicates']
+        self.assertEqual([(item['business'], item['signals']) for item in matches], [(other.pk, ['GSTIN'])])
 
     def test_suspended_business_cannot_mutate_onboarding(self):
         self.dealer.verification_state = 'SUSPENDED'
@@ -189,3 +230,6 @@ class OnboardingTests(TestCase):
         match = self.client.get(self.staff_base + '/onboarding').data['duplicates'][0]
         self.assertEqual(match['signals'], ['name and registered address'])
         self.assertIsNone(match['decision'])
+        other.registered_pin_code = '560002'
+        other.save()
+        self.assertEqual(self.client.get(self.staff_base + '/onboarding').data['duplicates'], [])

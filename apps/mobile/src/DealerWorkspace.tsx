@@ -1,28 +1,42 @@
 import {Button} from './Button';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {DealerActivity} from './DealerActivity';
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ApiClient, ApiError, type Product } from './api';
 import { useSession } from './session';
 import { useResource } from './useResource';
 import { blankBranch, blankInventory, branchFields, business, canChooseProduct, ownedPage, saveBranch, saveBusiness, saveListing, withdrawListing, reactivateListing, type BranchInput, type InventoryInput, type OwnedBranch, type OwnedListing } from './dealer';
-import { inr, indianNumber, istDateTime } from './india';
+import { displayIndianMobile, indianMobileDigits, inr, indianNumber, indianPinDigits, INDIAN_MOBILE, INDIAN_PIN, istDateTime, MOBILE_HELP, PIN_HELP } from './india';
 import LocalFileVault from './LocalFileVault';
 import {DealerContacts, DealerDeclarations, IdentityFields} from './Onboarding';
 
 type Tab = 'Dashboard' | 'Profile' | 'Documents' | 'Branches' | 'Authorization' | 'Listings' | 'Declarations' | 'Contacts';
 
-function Field({ label, value, change, max = 200, numeric = false, disabled = false }: { label: string; value: string; change: (value: string) => void; max?: number; numeric?: boolean; disabled?: boolean }) {
-  return <View style={s.field}><Text style={s.label}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={change} maxLength={max} editable={!disabled} style={s.input} keyboardType={numeric ? 'decimal-pad' : 'default'} autoCorrect={false} autoCapitalize="none" /></View>;
+function Field({ label, value, change, max = 200, numeric = false, postalPin = false, mobile = false, disabled = false }: { label: string; value: string; change: (value: string) => void; max?: number; numeric?: boolean; postalPin?: boolean; mobile?: boolean; disabled?: boolean }) {
+  const [touched, setTouched] = useState(false);
+  const input = <TextInput accessibilityLabel={mobile ? label + ', country code plus 91' : label}
+    value={mobile ? displayIndianMobile(indianMobileDigits(value)) : value}
+    onChangeText={mobile ? text => change(text ? '+91' + indianMobileDigits(text) : '') : postalPin ? text => change(indianPinDigits(text)) : change}
+    onBlur={() => setTouched(true)} maxLength={mobile ? undefined : max} editable={!disabled} style={[s.input, mobile && s.phoneInput]}
+    keyboardType={mobile ? 'phone-pad' : postalPin ? 'number-pad' : numeric ? 'decimal-pad' : 'default'}
+    placeholder={mobile ? '98765 43210' : undefined} autoCorrect={false} autoCapitalize="none" />;
+  return <View style={s.field}><Text style={s.label}>{label}</Text>
+    {mobile ? <View style={s.row}><Text style={s.prefix}>+91</Text>{input}</View> : input}
+    {mobile && touched && value && !INDIAN_MOBILE.test(value) && <Text style={s.error}>{MOBILE_HELP}</Text>}
+    {postalPin && <Text style={value && !INDIAN_PIN.test(value) ? s.error : s.body}>{PIN_HELP}</Text>}
+  </View>;
 }
 function Pagination({ page, next, previous, set }: { page: number; next: string | null; previous: string | null; set: (n: number) => void }) {
   return <View style={s.row}><Button variant="tertiary" icon="back" title="Previous page" disabled={!previous} onPress={() => set(page - 1)} /><Text>Page {page}</Text><Button variant="tertiary" icon="next" title="Next page" disabled={!next} onPress={() => set(page + 1)} /></View>;
 }
-export default function DealerWorkspace({ api }: { api: ApiClient }) {
+export default function DealerWorkspace({api, onOpenOrders}: {api: ApiClient; onOpenOrders: () => void}) {
   const session = useSession();
-  if (session.account?.account_type !== 'BUSINESS' || !session.token) return <View style={s.card}><Text accessibilityRole="alert">An active BUSINESS account is required for dealer management.</Text></View>;
-  return <Workspace key={session.account.id} api={api} token={session.token} expired={session.revalidateSession} />;
+  if (session.account?.account_type !== 'BUSINESS' || !session.token) return <View style={s.card}><Text accessibilityRole="alert">Sign in with an active dealer account to manage your business.</Text></View>;
+  return <Workspace key={session.account.id} api={api} token={session.token} expired={session.revalidateSession} onOpenOrders={onOpenOrders} />;
 }
-function Workspace({ api, token, expired }: { api: ApiClient; token: string; expired: () => void }) {
+function Workspace({api, token, expired, onOpenOrders}: {api: ApiClient; token: string; expired: () => void; onOpenOrders: () => void}) {
+  const {bottom} = useSafeAreaInsets();
   const { account } = useSession();
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const [tab, setTab] = useState<Tab>('Dashboard');
@@ -81,29 +95,46 @@ function Workspace({ api, token, expired }: { api: ApiClient; token: string; exp
       setError(failure instanceof Error ? failure.message : 'Could not load listing branch.');
     } finally { setBusy(''); }
   }
-  return <ScrollView ref={scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+  const header = <>
     <Text style={s.kicker}>DEALER WORKSPACE</Text><Text accessibilityRole="header" style={s.title}>{data?.legal_name || 'Your business'}</Text>
     <View style={s.row}>{(['Dashboard', 'Profile', 'Documents', 'Branches', 'Authorization', 'Listings', 'Declarations', 'Contacts'] as Tab[]).map(name => <Button variant="navigation" key={name} title={name} selected={tab === name} disabled={Boolean(busy)} onPress={() => setTab(name)} />)}</View>
     <Button variant="tertiary" icon="refresh" title="Refresh dealer records" disabled={Boolean(busy)} onPress={() => { setMessage(''); setError(''); setRefresh(n => n + 1); }} />
     {profile.state.status === 'loading' && <ActivityIndicator accessibilityLabel="Loading dealer workspace" />}
     {profile.state.status === 'error' && <View style={s.card}><Text accessibilityRole="alert" style={s.error}>{profile.state.message}</Text><Button variant="tertiary" icon="refresh" title="Retry dealer workspace" onPress={profile.retry} /></View>}
     {message !== '' && <Text accessibilityLiveRegion="polite" style={s.notice}>{message}</Text>}{error !== '' && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}{busy !== '' && <ActivityIndicator accessibilityLabel={busy} />}
+  </>;
+  const readOnlyNotice = data && !data.workspace.can_edit && <Text style={s.notice}>This business is {data.verification_state}. Editing is unavailable. Contact support if you need help restoring access.</Text>;
+  if (tab === 'Contacts' && data) {
+    return <DealerContacts api={api} token={token} editable={editable} header={<>{header}{readOnlyNotice}</>} />;
+  }
+  return <ScrollView ref={scroll} contentContainerStyle={[s.content, {paddingBottom: Math.max(64, bottom + 8)}]} keyboardShouldPersistTaps="handled">
+    {header}
       {tab === 'Documents' && <LocalFileVault category="dealer_document" ownerKey={`account-${account?.id}-dealer-documents`} legacyOwnerKey={data ? `business-${data.id}` : undefined} title="Dealer documents on this device" description="Keep private business and branch working documents on this device. They are not evidence submitted to SmartTrade and cannot affect dealer verification." allowedMimeTypes={['application/pdf','image/jpeg','image/png']} />}
     {data && <>
-      {!data.workspace.can_edit && <Text style={s.notice}>This business is {data.verification_state}. Management writes are blocked until authorized staff restoration. Account access and company authorization are separate.</Text>}
-      {tab === 'Dashboard' && <><View style={s.card}><Text style={s.heading}>Business status</Text><Text>Verification: {data.verification_state}</Text><Text>Account access: {account?.access_state ?? 'Unknown'}</Text><Text>Registration: {data.registration_number || 'Not provided'}</Text><Text>Profile editing: {editable ? 'Permitted' : 'Restricted'}</Text></View><View style={s.card}><Text style={s.heading}>Your network</Text><Text>Branches: {data.workspace.branch_count}</Text><Text>Published listings: {data.workspace.published_listing_count}</Text><Text>Currently discoverable listings: {data.workspace.discoverable_listing_count}</Text><Text style={s.body}>Published records may be hidden by branch status, company suspension, product moderation or revoked brand authorization. Counts come from the backend, not the current page.</Text></View></>}
+      {readOnlyNotice}
+      {tab === 'Dashboard' && <><DealerActivity api={api} token={token} revision={refresh} onExpired={expired} onOpenOrders={onOpenOrders} /><View style={s.card}><Text style={s.heading}>Business status</Text><Text>Verification: {data.verification_state}</Text><Text>Account access: {account?.access_state ?? 'Unknown'}</Text><Text>Registration: {data.registration_number || 'Not provided'}</Text><Text>Profile editing: {editable ? 'Permitted' : 'Restricted'}</Text></View><View style={s.card}><Text style={s.heading}>Your network</Text><Text>Branches: {data.workspace.branch_count}</Text><Text>Published listings: {data.workspace.published_listing_count}</Text><Text>Currently discoverable listings: {data.workspace.discoverable_listing_count}</Text><Text style={s.body}>A published listing may be hidden if its branch, product, company, or brand approval is no longer active.</Text></View></>}
       {tab === 'Declarations' && <DealerDeclarations api={api} token={token} editable={editable} />}
-      {tab === 'Contacts' && <DealerContacts api={api} token={token} editable={editable} />}
-      {tab === 'Profile' && <IdentityFields api={api} token={token} editable={editable} />}
+      {(tab === 'Profile' || tab === 'Branches') && <View style={s.card}>
+        <Text accessibilityRole="header" style={s.heading}>Business locations</Text>
+        <View style={s.row}>
+          <Button variant="navigation" title="Registered Office" selected={tab === 'Profile'} disabled={Boolean(busy)} onPress={() => setTab('Profile')} />
+          <Button variant="navigation" title="Branch Locations" selected={tab === 'Branches'} disabled={Boolean(busy)} onPress={() => setTab('Branches')} />
+        </View>
+        <Text style={s.body}>{tab === 'Profile' ? 'Your registered business address for verification and GST records.' : 'Locations where your team operates and fulfils orders.'}</Text>
+      </View>}
+      {(tab === 'Profile' || tab === 'Branches') && <View style={tab === 'Branches' ? {display: 'none'} : undefined}
+        accessibilityElementsHidden={tab === 'Branches'} importantForAccessibility={tab === 'Branches' ? 'no-hide-descendants' : 'auto'}>
+        <IdentityFields api={api} token={token} editable={editable} />
+      </View>}
       {tab === 'Profile' && <View style={s.card}><Text style={s.heading}>Business profile</Text><Field label="Business legal name" value={name} max={200} change={value => editBusinessField(setName, value)} disabled={!editable || Boolean(busy)} /><Field label="Business registration number" value={registration} max={100} change={value => editBusinessField(setRegistration, value)} disabled={!editable || Boolean(busy)} /><Field label="GSTIN (optional)" value={gstin} max={15} change={value => editBusinessField(setGstin, value)} disabled={!editable || Boolean(busy)} /><Field label="PAN (optional)" value={pan} max={10} change={value => editBusinessField(setPan, value)} disabled={!editable || Boolean(busy)} /><Text>GSTIN and PAN are optional identity fields; SmartTrade does not calculate tax. Verification status is managed by staff.</Text><Button variant="primary" icon="save" loading={Boolean(busy)} title="Save business profile" disabled={!editable || Boolean(busy)} onPress={() => void perform('Business profile save', async () => { await saveBusiness(api, token, name, registration, gstin, pan); businessDraftDirty.current = false; })} /></View>}
       {tab === 'Authorization' && <View style={s.card}><Text style={s.heading}>Company-issued brand authorizations</Text><Text style={s.body}>Only the owning company can grant or revoke authorization. Dealers cannot authorize themselves. An active grant alone does not override business, company, branch or product restrictions.</Text>{grants.length === 0 && <Text>No brand authorizations have been issued to this business.</Text>}{grants.map(grant => <View key={grant.id} style={s.divider}><Text style={s.heading}>{grant.brand_name}</Text><Text>{grant.company_name}</Text><Text>Grant: {grant.active ? 'Active' : 'Revoked'}</Text><Text>Current listing eligibility: {grant.eligible ? 'Eligible, subject to branch/product checks' : 'Not eligible'}</Text><Text>Company: {grant.company_verification_state} / {grant.company_activity_state}</Text><Text>Updated: {istDateTime(grant.updated_at)}</Text></View>)}</View>}
       {tab === 'Branches' && <>
         <Button variant="primary" icon="plus" loading={Boolean(busy)} title="Create branch" disabled={!editable || Boolean(busy)} onPress={() => { setBranchId(undefined); setBranchForm(blankBranch()); }} />
-        {branchForm && <View style={s.card}><Text style={s.heading}>{branchId ? 'Edit branch' : 'New branch'}</Text><Text style={s.body}>India-only branch. Private contact fields are available only through authorized management APIs. Deactivation preserves history.</Text>{branchFields.map(([key,label,max]) => <Field key={key} label={label} max={max} value={branchForm[key]} change={value => setBranchForm(current => current ? { ...current, [key]: value } : null)} disabled={Boolean(busy) || !editable || key === 'country'} />)}
+        {branchForm && <View style={s.card}><Text style={s.heading}>{branchId ? 'Edit branch' : 'New branch'}</Text><Text style={s.body}>Add a branch in India. Private contact details stay hidden from buyers. Deactivating a branch keeps its history.</Text>{branchFields.map(([key,label,max]) => <Field key={key} label={label} max={max} postalPin={key === 'pin_code'} mobile={key === 'contact_phone'} value={branchForm[key]} change={value => setBranchForm(current => current ? { ...current, [key]: value } : null)} disabled={Boolean(busy) || !editable || key === 'country'} />)}
           <View style={s.row}><Button variant="navigation" title={branchForm.active ? 'Active branch' : 'Inactive branch'} selected={branchForm.active} disabled={Boolean(busy) || !editable} onPress={() => setBranchForm({ ...branchForm, active: !branchForm.active })} /><Button variant="navigation" title="Private draft" selected={branchForm.visibility_state === 'PRIVATE_DRAFT'} disabled={Boolean(busy) || !editable} onPress={() => setBranchForm({ ...branchForm, visibility_state: 'PRIVATE_DRAFT' })} /><Button variant="navigation" title="Visible branch" selected={branchForm.visibility_state === 'VISIBLE'} disabled={Boolean(busy) || !editable || !data.workspace.can_publish_branches} onPress={() => setBranchForm({ ...branchForm, visibility_state: 'VISIBLE' })} /></View>
           {!data.workspace.can_publish_branches && <Text>Pending businesses may save private draft branches. Verification is required to make branches visible.</Text>}<Button variant="primary" icon="save" loading={Boolean(busy)} title="Save branch" disabled={Boolean(busy) || !editable} onPress={() => void perform('Branch save', async () => { await saveBranch(api, token, branchForm, branchId); setBranchForm(null); })} /><Button variant="secondary" title="Cancel branch editing" disabled={Boolean(busy)} onPress={() => setBranchForm(null)} />
         </View>}
-        {branches.state.status === 'loading' ? <ActivityIndicator accessibilityLabel="Loading branches" /> : branches.state.status === 'error' ? <View style={s.card}><Text style={s.error}>{branches.state.message}</Text><Button variant="tertiary" icon="refresh" title="Retry branches" onPress={branches.retry} /></View> : <>{branches.state.data.results.length === 0 && <View style={s.card}><Text>No dealer branches yet.</Text></View>}{branches.state.data.results.map(item => <View key={item.id} style={s.card}><Text style={s.heading}>{item.branch_name}</Text><Text>{[item.address,item.locality,item.district,item.pin_code,item.state,item.country].join(', ')}</Text><Text>{item.active ? 'Active' : 'Inactive'} · {item.visibility_state} · {item.admin_hidden ? 'Hidden by staff' : 'Not hidden by staff'}</Text><Text style={s.body}>Private contact: {item.contact_name || 'Not provided'} · {item.contact_phone || 'No phone'} · {item.contact_email || 'No email'}</Text><Button variant="secondary" icon="edit" title={`Edit ${item.branch_name}`} disabled={!editable || Boolean(busy)} onPress={() => { setBranchId(item.id); setBranchForm({ ...Object.fromEntries(branchFields.map(([key]) => [key,item[key]])), active: item.active, visibility_state: item.visibility_state } as BranchInput); }} /></View>)}<Pagination page={branchPage} {...branches.state.data} set={setBranchPage} /></>}
+        {branches.state.status === 'loading' ? <ActivityIndicator accessibilityLabel="Loading branches" /> : branches.state.status === 'error' ? <View style={s.card}><Text style={s.error}>{branches.state.message}</Text><Button variant="tertiary" icon="refresh" title="Retry branches" onPress={branches.retry} /></View> : <>{branches.state.data.results.length === 0 && <View style={s.card}><Text>No dealer branches yet.</Text></View>}{branches.state.data.results.map(item => <View key={item.id} style={s.card}><Text style={s.heading}>{item.branch_name}</Text><Text>{item.address}</Text><Text style={s.body}>{[item.locality, item.district, item.state, item.pin_code].filter(Boolean).join(' · ')}</Text><Text>{item.active ? 'Active' : 'Inactive'} · {item.visibility_state} · {item.admin_hidden ? 'Hidden by staff' : 'Not hidden by staff'}</Text><Text style={s.body}>Private branch contact: {[item.contact_name, item.contact_phone, item.contact_email].filter(Boolean).join(' · ') || 'Not provided'}</Text><Button variant="secondary" icon="edit" title={`Edit ${item.branch_name}`} disabled={!editable || Boolean(busy)} onPress={() => { setBranchId(item.id); setBranchForm({ ...Object.fromEntries(branchFields.map(([key]) => [key,item[key]])), active: item.active, visibility_state: item.visibility_state } as BranchInput); }} /></View>)}<Pagination page={branchPage} {...branches.state.data} set={setBranchPage} /></>}
       </>}
       {tab === 'Listings' && <>
         <View style={s.card}><Field label="Search dealer listings" value={listingSearch} change={setListingSearch} /><Button variant="secondary" icon="search" title="Search inventory" disabled={Boolean(busy)} onPress={() => { setListingQuery(listingSearch.trim()); setListingPage(1); }} /><View style={s.row}>{[['','All listing states'],['PUBLISHED','Published listings'],['WITHDRAWN','Withdrawn listings']].map(([value,label]) => <Button variant="navigation" key={label} title={label} selected={listingState===value} disabled={Boolean(busy)} onPress={() => { setListingState(value); setListingPage(1); }} />)}</View></View>
@@ -130,6 +161,6 @@ function Workspace({ api, token, expired }: { api: ApiClient; token: string; exp
     </>}
   </ScrollView>;
 }
-const s = StyleSheet.create({
+const s = StyleSheet.create({phoneInput: {flex: 1}, prefix: {padding: 12, borderRadius: 8, backgroundColor: '#edf7f0', color: '#17392d', fontWeight: '700'},
   content: { padding: 20, paddingBottom: 64, gap: 14 }, kicker: { color: '#087f5b', fontWeight: '800', letterSpacing: 1.5 }, title: { color: '#17392d', fontSize: 28, fontWeight: '800' }, heading: { fontSize: 20, fontWeight: '700', color: '#17392d' }, label: { fontWeight: '700', color: '#294b3a' }, body: { fontSize: 15, lineHeight: 23, color: '#52675c' }, card: { backgroundColor: '#fff', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#dce7e0', gap: 14 }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },     field: { gap: 6 }, input: { minHeight: 48, borderWidth: 1, borderColor: '#9fb7aa', borderRadius: 10, padding: 12, fontSize: 16, color: '#17392d' }, notice: { padding: 12, backgroundColor: '#edf7f0', color: '#294b3a', lineHeight: 23 }, error: { color: '#9c2820', lineHeight: 23 }, divider: { borderTopWidth: 1, borderColor: '#dce7e0', paddingTop: 12, gap: 8 }, price: { color: '#126743', fontWeight: '700', fontSize: 22 },
 });

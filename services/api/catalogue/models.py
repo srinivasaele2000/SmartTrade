@@ -47,6 +47,30 @@ class Product(models.Model):
         ]
 
 
+class ProductMedia(models.Model):
+    class Kind(models.TextChoices):
+        IMAGE = 'image', 'Primary image'
+        PDF = 'catalogue-pdf', 'Catalogue PDF'
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='official_media')
+    kind = models.CharField(max_length=13, choices=Kind.choices)
+    key = models.UUIDField(unique=True, editable=False)
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=32)
+    size = models.PositiveIntegerField()
+    uploaded_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['product', 'kind'], name='catalogue_unique_media_kind'),
+        ]
+
+    @property
+    def storage_name(self):
+        extension = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf'}
+        return f'catalogue/{self.key}.{extension[self.content_type]}'
+
+
 class ProductVariant(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='variants')
     sku = models.CharField(max_length=100)

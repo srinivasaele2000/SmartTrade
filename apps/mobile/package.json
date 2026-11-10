@@ -14,11 +14,14 @@
     "expo": "~58.0.0",
     "expo-document-picker": "~58.0.4",
     "expo-file-system": "~58.0.13",
+    "expo-image": "~58.0.18",
+    "expo-intent-launcher": "~58.0.3",
     "expo-secure-store": "~58.0.2",
     "expo-sharing": "~58.0.21",
     "lucide-react-native": "1.68.0",
     "react": "19.3.0",
     "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
     "react-native-svg": "15.16.0"
   },
   "devDependencies": {

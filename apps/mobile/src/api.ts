@@ -5,12 +5,14 @@ export type Product = {
   id: number; name: string; code: string; brand_id?: number; company_id?: number; brand_name: string; company_name: string; category_name: string;
   description: string; specifications: Record<string, unknown>; unit: string;
   catalogue_price: string | null; currency: string; variants: Variant[];
+  primary_image_url?: string | null; catalogue_pdf_url?: string | null;
 };
 export type Branch = { id: number; branch_name: string; address: string; pin_code: string; locality: string; district: string; state: string; country: string };
 export type Listing = {
   id: number; business_id: number; business_name: string; location: number; product: number; product_name: string;
   variant: number | null; selling_price: string; currency: string; stock_status: 'IN_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN';
   quantity: string | null; branch: Branch;
+  primary_image_url?: string | null; catalogue_pdf_url?: string | null;
 };
 export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 export type Discovery = Page<Listing> & { match_level: string };
@@ -31,11 +33,18 @@ const text = (value: unknown): string => { if (typeof value !== 'string') throw 
 const number = (value: unknown): number => { if (typeof value !== 'number' || !Number.isFinite(value)) throw new ApiError('Unexpected numeric API field.'); return value; };
 const nullable = (value: unknown): string | null => value === null ? null : text(value);
 const array = (value: unknown): unknown[] => { if (!Array.isArray(value)) throw new ApiError('Unexpected API list.'); return value; };
+function mediaFields(value: Record<string, unknown>) {
+  return {
+    primary_image_url: typeof value.primary_image_url === 'string' ? value.primary_image_url : null,
+    catalogue_pdf_url: typeof value.catalogue_pdf_url === 'string' ? value.catalogue_pdf_url : null,
+  };
+}
 export function mapProduct(value: unknown): Product {
   const p = object(value);
   const price = nullable(p.catalogue_price), currency = text(p.currency);
   if ((price === null && currency !== '') || (price !== null && currency !== 'INR')) throw new ApiError('Unexpected catalogue currency.');
   return {
+    ...mediaFields(p),
     id: number(p.id), name: text(p.name), code: text(p.code), brand_id: typeof p.brand_id === 'number' ? p.brand_id : undefined, company_id: typeof p.company_id === 'number' ? p.company_id : undefined, brand_name: text(p.brand_name), company_name: text(p.company_name), category_name: text(p.category_name),
     description: text(p.description), specifications: object(p.specifications), unit: text(p.unit), catalogue_price: price, currency,
     variants: array(p.variants).map(value => { const v = object(value); return { id: number(v.id), product: number(v.product), name: text(v.name), sku: text(v.sku), attributes: object(v.attributes), active: v.active === true }; }).filter(v => v.active),
@@ -49,6 +58,7 @@ export function mapListing(value: unknown): Listing {
   if (text(b.country) !== 'IN' || !/^[1-9][0-9]{5}$/.test(text(b.pin_code))) throw new ApiError('Unexpected dealer branch location.');
   // Explicit projection prevents private contacts from entering mobile view models.
   return {
+    ...mediaFields(item),
     id: number(item.id), business_id: number(item.business_id), business_name: text(item.business_name), location: number(item.location), product: number(item.product), product_name: text(item.product_name),
     variant: item.variant === null ? null : number(item.variant), selling_price: text(item.selling_price), currency: text(item.currency), stock_status: stock as Listing['stock_status'], quantity: nullable(item.quantity),
     branch: { id: number(b.id), branch_name: text(b.branch_name), address: text(b.address), pin_code: text(b.pin_code), locality: text(b.locality), district: text(b.district), state: text(b.state), country: text(b.country) },
@@ -72,36 +82,39 @@ export function query(filters: Record<string, string | undefined>, page: number)
   return params.toString();
 }
 
+const connectionMessage = 'Unable to connect right now. Please check your internet or try again in a moment.';
+const setupMessage = 'SmartTrade can’t connect with this app setup. Please contact support.';
+
 export class ApiClient {
   base: string;
   transport: typeof fetch;
   constructor(base: string, transport: typeof fetch = fetch) { this.base = base.replace(/\/+$/, ''); this.transport = transport; }
   async get(path: string, signal?: AbortSignal, token?: string, init: RequestInit = {}): Promise<unknown> {
-    if (!this.base) throw new ApiError('Set EXPO_PUBLIC_API_URL to a reachable development API URL, then restart Expo.');
+    if (!this.base) throw new ApiError(setupMessage);
     let url: URL;
-    try { url = new URL(this.base); } catch { throw new ApiError('EXPO_PUBLIC_API_URL must be an absolute HTTP(S) API base URL.'); }
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new ApiError('API URL must use HTTP(S) and contain no credentials.');
-    if (url.search || url.hash) throw new ApiError('API base URL cannot contain query parameters or fragments.');
+    try { url = new URL(this.base); } catch { throw new ApiError(setupMessage); }
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new ApiError(setupMessage);
     let response: Response;
     try { response = await this.transport(`${this.base}${path}`, { ...init, signal, headers: { Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) } }); }
-    catch (error) { if (signal?.aborted) throw error; throw new ApiError('Cannot reach SmartTrade. Check the API URL, device network and local server.'); }
+    catch (error) { if (signal?.aborted) throw error; throw new ApiError(connectionMessage); }
     if (!response.ok) {
       if (init.method || (path.startsWith('/companies') || path.startsWith('/businesses'))) {
         const error = await response.json().catch(() => ({})) as Record<string, unknown>;
         const fields = error.field_errors ?? Object.fromEntries(Object.entries(error).filter(([key]) => !['message', 'code', 'detail'].includes(key)));
         const describe = (value: unknown): string => typeof value === 'string' ? value : Array.isArray(value) ? value.map(describe).join(' ') : value && typeof value === 'object' ? Object.entries(value).map(([key, val]) => `${key}: ${describe(val)}`).join(' ') : '';
+        if (response.status === 503) throw new ApiError(connectionMessage, 503, typeof error.code === 'string' ? error.code : undefined);
         throw new ApiError([typeof error.message === 'string' ? error.message : 'The request could not be completed.', describe(fields)].filter(Boolean).join(' '), response.status, typeof error.code === 'string' ? error.code : undefined);
       }
-      if (response.status === 401) throw new ApiError('Your session is no longer valid. Sign in again to discover dealers.', 401);
-      if (response.status === 403) throw new ApiError('This account cannot access dealer discovery.', 403);
+      if (response.status === 401) throw new ApiError('Please sign in again to continue.', 401);
+      if (response.status === 403) throw new ApiError('This action isn’t available for your account.', 403);
       if (response.status === 404) {
         if (/^\/catalogue\/products\/\d+$/.test(path)) throw new ApiError('This product is no longer available.', 404);
-        throw new ApiError('The requested SmartTrade resource is not available.', 404);
+        throw new ApiError('We couldn’t find what you requested.', 404);
       }
-      throw new ApiError(response.status >= 500 ? 'SmartTrade is temporarily unavailable. Retry shortly.' : 'The search could not be completed. Check your filters.', response.status);
+      throw new ApiError(response.status >= 500 ? connectionMessage : 'The search could not be completed. Check your filters.', response.status);
     }
     if (response.status === 204) return undefined;
-    try { return await response.json(); } catch { throw new ApiError('SmartTrade returned an unreadable response.'); }
+    try { return await response.json(); } catch { throw new ApiError('We couldn’t load this information. Please try again.'); }
   }
   async post(path: string, data: unknown, token?: string) {
     return this.get(path, undefined, token, { method: 'POST', body: JSON.stringify(data) });

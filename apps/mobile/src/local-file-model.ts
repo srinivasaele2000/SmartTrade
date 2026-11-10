@@ -1,9 +1,10 @@
-export type LocalFileCategory = 'company_document' | 'dealer_document' | 'product_image' | 'invoice';
+export type LocalFileCategory = 'company_document' | 'dealer_document' | 'product_image' | 'invoice' | 'catalogue_pdf';
 export type LocalFileRecord = {
   id: string;
   category: LocalFileCategory;
   ownerKey: string;
   displayName: string;
+  title?: string;
   mimeType: string;
   size: number;
   uri: string;
@@ -11,7 +12,7 @@ export type LocalFileRecord = {
 };
 export type LocalFileStatus = LocalFileRecord & { exists: boolean };
 
-const categories = new Set<LocalFileCategory>(['company_document', 'dealer_document', 'product_image', 'invoice']);
+const categories = new Set<LocalFileCategory>(['company_document', 'dealer_document', 'product_image', 'invoice', 'catalogue_pdf']);
 export function safeFileName(value: string) {
   const cleaned = value.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(-120);
   return cleaned || 'file';
@@ -35,4 +36,26 @@ export function parseLocalFileRecords(value: string): LocalFileRecord[] {
 }
 export function recordsFor(records: LocalFileRecord[], category: LocalFileCategory, ownerKey: string) {
   return records.filter(record => record.category === category && record.ownerKey === ownerKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export const invoiceFileScope = (accountId: number, invoiceId: number) => `account-${accountId}-invoice-${invoiceId}`;
+
+export function offlineDocumentRecords(records: LocalFileRecord[], accountId: number) {
+  return records.filter(record => record.mimeType === 'application/pdf' && (
+    record.category === 'catalogue_pdf' || (record.category === 'invoice' &&
+      record.ownerKey.startsWith(`account-${accountId}-invoice-`))
+  )).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function fileSizeLabel(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${Number((bytes / (1024 * 1024)).toFixed(2))} MB`;
+}
+
+export function offlineDocumentTitle(record: LocalFileRecord) {
+  if (record.category === 'invoice') return 'Invoice #' + record.displayName.replace(/\.pdf$/i, '');
+  const productId = /^product-(\d+)$/.exec(record.ownerKey)?.[1];
+  return typeof record.title === 'string' && record.title.trim() ? `Catalogue · ${record.title}`
+    : productId ? `Catalogue · Product #${productId}` : record.displayName;
 }

@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { File } from 'expo-file-system';
 import {resolveApiFileUrl} from './api-file-url';
-import { parseLocalFileRecords, recordsFor, safeFileName, type LocalFileCategory, type LocalFileRecord, type LocalFileStatus } from './local-file-model';
+import { offlineDocumentRecords, parseLocalFileRecords, recordsFor, safeFileName, type LocalFileCategory, type LocalFileRecord, type LocalFileStatus } from './local-file-model';
 
 const root = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}smarttrade-private/` : null;
 const contentRoot = root ? `${root}content/` : null;
@@ -80,6 +80,17 @@ export async function localFiles(category: LocalFileCategory, ownerKey: string):
   const records = recordsFor(await readAll(), category, ownerKey);
   return Promise.all(records.map(async record => ({ ...record, exists: (await FileSystem.getInfoAsync(record.uri)).exists })));
 }
+
+export async function offlineDocuments(accountId: number): Promise<LocalFileStatus[]> {
+  const {contentRoot} = configured();
+  const records = offlineDocumentRecords(await readAll(), accountId).filter(record =>
+    record.uri.startsWith(contentRoot) && /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(record.uri.slice(contentRoot.length)));
+  return Promise.all(records.map(async record => {
+    const info = await FileSystem.getInfoAsync(record.uri);
+    const exists = info.exists && !info.isDirectory;
+    return {...record, exists, size: exists && 'size' in info ? info.size : 0};
+  }));
+}
 export async function moveLocalFileScope(category: LocalFileCategory, fromOwnerKey: string, toOwnerKey: string) {
   if (!fromOwnerKey || fromOwnerKey === toOwnerKey) return;
   await serialized(async () => {
@@ -108,7 +119,7 @@ export async function importLocalFile(input: { uri: string; name: string; mimeTy
 export function downloadApiFile(base:string, reference:string, headers:Record<string,string>, name:string, category:LocalFileCategory, ownerKey:string, mimeType:string) {
   return downloadLocalFile(resolveApiFileUrl(base,reference),headers,name,category,ownerKey,mimeType);
 }
-export async function downloadLocalFile(url: string, headers: Record<string, string>, name: string, category: LocalFileCategory, ownerKey: string, mimeType: string) {
+export async function downloadLocalFile(url: string, headers: Record<string, string>, name: string, category: LocalFileCategory, ownerKey: string, mimeType: string, title?: string) {
   const existing = recordsFor(await readAll(), category, ownerKey).find(record => record.displayName === name);
   if (existing && (await FileSystem.getInfoAsync(existing.uri)).exists) return existing;
   await ensureStorage(); await availableFor(1);
@@ -119,7 +130,7 @@ export async function downloadLocalFile(url: string, headers: Record<string, str
     const info = await FileSystem.getInfoAsync(uri);
     const size = info.exists && 'size' in info && typeof info.size === 'number' ? info.size : 0;
     if (!size) throw new Error('The downloaded file is empty.');
-    const record: LocalFileRecord = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, category, ownerKey, displayName: name, mimeType, size, uri, createdAt: new Date().toISOString() };
+    const record: LocalFileRecord = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, category, ownerKey, displayName: name, mimeType, size, uri, createdAt: new Date().toISOString(), title };
     return await addRecord(record, true);
   }
   catch (error) { await FileSystem.deleteAsync(uri, { idempotent: true }); throw error; }

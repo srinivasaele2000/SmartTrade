@@ -1,7 +1,10 @@
 from django.urls import path
+from .media import StaffProductMedia
 from .views import OwnerBrand, StaffBrands, StaffCategory, StaffCatalogueAudit, Categories, ModerateProduct, OwnerCatalogue, OwnerProduct, OwnerVariant, OwnerVariants, PublicBrands, PublicProduct, PublicProducts, StaffCategories, StaffProducts
 
 urlpatterns = [
+    *[path(f'staff/catalogue/products/<int:pk>/{kind}', StaffProductMedia.as_view(), {'kind': kind})
+      for kind in ('image', 'catalogue-pdf')],
     path('companies/me/catalogue/brands/<int:pk>', OwnerBrand.as_view()),
     path('staff/catalogue/brands', StaffBrands.as_view()),
     path('staff/catalogue/categories/<int:pk>', StaffCategory.as_view()),

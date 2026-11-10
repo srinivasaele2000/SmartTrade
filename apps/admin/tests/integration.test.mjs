@@ -24,6 +24,21 @@ test('JSON requests retain exact base/path, method and bearer header', async () 
   const result = await requestApi('/api/v1', '/staff/catalogue/products/7/moderation', 'isolated-test-token', { method: 'POST', body: JSON.stringify({ action: 'HIDE', reason: 'Review' }) });
   assert.equal(result.moderation_state, 'HIDDEN');
 });
+test('catalogue multipart upload lets the browser supply the content boundary', async () => {
+  const form = new FormData();
+  form.append('file', new Blob(['pdf'], {type: 'application/pdf'}), 'fixture.pdf');
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, '/api/v1/staff/catalogue/products/7/catalogue-pdf');
+    assert.equal(init.method, 'POST');
+    assert.equal(init.headers.Authorization, 'Bearer fixture');
+    assert.equal(init.headers['Content-Type'], undefined);
+    assert.equal(init.body.get('file').name, 'fixture.pdf');
+    return json({filename: 'fixture.pdf'}, 201);
+  };
+  assert.deepEqual(await requestApi('/api/v1', '/staff/catalogue/products/7/catalogue-pdf', 'fixture', {
+    method: 'POST', body: form,
+  }), {filename: 'fixture.pdf'});
+});
 test('field validation explains invalid Indian mobile input instead of hiding field errors', async () => {
   globalThis.fetch = async () => json({ message: 'Request validation failed.', field_errors: { mobile_e164: ['Use a valid Indian mobile number in +91XXXXXXXXXX format.'] } }, 400);
   await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), error => error.status === 400 && /mobile_e164.*Indian/.test(error.message));

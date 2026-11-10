@@ -29,6 +29,9 @@ $usbEnv = Join-Path $privateDir 'usb-build.env'
 if (!(Test-Path $usbEnv)) { 'EXPO_PUBLIC_API_URL=http://127.0.0.1:8000/api/v1' | Set-Content -LiteralPath $usbEnv }
 foreach ($line in Get-Content $usbEnv) {
     if ($line -match '^EXPO_PUBLIC_API_URL=(.+)$') { $env:EXPO_PUBLIC_API_URL = $Matches[1] }
+    if ($line -match '^(EXPO_PUBLIC_ENABLE_DEMO_ROLES|EXPO_PUBLIC_DEMO_(BUYER|DEALER|COMPANY|STAFF)_MOBILE)=([+0-9a-z]*)$') {
+        [Environment]::SetEnvironmentVariable($Matches[1], $Matches[3], 'Process')
+    }
 }
 $env:EXPO_NO_DOTENV = '1'
 $env:NODE_ENV = 'production'

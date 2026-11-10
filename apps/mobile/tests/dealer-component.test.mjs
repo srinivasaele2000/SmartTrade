@@ -28,6 +28,8 @@ function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'rea
   }
   native.StyleSheet = { create: value => value };
   const imports = { './Button':buttonModule(React,native,jsx),
+    'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
+    './DealerActivity': {DealerActivity: () => null},
     './Onboarding': {DealerContacts: () => null, DealerDeclarations: () => null, IdentityFields: () => null},
     react: { ...React, useState: value => React.useState(value === 'Dashboard' ? tab : value) },
     'react/jsx-runtime': jsx, 'react-native': native, './dealer': dealer, './api': api, './india': india, './LocalFileVault': { default: props => React.createElement('div', null, props.title, props.description) },
@@ -39,7 +41,7 @@ function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'rea
   return renderToStaticMarkup(React.createElement(module.exports.default, { api: new api.ApiClient('http://example.test/api/v1') }));
 }
 test('actual component gates non-business identities and displays real aggregate dashboard fields', () => {
-  assert.match(render({ role: 'PERSONAL' }), /active BUSINESS account/);
+  assert.match(render({ role: 'PERSONAL' }), /active dealer account/);
   assert.match(render(), /Branches: 0/);
   assert.match(render(), /Currently discoverable listings: 0/);
 });

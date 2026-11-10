@@ -24,7 +24,7 @@ def eligible_products():
 
 
 def products():
-    return Product.objects.select_related('brand_category__brand__company', 'brand_category__category').prefetch_related('variants').order_by('pk')
+    return Product.objects.select_related('brand_category__brand__company', 'brand_category__category').prefetch_related('variants', 'official_media').order_by('pk')
 
 
 def owner(request):
@@ -250,6 +250,9 @@ class StaffProducts(generics.ListAPIView):
     required_staff_permission = 'MODERATE_PRODUCTS'
     serializer_class = ProductSerializer
     pagination_class = Pages
+
+    def get_serializer_context(self):
+        return super().get_serializer_context() | {'staff_media': True}
 
     def get_queryset(self):
         qs = products()

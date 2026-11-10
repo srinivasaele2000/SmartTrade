@@ -78,7 +78,7 @@ def audit(request, business, action, snapshot, reason='', location=None, listing
 
 def page(request, qs, serializer):
     pages = Pages()
-    return pages.get_paginated_response(serializer(pages.paginate_queryset(qs, request), many=True).data)
+    return pages.get_paginated_response(serializer(pages.paginate_queryset(qs, request), many=True, context={'request': request}).data)
 
 
 def save_validated(request, serializer, dealer, action, *, audit_fields=None, **kwargs):
@@ -303,7 +303,7 @@ class Discovery(APIView):
             if any(request.query_params.get(key) for key in ['pin_code', 'locality', 'district']):
                 qs = qs_for_fallback
                 match = 'NO_LOCATION_MATCH'
-        response = page(request, qs, DiscoverySerializer)
+        response = page(request, qs.prefetch_related('product__official_media'), DiscoverySerializer)
         response.data['match_level'] = match
         response['Cache-Control'] = 'private, no-store'
         return response

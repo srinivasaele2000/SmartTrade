@@ -32,7 +32,7 @@ function vault({status=200,networkError=false,empty=false,metadataError=false}={
  const imports={'expo-file-system/legacy':native,'expo-file-system':{File:class{}},'./local-file-model':model,'./api-file-url':{resolveApiFileUrl}};
  const module={exports:{}};new Function('require','module','exports',compiled)(name=>imports[name],module,module.exports);
  const download=(api=base,path='/api/v1/orders/9/invoice/download')=>module.exports.downloadApiFile(api,path,{Authorization:'Bearer isolated-test-token'},'invoice.pdf','invoice','invoice-9','application/pdf');
- return {files,calls,download};
+ return {files,calls,download,storage:module.exports};
 }
 test('actual URL-to-vault integration saves metadata only after a successful private download and reuses the copy',async()=>{
  const {download,files,calls}=vault();const first=await download(),again=await download();
@@ -49,4 +49,22 @@ test('failed, empty or interrupted downloads and metadata write failures never c
 });
 test('cross-origin invoice reference is rejected before the authenticated file transport runs',async()=>{
  const {download,calls}=vault();assert.throws(()=>download(base,'https://foreign.test/api/v1/orders/9/invoice/download'));assert.equal(calls.length,0);
+});
+
+test('offline document index hides legacy and other-account invoices, includes catalogues, and updates after removal', async () => {
+ const {download, storage, files}=vault();
+ const legacy=await download();
+ const firstScope=model.invoiceFileScope(7,9);
+ assert.deepEqual(await storage.offlineDocuments(7), []);
+ await storage.moveLocalFileScope('invoice','invoice-9',firstScope);
+ const catalogue=await storage.downloadLocalFile(base+'/catalogue/fixture',{},'fixture.pdf','catalogue_pdf','product-1','application/pdf','Lighting');
+ const mine=await storage.offlineDocuments(7);
+ assert.deepEqual(new Set(mine.map(file=>file.id)),new Set([legacy.id,catalogue.id]));
+ assert.deepEqual((await storage.offlineDocuments(70)).map(file=>file.id),[catalogue.id]);
+ assert.equal(model.offlineDocumentTitle(catalogue),'Catalogue · Lighting');
+ const invoice=mine.find(file=>file.category==='invoice');
+ assert.equal(invoice.size,files.get(invoice.uri).length);
+ await storage.deleteLocalFile(invoice);
+ assert.equal(files.has(legacy.uri),false);
+ assert.deepEqual((await storage.offlineDocuments(7)).map(file=>file.id),[catalogue.id]);
 });

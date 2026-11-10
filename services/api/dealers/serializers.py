@@ -4,6 +4,7 @@ from rest_framework import serializers
 from accounts.models import BusinessProfile
 from accounts.profiles import validate_profile_location
 from catalogue.serializers import StrictSerializer
+from catalogue.media import attachment, media_url
 from .models import DealerLocation, DealerProductListing, AuthorizedDealerGrant
 from config.india import GSTIN_PATTERN, INDIAN_MOBILE_PATTERN, INDIAN_PIN_PATTERN, PAN_PATTERN, canonical_indian_state
 
@@ -136,9 +137,17 @@ class GrantSerializer(StrictSerializer):
 class DiscoverySerializer(ListingSerializer):
     # Address and branch identity are discoverable; owner contact fields are deliberately absent.
     branch = serializers.SerializerMethodField()
+    primary_image_url = serializers.SerializerMethodField()
+    catalogue_pdf_url = serializers.SerializerMethodField()
 
     class Meta(ListingSerializer.Meta):
-        fields = ListingSerializer.Meta.fields + ['branch']
+        fields = ListingSerializer.Meta.fields + ['branch', 'primary_image_url', 'catalogue_pdf_url']
+
+    def get_primary_image_url(self, item):
+        return media_url(self.context.get('request'), attachment(item.product, 'image'))
+
+    def get_catalogue_pdf_url(self, item):
+        return media_url(self.context.get('request'), attachment(item.product, 'catalogue-pdf'))
 
     def get_branch(self, item):
         location = item.location

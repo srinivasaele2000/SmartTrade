@@ -79,7 +79,7 @@ test('401 and 403 fail closed; service/network/malformed responses are errors, n
     await assert.rejects(api.dealers(10, {}, 1, 'test-only-token'), error => error.status === status);
   }
   const offline = new ApiClient('http://example.test/api/v1', async () => { throw new Error('offline'); });
-  await assert.rejects(offline.products({}, 1), /Cannot reach/);
+  await assert.rejects(offline.products({}, 1), /Unable to connect right now/);
   const malformed = new ApiClient('http://example.test/api/v1', async () => response({ results: [] }));
   await assert.rejects(malformed.products({}, 1), ApiError);
 });
@@ -91,8 +91,9 @@ test('loading, failure, retry and successful empty states are distinct', () => {
   assert.equal(state.status, 'ready'); assert.equal(state.data.count, 0);
 });
 test('configuration and brand validation fail before sending a request', async () => {
-  const api = new ApiClient(''); await assert.rejects(api.products({}, 1), /EXPO_PUBLIC_API_URL/);
-  await assert.rejects(new ApiClient('http://user:secret@example.test').products({}, 1), /contain no credentials/);
+  const unexpected = async () => assert.fail('Invalid configuration must not make a request');
+  const api = new ApiClient('', unexpected); await assert.rejects(api.products({}, 1), /contact support/);
+  await assert.rejects(new ApiClient('http://user:secret@example.test', unexpected).products({}, 1), /contact support/);
   await assert.rejects(new ApiClient('http://example.test').products({ brand: 'oops' }, 1), /Brand ID/);
 });
 test('session admission verifies the server account status', async () => {
@@ -105,7 +106,7 @@ test('404 product detail is unavailable rather than empty inventory', async () =
 });
 test('non-product 404 errors do not masquerade as unavailable inventory', async () => {
   const api = new ApiClient('http://example.test/api/v1', async () => new Response('{}', { status: 404 }));
-  await assert.rejects(api.brands({}, 1), error => error.status === 404 && /requested SmartTrade resource/.test(error.message));
+  await assert.rejects(api.brands({}, 1), error => error.status === 404 && /couldn’t find what you requested/.test(error.message));
 });
 test('abort signals reach transport without becoming successful empty results', async () => {
   const controller = new AbortController();
@@ -117,11 +118,11 @@ test('abort signals reach transport without becoming successful empty results', 
 });
 test('server-side error and unreadable JSON cannot become an empty search', async () => {
   const api = new ApiClient('http://example.test/api/v1', async () => new Response('not json'));
-  await assert.rejects(api.products({}, 1), /unreadable/);
+  await assert.rejects(api.products({}, 1), /couldn’t load this information/);
 });
 test('API base cannot smuggle query credentials into endpoint requests', async () => {
   const api = new ApiClient('http://example.test/api/v1?key=test-only');
-  await assert.rejects(api.products({}, 1), /query parameters/);
+  await assert.rejects(api.products({}, 1), /contact support/);
 });
 
 test('selected SKU is sent to discovery before server pagination',async()=>{
