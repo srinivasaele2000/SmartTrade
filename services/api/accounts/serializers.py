@@ -1,20 +1,30 @@
 from rest_framework import serializers
 
-from .models import AccountType
+from .models import ACCOUNT_TYPES_BY_ROLE, AccountType, UserRole
 from config.india import INDIAN_MOBILE_PATTERN
 
 
 E164_PATTERN = INDIAN_MOBILE_PATTERN
-MARKETPLACE_ACCOUNT_TYPES = (
-    (AccountType.PERSONAL, "Personal"),
-    (AccountType.BUSINESS, "Business"),
-    (AccountType.COMPANY, "Company"),
-)
+MARKETPLACE_ACCOUNT_TYPES = tuple((kind, label) for kind, label in AccountType.choices if kind != AccountType.STAFF)
+REGISTRATION_ROLES = tuple((role, label) for role, label in UserRole.choices if role != UserRole.PLATFORM_ADMIN)
 
 
 class AccountRegistrationSerializer(serializers.Serializer):
     mobile_e164 = serializers.CharField(max_length=16)
-    account_type = serializers.ChoiceField(choices=MARKETPLACE_ACCOUNT_TYPES)
+    account_type = serializers.ChoiceField(choices=MARKETPLACE_ACCOUNT_TYPES, required=False)
+    role = serializers.ChoiceField(choices=REGISTRATION_ROLES, required=False)
+
+    def validate(self, attrs):
+        role = attrs.pop('role', None)
+        kind = attrs.get('account_type')
+        if role is not None:
+            mapped = ACCOUNT_TYPES_BY_ROLE[role]
+            if kind is not None and kind != mapped:
+                raise serializers.ValidationError({'role': 'Role and account type must describe the same account.'})
+            attrs['account_type'] = mapped
+        elif kind is None:
+            raise serializers.ValidationError({'role': 'Select a registration role.'})
+        return attrs
 
     def validate_mobile_e164(self, value):
         if not E164_PATTERN.fullmatch(value):
@@ -48,6 +58,7 @@ class AccountResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     mobile_e164 = serializers.CharField()
     account_type = serializers.CharField()
+    role = serializers.CharField()
     access_state = serializers.CharField()
     mobile_verified = serializers.SerializerMethodField()
     staff_profile = serializers.SerializerMethodField()

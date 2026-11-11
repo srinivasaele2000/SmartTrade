@@ -7,11 +7,14 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
-test('all six sidebar links resolve to distinct page identities', () => {
-  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'dealers', 'enquiries', 'orders', 'audit']);
+test('sidebar and direct onboarding paths resolve to distinct page identities', () => {
+  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'catalogues', 'dealers', 'dealer-directory', 'enquiries', 'orders', 'audit']);
   for (const page of pages) assert.equal(pageFromHash(`#${page.id}`), page.id);
   assert.equal(pageFromHash(''), 'overview');
   assert.equal(pageFromHash('#missing'), 'overview');
+  assert.equal(pageFromHash('', '/catalogues'), 'catalogues');
+  assert.equal(pageFromHash('', '/dealers'), 'dealer-directory');
+  assert.equal(pageFromHash('#dealers', '/dealers'), 'dealers');
 });
 test('JSON requests retain exact base/path, method and bearer header', async () => {
   globalThis.fetch = async (url, init) => {

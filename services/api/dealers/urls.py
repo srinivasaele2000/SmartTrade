@@ -1,7 +1,12 @@
 from django.urls import path
-from . import onboarding, views
+from . import client_onboarding, onboarding, views
 
 urlpatterns = [
+    path('auth/dealer/register/', client_onboarding.DealerRegistration.as_view()),
+    path('dealers/contacts/batch/', client_onboarding.BatchContacts.as_view()),
+    path('admin/dealers/', client_onboarding.DealerDirectory.as_view()),
+    path('admin/dealers/<int:pk>/', client_onboarding.DealerDirectoryDetail.as_view()),
+    path('admin/dealers/<int:pk>/contacts/', onboarding.StaffContacts.as_view()),
     path('businesses/me/declarations', onboarding.Declarations.as_view()),
     path('businesses/me/declaration-brands', onboarding.DeclarationBrands.as_view()),
     path('businesses/me/brand-suggestions', onboarding.Suggestions.as_view()),

@@ -1,11 +1,14 @@
 import {StyleSheet, Text, useColorScheme, View} from 'react-native';
-import {Building2, ShieldCheck, ShoppingBag, Store} from 'lucide-react-native';
+import {Briefcase, Building2, Search, ShieldCheck, ShoppingBag, Store, Wrench} from 'lucide-react-native';
 import type {Account} from './auth';
 
 const identities = {
-  PERSONAL: {label: 'BUYER', Icon: ShoppingBag, light: ['#E7F0FF', '#174888'], dark: ['#162E52', '#C4DAFF']},
+  PERSONAL: {label: 'CUSTOMER', Icon: ShoppingBag, light: ['#E7F0FF', '#174888'], dark: ['#162E52', '#C4DAFF']},
   BUSINESS: {label: 'DEALER', Icon: Store, light: ['#DBF1E5', '#15543B'], dark: ['#17382B', '#B2E7CB']},
   COMPANY: {label: 'COMPANY', Icon: Building2, light: ['#EFE6FF', '#552780'], dark: ['#36234D', '#E8D3FF']},
+  SERVICE_PROVIDER: {label: 'SERVICE PROVIDER', Icon: Wrench, light: ['#FFF0D6', '#7A4200'], dark: ['#422A0C', '#FFDB91']},
+  JOB_SEEKER: {label: 'JOB SEEKER', Icon: Search, light: ['#DFF5F2', '#115952'], dark: ['#123B38', '#A9E9DE']},
+  EMPLOYER: {label: 'EMPLOYER', Icon: Briefcase, light: ['#EBEAFF', '#37308B'], dark: ['#282351', '#D5D0FF']},
   STAFF: {label: 'STAFF', Icon: ShieldCheck, light: ['#FCE9E7', '#8A241B'], dark: ['#481C1B', '#FFD1CC']},
 } as const;
 

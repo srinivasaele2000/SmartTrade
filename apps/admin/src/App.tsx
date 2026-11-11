@@ -1,6 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReviewRequests from "./ReviewRequests";
 import Catalogue from "./Catalogue";
+import CatalogueVault from "./CatalogueVault";
+import DealerDirectory from "./DealerDirectory";
 import Dealers from "./Dealers";
 import Enquiries from "./Enquiries";
 import Orders from "./Orders";
@@ -63,7 +65,7 @@ function formatDate(value: string) {
 }
 
 function App() {
-  const [page, setPage] = useState(() => pageFromHash(window.location.hash));
+  const [page, setPage] = useState(() => pageFromHash(window.location.hash, window.location.pathname));
   const currentPage = pages.find(item => item.id === page)!;
   const [sessionMessage, setSessionMessage] = useState("");
   const [mobile, setMobile] = useState("");
@@ -95,7 +97,7 @@ function App() {
   const selectedCase = useMemo(() => cases.find((item) => item.company_id === selectedId) ?? null, [cases, selectedId]);
 
   useEffect(() => {
-    const navigate = () => { setPage(pageFromHash(window.location.hash)); window.scrollTo(0, 0); };
+    const navigate = () => { setPage(pageFromHash(window.location.hash, window.location.pathname)); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', navigate);
     return () => window.removeEventListener('hashchange', navigate);
   }, []);
@@ -433,6 +435,8 @@ function App() {
         {page === 'verification' && actionMessage && <p className={`action-message ${actionMessage.kind}`} role="status">{actionMessage.text}</p>}
         {accessToken && page === 'review-requests' && <ReviewRequests baseUrl={API_BASE} token={accessToken} canRestore={Boolean(account?.staff_profile?.permissions.includes("RESTORE_COMPANY"))} />}
         {accessToken && page === 'catalogue' && <Catalogue baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
+        {accessToken && page === 'catalogues' && <CatalogueVault baseUrl={API_BASE} token={accessToken} allowed={Boolean(account?.staff_profile?.permissions.includes('MODERATE_PRODUCTS'))} />}
+        {accessToken && page === 'dealer-directory' && <DealerDirectory baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'dealers' && <Dealers baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'enquiries' && <Enquiries baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'audit' && <AuditHistory baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}

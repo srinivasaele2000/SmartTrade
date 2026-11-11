@@ -9,11 +9,36 @@ from config.india import INDIAN_MOBILE_PATTERN
 E164_PATTERN = INDIAN_MOBILE_PATTERN
 
 
+class UserRole(models.TextChoices):
+    CUSTOMER = "CUSTOMER", "Personal User / Customer"
+    BUSINESS_DEALER = "BUSINESS_DEALER", "Business User / Dealer / Shop"
+    COMPANY_BRAND = "COMPANY_BRAND", "Company / Manufacturer / Brand"
+    SERVICE_PROVIDER = "SERVICE_PROVIDER", "Service Provider"
+    JOB_SEEKER = "JOB_SEEKER", "Job Seeker"
+    EMPLOYER = "EMPLOYER", "Employer"
+    PLATFORM_ADMIN = "PLATFORM_ADMIN", "Platform Admin / Staff"
+
+
 class AccountType(models.TextChoices):
     PERSONAL = "PERSONAL", "Personal"
     BUSINESS = "BUSINESS", "Business"
     COMPANY = "COMPANY", "Company"
     STAFF = "STAFF", "Staff"
+    SERVICE_PROVIDER = "SERVICE_PROVIDER", "Service Provider"
+    JOB_SEEKER = "JOB_SEEKER", "Job Seeker"
+    EMPLOYER = "EMPLOYER", "Employer"
+
+
+ACCOUNT_TYPES_BY_ROLE = {
+    UserRole.CUSTOMER: AccountType.PERSONAL,
+    UserRole.BUSINESS_DEALER: AccountType.BUSINESS,
+    UserRole.COMPANY_BRAND: AccountType.COMPANY,
+    UserRole.SERVICE_PROVIDER: AccountType.SERVICE_PROVIDER,
+    UserRole.JOB_SEEKER: AccountType.JOB_SEEKER,
+    UserRole.EMPLOYER: AccountType.EMPLOYER,
+    UserRole.PLATFORM_ADMIN: AccountType.STAFF,
+}
+ROLES_BY_ACCOUNT_TYPE = {kind: role for role, kind in ACCOUNT_TYPES_BY_ROLE.items()}
 
 
 class AccountAccessState(models.TextChoices):
@@ -57,7 +82,7 @@ class AccountManager(BaseUserManager):
 
 class Account(AbstractBaseUser):
     mobile_e164 = models.CharField(max_length=16, unique=True)
-    account_type = models.CharField(max_length=10, choices=AccountType.choices)
+    account_type = models.CharField(max_length=16, choices=AccountType.choices)
     access_state = models.CharField(
         max_length=8,
         choices=AccountAccessState.choices,
@@ -87,6 +112,10 @@ class Account(AbstractBaseUser):
                 name="account_indian_mobile",
             ),
         ]
+
+    @property
+    def role(self):
+        return ROLES_BY_ACCOUNT_TYPE[self.account_type]
 
     @property
     def is_active(self):
@@ -155,7 +184,20 @@ class PersonalProfile(models.Model):
     )
 
 
+class BusinessType(models.TextChoices):
+    ELECTRICAL = 'ELECTRICAL', 'Electrical'
+    PLUMBING = 'PLUMBING', 'Plumbing'
+    PAINTS = 'PAINTS', 'Paints'
+    HARDWARE = 'HARDWARE', 'Hardware'
+    NETWORKING = 'NETWORKING', 'Networking'
+    OTHER = 'OTHER', 'Other'
+
+
 class BusinessProfile(models.Model):
+    business_type = models.CharField(max_length=10, choices=BusinessType.choices, default=BusinessType.OTHER)
+    sub_category = models.CharField(max_length=40, blank=True, default='')
+    trade_license = models.CharField(max_length=100, blank=True, default='')
+    contacts_submitted_at = models.DateTimeField(null=True, blank=True)
     owner_name = models.CharField(max_length=200, blank=True)
     business_email = models.EmailField(blank=True)
     registered_address = models.CharField(max_length=400, blank=True)
@@ -181,6 +223,7 @@ class BusinessProfile(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(condition=Q(business_type__in=BusinessType.values), name='business_valid_business_type'),
             models.CheckConstraint(
                 condition=Q(verification_state__in=VerificationState.values),
                 name="business_valid_verification_state",
@@ -197,6 +240,34 @@ class CompanyUserProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="company_user_profile",
     )
+
+
+class WorkforceProfile(models.Model):
+    account = models.OneToOneField(Account, primary_key=True, on_delete=models.CASCADE)
+    pin_code = models.CharField(max_length=6, blank=True)
+    locality = models.CharField(max_length=120, blank=True)
+    district = models.CharField(max_length=120, blank=True)
+    state = models.CharField(max_length=80, blank=True)
+
+    class Meta:
+        abstract = True
+
+
+class ServiceProviderProfile(WorkforceProfile):
+    full_name = models.CharField(max_length=200, blank=True)
+    trade = models.CharField(max_length=120, blank=True)
+
+
+class JobSeekerProfile(WorkforceProfile):
+    full_name = models.CharField(max_length=200, blank=True)
+    skills = models.CharField(max_length=500, blank=True)
+    experience = models.CharField(max_length=1000, blank=True)
+    preferred_location = models.CharField(max_length=200, blank=True)
+
+
+class EmployerProfile(WorkforceProfile):
+    organization_name = models.CharField(max_length=200, blank=True)
+    contact_name = models.CharField(max_length=200, blank=True)
 
 
 class StaffProfile(models.Model):
@@ -325,6 +396,9 @@ def create_account_profile(account):
         AccountType.BUSINESS: BusinessProfile,
         AccountType.COMPANY: CompanyUserProfile,
         AccountType.STAFF: StaffProfile,
+        AccountType.SERVICE_PROVIDER: ServiceProviderProfile,
+        AccountType.JOB_SEEKER: JobSeekerProfile,
+        AccountType.EMPLOYER: EmployerProfile,
     }
     profile_by_type[account.account_type].objects.using(account._state.db).create(
         account=account,

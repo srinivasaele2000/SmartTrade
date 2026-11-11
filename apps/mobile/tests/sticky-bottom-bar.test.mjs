@@ -20,4 +20,7 @@ test('sticky actions clear the system navigation inset and keep padding when the
   bottom = 0;
   assert.equal(render().style[1].paddingBottom, 16);
   assert.equal(render().children, 'Save');
+  assert.equal(exports.StickyBottomBar({children: 'Submit', clearance: 22}).style[1].paddingBottom, 22);
+  bottom = 48;
+  assert.equal(exports.StickyBottomBar({children: 'Submit', clearance: 22}).style[1].paddingBottom, 70);
 });

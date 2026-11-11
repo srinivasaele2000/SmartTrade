@@ -1,6 +1,11 @@
+from pathlib import PurePath
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+
+from .taxonomy import CATALOGUE_BUSINESS_KEYS, CATALOGUE_BUSINESS_TYPES
 
 
 class Category(models.Model):
@@ -80,6 +85,35 @@ class ProductVariant(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['product', 'sku'], name='catalogue_variant_product_sku')]
+
+
+def vault_path(instance, filename):
+    return f'vault/catalogues/{instance.key}{PurePath(filename).suffix.lower()}'
+
+
+def vault_storage():
+    from django.core.files.storage import FileSystemStorage
+    return FileSystemStorage(location=settings.CATALOGUE_MEDIA_ROOT)
+
+
+class CatalogueDocument(models.Model):
+    key = models.UUIDField(default=uuid4, unique=True, editable=False)
+    business_type = models.CharField(max_length=18, choices=CATALOGUE_BUSINESS_TYPES)
+    sub_category = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    brand_name = models.CharField(max_length=200)
+    title = models.CharField(max_length=200)
+    file = models.FileField(upload_to=vault_path, storage=vault_storage)
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=32)
+    file_size_bytes = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=Q(business_type__in=CATALOGUE_BUSINESS_KEYS), name='vault_valid_business_type',
+        )]
+        indexes = [models.Index(fields=['business_type', 'is_active', '-id'], name='vault_type_active_idx')]
 
 
 class CatalogueAudit(models.Model):

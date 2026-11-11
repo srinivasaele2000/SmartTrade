@@ -5,6 +5,7 @@ from accounts.models import BusinessProfile
 from accounts.profiles import validate_profile_location
 from catalogue.serializers import StrictSerializer
 from catalogue.media import attachment, media_url
+from catalogue.taxonomy import SUB_CATEGORIES
 from .models import DealerLocation, DealerProductListing, AuthorizedDealerGrant
 from config.india import GSTIN_PATTERN, INDIAN_MOBILE_PATTERN, INDIAN_PIN_PATTERN, PAN_PATTERN, canonical_indian_state
 
@@ -18,10 +19,14 @@ class BusinessSerializer(StrictSerializer):
         fields = BUSINESS_SUMMARY_FIELDS + (
             'owner_name', 'business_email', 'registered_address', 'registered_pin_code',
             'registered_locality', 'registered_district', 'registered_state',
+            'business_type', 'sub_category', 'trade_license', 'contacts_submitted_at',
         )
-        read_only_fields = ['id', 'verification_state']
+        read_only_fields = ['id', 'verification_state', 'business_type', 'contacts_submitted_at']
 
     def validate(self, attrs):
+        sub_category = attrs.get('sub_category')
+        if sub_category and sub_category not in SUB_CATEGORIES.get(getattr(self.instance, 'business_type', None), ()):
+            raise serializers.ValidationError({'sub_category': 'Choose a sub-business for the registered business type.'})
         return validate_profile_location(attrs, 'registered_')
 
     def validate_gstin(self, value):

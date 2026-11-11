@@ -57,6 +57,40 @@ class ProductMediaTests(TestCase):
         self.public = APIClient()
         self.route = f'/api/v1/staff/catalogue/products/{self.product.pk}'
 
+    def test_item_edit_replaces_image_and_archive_removes_discovery(self):
+        self.product.catalogue_price = '10.00'
+        self.product.currency = 'INR'
+        self.product.specifications = {'HSN': '8544', 'voltage': '240V'}
+        self.product.save()
+        category = Category.objects.create(name='New category')
+        association = BrandCategory.objects.create(brand=self.brand, category=category)
+        endpoint = f'/api/v1/catalogue/items/{self.product.pk}/'
+        self.assertEqual(self.public.patch(endpoint, {'name': 'Unauthorized'}, format='json').status_code, 401)
+        self.assertEqual(self.public.delete(endpoint).status_code, 401)
+        self.assertEqual(self.client.patch(endpoint, {'price_per_unit': '-1'}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(endpoint, {'hsn_sac_code': 'text'}, format='json').status_code, 400)
+        self.assertEqual(self.upload('image', 'old.png', png(), 'image/png').status_code, 201)
+        old = self.product.official_media.get().storage_name
+        with self.captureOnCommitCallbacks(execute=True):
+            updated = self.client.patch(endpoint, {
+                'name': 'Updated fixture', 'product_code': 'MEDIA-UPDATED', 'hsn_sac_code': '8536',
+                'price_per_unit': '12.25', 'brand_category': association.pk,
+                'image': SimpleUploadedFile('new.png', png('blue'), 'image/png'),
+            }, format='multipart')
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data['category_name'], 'New category')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.specifications, {'HSN': '8536', 'voltage': '240V'})
+        self.assertFalse((self.root / old).exists())
+        self.assertEqual((self.root / self.product.official_media.get().storage_name).read_bytes(), png('blue'))
+        self.assertEqual(self.public.get('/api/v1/catalogue/items/').data['count'], 1)
+        self.assertEqual(self.client.delete(endpoint).status_code, 204)
+        self.assertEqual(self.client.delete(endpoint).status_code, 204)
+        self.assertEqual(self.public.get('/api/v1/catalogue/items/').data['count'], 0)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.state, 'ARCHIVED')
+        self.assertEqual(CatalogueAudit.objects.filter(product=self.product, action='PRODUCT_ARCHIVED').count(), 1)
+
     def upload(self, kind, filename, content, mime, client=None):
         return (client or self.client).post(
             f'{self.route}/{kind}', {'file': SimpleUploadedFile(filename, content, mime)}, format='multipart',

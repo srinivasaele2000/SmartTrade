@@ -9,6 +9,7 @@ import * as resourceModule from '../src/resource.ts';
 import * as indiaModule from '../src/india.ts';
 import * as browseModule from '../src/catalogue-browse.ts';
 import * as demoRoles from '../src/demo-roles.ts';
+import * as workforce from '../src/workforce-profile.ts';
 
 const requireAdmin = createRequire(new URL('../../admin/package.json', import.meta.url));
 const React = requireAdmin('react');
@@ -37,7 +38,7 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
   native.BackHandler = { addEventListener: () => ({ remove() {} }) };
   native.useColorScheme = () => scheme;
   const identity = {exports: {}};
-  const icons = Object.fromEntries(['Building2','ShieldCheck','ShoppingBag','Store'].map(name => [
+  const icons = Object.fromEntries(['Briefcase','Building2','Search','ShieldCheck','ShoppingBag','Store','Wrench'].map(name => [
     name, () => React.createElement('span', {'data-icon': name}),
   ]));
   new Function('require', 'module', 'exports', identityCompiled)(name => ({
@@ -67,6 +68,10 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/AuthScreen': { default: () => null },
     './src/CompanyScreen': { default: () => null },
     './src/DealerWorkspace': { default: () => null },
+    './src/DealerOnboardingScreen': { default: () => null },
+    './src/DealerEstimateScreen': { default: () => null },
+    './src/WorkforceProfileScreen': { default: () => null },
+    './src/workforce-profile': workforce,
     './src/EnquiryWorkspace': { default: () => null },
     './src/OrderWorkspace': { default: () => null },
     './src/OfflineDocumentsScreen': { default: () => null },
@@ -83,9 +88,12 @@ test('authenticated header and account dashboard identify each role and signed-o
   const states = [ready(page([])), ready(page([])), ready(page([]))];
   const render = (account, screen, scheme) => renderToStaticMarkup(React.createElement(moduleWith(states, account, screen, scheme).default));
   for (const [code, label, icon, palette] of [
-    ['PERSONAL', 'BUYER', 'ShoppingBag', '#174888'],
+    ['PERSONAL', 'CUSTOMER', 'ShoppingBag', '#174888'],
     ['BUSINESS', 'DEALER', 'Store', '#15543B'],
     ['COMPANY', 'COMPANY', 'Building2', '#552780'],
+    ['SERVICE_PROVIDER', 'SERVICE PROVIDER', 'Wrench', '#7A4200'],
+    ['JOB_SEEKER', 'JOB SEEKER', 'Search', '#115952'],
+    ['EMPLOYER', 'EMPLOYER', 'Briefcase', '#37308B'],
     ['STAFF', 'PLATFORM ADMIN', 'ShieldCheck', '#8A241B'],
   ]) {
     const account = {...base, account_type: code, staff_profile: code === 'STAFF' ? {state: 'ACTIVE', roles: ['PLATFORM_ADMIN']} : null};
@@ -100,6 +108,24 @@ test('authenticated header and account dashboard identify each role and signed-o
   assert.match(render({...base, account_type: 'COMPANY'}, 'catalogue', 'dark'), /data-palette="#E8D3FF"/);
   assert.doesNotMatch(render(null, 'catalogue', 'light'), /Account role:/);
   assert.match(render({...base, account_type: 'PERSONAL'}, 'account', 'light'), /Offline Documents/);
+});
+
+test('public registration picker renders six distinct cards and excludes staff', () => {
+  const src = readFileSync(new URL('../src/RoleSelectScreen.tsx', import.meta.url), 'utf8');
+  const output = ts.transpileModule(src, {compilerOptions: {module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX}}).outputText;
+  const host = props => React.createElement('div', {'aria-label': props.accessibilityLabel}, props.children);
+  const imports = {
+    'react/jsx-runtime': jsx,
+    'react-native': {Pressable: host, ScrollView: host, View: host, Text: host, StyleSheet: {create: value => value}},
+    'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
+    './Button': {Button: props => React.createElement('button', {}, props.title)},
+    './RoleIdentity': {RoleBadge: () => null},
+  };
+  const exports = {};
+  new Function('require', 'exports', output)(name => imports[name], exports);
+  const html = renderToStaticMarkup(React.createElement(exports.default, {choose() {}, cancel() {}}));
+  const labels = [...html.matchAll(/aria-label="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(labels, ['Personal Customer', 'Dealer / Shop', 'Company / Manufacturer', 'Service Provider', 'Job Seeker', 'Employer']);
 });
 
 test('buyer catalogue renders real category and brand selectors plus product metadata', () => {

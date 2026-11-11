@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "dealers",
     "enquiries",
     "orders",
+    "quotations",
     "health",
 ]
 

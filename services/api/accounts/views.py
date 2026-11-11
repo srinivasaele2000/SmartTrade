@@ -37,9 +37,13 @@ def error_response(code, detail, http_status):
 class AccountRegistrationView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    serializer_class = AccountRegistrationSerializer
+
+    def create_account(self, values):
+        return Account.objects.create_user(**values)
 
     def post(self, request):
-        serializer = AccountRegistrationSerializer(data=request.data)
+        serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             return Response(
                 {
@@ -59,7 +63,7 @@ class AccountRegistrationView(APIView):
                         "An account with this mobile number already exists.",
                         status.HTTP_409_CONFLICT,
                     )
-                account = Account.objects.create_user(**values)
+                account = self.create_account(values)
         except IntegrityError:
             # The database uniqueness constraint handles concurrent registration.
             if Account.objects.filter(mobile_e164=values["mobile_e164"]).exists():
@@ -187,7 +191,7 @@ class AccountLoginView(APIView):
         account = Account.objects.filter(mobile_e164=mobile).first()
         if account is None:
             if development_otp:
-                return error_response("ACCOUNT_NOT_REGISTERED", "Register a PERSONAL, BUSINESS or COMPANY account before development login. Staff provisioning is separate.", 401)
+                return error_response("ACCOUNT_NOT_REGISTERED", "Register a marketplace account before development login. Staff provisioning is separate.", 401)
             return error_response(
                 "INVALID_CREDENTIALS",
                 "The mobile number or verification code is invalid.",
@@ -212,6 +216,7 @@ def token_response(account, *, development=False, development_otp=False):
     refresh = RefreshToken.for_user(account)
     refresh["token_version"] = account.token_version
     refresh["account_type"] = account.account_type
+    refresh["role"] = account.role
     if development:
         refresh["dev_auth"] = True
     if development_otp:

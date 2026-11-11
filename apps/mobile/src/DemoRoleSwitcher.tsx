@@ -47,7 +47,7 @@ export default function DemoRoleSwitcher({api, configured, onSwitch}: {
     <Button variant="secondary" title="Switch Role (Demo)" onPress={() => {setError(''); setOpen(true);}} />
     <Modal visible={open} transparent animationType="slide" onRequestClose={close} statusBarTranslucent navigationBarTranslucent>
       <View style={styles.overlay}>
-        <View accessibilityViewIsModal style={[styles.sheet, {paddingBottom: Math.max(bottom + 8, 16),
+        <View accessibilityViewIsModal style={[styles.sheet, {paddingBottom: bottom + 22,
           paddingLeft: Math.max(left, 18), paddingRight: Math.max(right, 18)}]}>
           <Text accessibilityRole="header" style={styles.title}>Switch Account Role</Text>
           <Text style={styles.body}>Select a development persona to preview role-specific workspaces and badges.</Text>

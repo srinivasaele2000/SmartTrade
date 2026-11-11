@@ -6,6 +6,7 @@ export type DemoPersona = {role: DemoRole; name: string; mobile: string};
 
 const names: Record<DemoRole, string> = {
   PERSONAL: 'Controlled Buyer', BUSINESS: 'Controlled Dealer', COMPANY: 'Controlled Company', STAFF: 'Designated Staff',
+  SERVICE_PROVIDER: 'Controlled Service Provider', JOB_SEEKER: 'Controlled Job Seeker', EMPLOYER: 'Controlled Employer',
 };
 
 export function configuredDemoPersonas(base: string, enabled: string | undefined, mobiles: Partial<Record<DemoRole, string>>) {

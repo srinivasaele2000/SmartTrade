@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import CatalogueTools from './CatalogueTools';
+import CreateProductItem from './CreateProductItem';
 import {ProductMediaCard, type Attachment} from './ProductMedia';
 import { inr } from './india';
 
@@ -60,6 +61,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
   }
 
   return <section id="catalogue" className="queue-section" aria-labelledby="catalogue-title">
+    {permissions.includes('MODERATE_PRODUCTS') && <CreateProductItem baseUrl={baseUrl} token={token} />}
     <div className="section-heading"><h2 id="catalogue-title">Company catalogue moderation</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh catalogue</button></div>
     <p>Company-owned products and catalogue prices. Dealer stock and selling prices are separate.</p>
     <form onSubmit={event => { event.preventDefault(); setPage(1); setQuery(search.trim()); }} className="decision-buttons">
