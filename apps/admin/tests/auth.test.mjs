@@ -1,10 +1,19 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession } from '../src/auth.ts';
+import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession, staffMobileDigits } from '../src/auth.ts';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
+
+test('staff mobile input normalizes local, formatted, and +91-prefixed numbers', () => {
+  for (const value of ['9876543210', '+919876543210', '919876543210', '+91 (98765) 43210']) {
+    assert.equal(staffMobileDigits(value), '9876543210');
+  }
+  assert.equal(staffMobileDigits('9123456789'), '9123456789');
+  assert.equal(staffMobileDigits('98a-76'), '9876');
+  assert.equal(staffMobileDigits('9876543210123').length, 10);
+});
 
 test('development OTP discovery is local-only and responses clearly label simulation', async () => {
   globalThis.fetch = async () => { throw new Error('Must not request'); };

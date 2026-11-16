@@ -12,7 +12,7 @@ import AuditHistory from './AuditHistory';
 import { ApiError, apiResponse, ensureList, onSessionExpired, requestApi } from "./api";
 import { pages, pageFromHash } from "./navigation";
 
-import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession } from './auth';
+import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession, staffMobileDigits } from './auth';
 import type { StaffAccount as Account, LoginResponse, OtpAcknowledgement } from './auth';
 import { istDateTime } from './india';
 type DocumentItem = {
@@ -198,7 +198,7 @@ function App() {
     setLoginMessage("");
     try {
       const response = await apiRequest<OtpAcknowledgement>("/auth/otp/request", undefined, {
-        method: "POST", body: JSON.stringify({ mobile_e164: mobile.trim() }),
+        method: "POST", body: JSON.stringify({ mobile_e164: `+91${mobile}` }),
       });
       setOtpRequested(true);
       setLoginMessage(otpAcknowledgementMessage(response));
@@ -215,7 +215,7 @@ function App() {
     setLoginMessage("");
     try {
       const payload = await apiRequest<LoginResponse>("/auth/login", undefined, {
-        method: "POST", body: JSON.stringify({ mobile_e164: mobile.trim(), code: otp.trim() }),
+        method: "POST", body: JSON.stringify({ mobile_e164: `+91${mobile}`, code: otp.trim() }),
       });
       await acceptLogin(payload);
     } catch (error) {
@@ -358,7 +358,21 @@ function App() {
             {import.meta.env.DEV && devAuthEnabled && <div className="state-panel"><h3>Local development authentication</h3><p>Uses only the server-designated existing staff account. No phone verification or permissions are granted.</p><button className="button button-quiet" type="button" disabled={loginBusy} onClick={() => void developmentLogin()}>Development Login</button></div>}
             <form className="signin-form" onSubmit={otpRequested ? signIn : requestOtp}>
               <label htmlFor="staff-mobile">Staff mobile number (+91)</label>
-              <input id="staff-mobile" type="tel" autoComplete="tel" pattern="[+]91[6-9][0-9]{9}" maxLength={13} title="Use an Indian mobile number in +91XXXXXXXXXX format." placeholder="+91XXXXXXXXXX" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
+              <div className="staff-mobile-field">
+                <span aria-hidden="true">+91</span>
+                <input id="staff-mobile" type="tel" inputMode="numeric" autoComplete="tel-national"
+                  pattern="[6-9][0-9]{9}" maxLength={10} title="Enter a valid 10-digit Indian mobile number."
+                  placeholder="9876543210" value={mobile} onChange={event => setMobile(staffMobileDigits(event.target.value))}
+                  onPaste={event => {
+                    event.preventDefault();
+                    const pasted = staffMobileDigits(event.clipboardData.getData('text'));
+                    if (!pasted) return;
+                    const {selectionStart, selectionEnd} = event.currentTarget;
+                    setMobile(pasted.length === 10 ? pasted :
+                      staffMobileDigits(mobile.slice(0, selectionStart ?? mobile.length) + pasted +
+                        mobile.slice(selectionEnd ?? mobile.length)));
+                  }} required />
+              </div>
               {otpRequested && <>
                 <label htmlFor="staff-otp">Verification code</label>
                 <input id="staff-otp" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} required />

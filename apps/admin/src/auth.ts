@@ -1,5 +1,10 @@
 import { requestApi } from './api.ts';
 
+export function staffMobileDigits(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  return (/^91\d{10}$/.test(digits) ? digits.slice(2) : digits).slice(0, 10);
+}
+
 export type StaffAccount = { id: number; account_type: string; staff_profile?: { state: string; roles: string[]; permissions: string[] } | null };
 export type LoginResponse = { access: string; refresh: string; expires_in: number; account: StaffAccount };
 

@@ -45,6 +45,9 @@ h1 { margin-bottom: 0; font-size: 30px; }
 .auth-panel h2, .detail-heading h2 { margin-bottom: 10px; }
 .auth-panel p:not(.eyebrow) { max-width: 560px; color: #52645d; line-height: 1.6; }
 .signin-form, .review-actions form { display: grid; gap: 11px; }
+.staff-mobile-field { position: relative; }
+.staff-mobile-field span { position: absolute; inset-inline-start: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.staff-mobile-field input { padding-inline-start: 45px; }
 label { color: #34483f; font-size: 13px; font-weight: 700; }
 input, textarea { width: 100%; padding: 11px 12px; border: 1px solid #ccd8d1; border-radius: 8px; color: #172b25; background: white; font: inherit; }
 input:focus, textarea:focus { outline: 2px solid #57d5a5; outline-offset: 1px; }
