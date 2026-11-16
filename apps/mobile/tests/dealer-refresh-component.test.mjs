@@ -61,6 +61,7 @@ function workspace() {
   const imports = { './trade-theme': theme,
     'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
     './DealerActivity': {DealerActivity: () => null},
+    './featureFlags': {SHOW_DEALER_INCOMING_COMMERCIAL_MODULES: false},
     react: React, 'react/jsx-runtime': {jsx, jsxs: jsx, Fragment: 'fragment'}, 'react-native': native,
     './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button': {Button: props => jsx('button', props)},
     './api': api, './india': india, './dealer': dealer, './resource': resource,

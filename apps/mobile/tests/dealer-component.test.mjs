@@ -8,6 +8,7 @@ import ts from 'typescript';
 import * as dealer from '../src/dealer.ts';
 import * as api from '../src/api.ts';
 import * as india from '../src/india.ts';
+import * as featureFlags from '../src/featureFlags.ts';
 
 // Reuse the monorepo's existing matching React/ReactDOM installations. Render
 // the actual TSX component with native host adapters and isolated API fixtures;
@@ -20,7 +21,7 @@ const source = readFileSync(new URL('../src/DealerWorkspace.tsx', import.meta.ur
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
 const base = { id: 1, legal_name: 'Fixture dealer', registration_number: '', verification_state: 'PENDING', workspace: { branch_count: 0, published_listing_count: 0, discoverable_listing_count: 0, can_edit: true, can_publish_branches: false, can_manage_listings: false, authorizations: [] } };
 
-function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'ready', data: base }, branches = { status: 'ready', data: { count: 0, results: [], next: null, previous: null } }, inventoryRows = [] } = {}) {
+function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'ready', data: base }, branches = { status: 'ready', data: { count: 0, results: [], next: null, previous: null } }, inventoryRows = [], flags = featureFlags } = {}) {
   let calls = 0;
   const states = [profile, branches, { status: 'ready', data: { count: inventoryRows.length, results: inventoryRows, next: null, previous: null } }, { status: 'ready', data: null }];
   const native = {};
@@ -30,7 +31,8 @@ function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'rea
   native.StyleSheet = { create: value => value };
   const imports = { './trade-theme': theme, './Button':buttonModule(React,native,jsx),
     'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
-    './DealerActivity': {DealerActivity: () => null},
+    './featureFlags': flags,
+    './DealerActivity': {DealerActivity: () => React.createElement('div', {}, 'View orders and invoices')},
     './Onboarding': {DealerContacts: () => null, DealerDeclarations: () => null, IdentityFields: () => null},
     react: { ...React, useState: value => React.useState(value === 'Dashboard' ? tab : value) },
     'react/jsx-runtime': jsx, 'react-native': native, './dealer': dealer, './api': api, './india': india, './LocalFileVault': { default: props => React.createElement('div', null, props.title, props.description) },
@@ -45,6 +47,11 @@ test('actual component gates non-business identities and displays real aggregate
   assert.match(render({ role: 'PERSONAL' }), /active dealer account/);
   assert.match(render(), /Branches: 0/);
   assert.match(render(), /Currently discoverable listings: 0/);
+});
+
+test('Dealer dashboard omits the commercial activity shortcut until the flag is enabled', () => {
+  assert.doesNotMatch(render(), /View orders and invoices/);
+  assert.match(render({flags: {SHOW_DEALER_INCOMING_COMMERCIAL_MODULES: true}}), /View orders and invoices/);
 });
 
 test('dealer local documents remain available without profile API data',()=>{

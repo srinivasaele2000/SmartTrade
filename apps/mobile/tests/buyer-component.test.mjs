@@ -11,6 +11,7 @@ import * as browseModule from '../src/catalogue-browse.ts';
 import * as theme from '../src/trade-theme.ts';
 import * as demoRoles from '../src/demo-roles.ts';
 import * as workforce from '../src/workforce-profile.ts';
+import * as featureFlags from '../src/featureFlags.ts';
 
 const requireAdmin = createRequire(new URL('../../admin/package.json', import.meta.url));
 const React = requireAdmin('react');
@@ -27,7 +28,7 @@ const product = { id: 10, name: 'Impact driver', code: 'ID-10', brand_name: 'Bui
 const page = results => ({ count: results.length, next: null, previous: null, results });
 const ready = data => ({ status: 'ready', data });
 
-function moduleWith(states, account = null, screen = 'catalogue', scheme = 'light') {
+function moduleWith(states, account = null, screen = 'catalogue', scheme = 'light', flags = featureFlags) {
   let calls = 0;
   const native = {};
   for (const name of ['Text', 'View', 'ScrollView', 'Pressable', 'TextInput', 'ActivityIndicator', 'SafeAreaView', 'KeyboardAvoidingView']) {
@@ -54,6 +55,7 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
   })[name], cards, cards.exports);
   const imports = { './src/platform-alert': {showAlert() {}}, './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
     './src/RoleIdentity': identity.exports,
+    './src/featureFlags': flags,
     './src/CatalogueMedia': catalogueMedia,
     './src/CatalogueBrowseCards': cards.exports,
     './src/catalogue-browse': browseModule,
@@ -79,8 +81,8 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/DealerEstimateScreen': { default: () => null },
     './src/WorkforceProfileScreen': { default: () => null },
     './src/workforce-profile': workforce,
-    './src/EnquiryWorkspace': { default: () => null },
-    './src/OrderWorkspace': { default: () => null },
+    './src/EnquiryWorkspace': { default: () => React.createElement('div', {}, 'Enquiry workspace fixture') },
+    './src/OrderWorkspace': { default: () => React.createElement('div', {}, 'Order workspace fixture') },
     './src/OfflineDocumentsScreen': { default: () => null },
     './src/DemoRoleSwitcher': { default: () => null },
     './src/demo-roles': demoRoles,
@@ -115,6 +117,31 @@ test('authenticated header and account dashboard identify each role and signed-o
   assert.match(render({...base, account_type: 'COMPANY'}, 'catalogue', 'dark'), /data-palette="#E8D3FF"/);
   assert.doesNotMatch(render(null, 'catalogue', 'light'), /Account role:/);
   assert.match(render({...base, account_type: 'PERSONAL'}, 'account', 'light'), /Offline Documents/);
+});
+
+test('Dealer commercial rows and direct routes are hidden by default while Buyer access remains', () => {
+  const states = [ready(page([])), ready(page([])), ready(page([]))];
+  const buyer = {id: 1, account_type: 'PERSONAL', access_state: 'ACTIVE'};
+  const dealer = {...buyer, account_type: 'BUSINESS', dealer_contacts_complete: true};
+  const render = (account, route, flags) =>
+    renderToStaticMarkup(React.createElement(moduleWith(states, account, route, 'light', flags).default));
+
+  const dealerAccount = render(dealer, 'account');
+  assert.doesNotMatch(dealerAccount, /Incoming enquiries|Incoming orders/);
+  assert.match(dealerAccount, /Catalogue items &amp; estimates/);
+  assert.match(dealerAccount, /My bills \/ invoices/);
+  assert.match(render(buyer, 'account'), /Enquiries and quotations/);
+  assert.match(render(buyer, 'account'), /Orders and invoices/);
+
+  const enabled = {SHOW_DEALER_INCOMING_COMMERCIAL_MODULES: true};
+  const enabledAccount = render(dealer, 'account', enabled);
+  assert.match(enabledAccount, /Incoming enquiries/);
+  assert.match(enabledAccount, /Incoming orders/);
+  for (const [route, workspace] of [['enquiries', /Enquiry workspace fixture/], ['orders', /Order workspace fixture/]]) {
+    assert.doesNotMatch(render(dealer, route), workspace);
+    assert.match(render(buyer, route), workspace);
+    assert.match(render(dealer, route, enabled), workspace);
+  }
 });
 
 test('incomplete or unknown dealer onboarding status replaces every requested route with Step 2', () => {
