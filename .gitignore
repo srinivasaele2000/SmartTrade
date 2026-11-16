@@ -20,6 +20,7 @@ private_uploads/
 apps/mobile/android/local.properties
 apps/mobile/android/.gradle/
 apps/mobile/android/.cxx/
+apps/mobile/android/app/.cxx/
 client-presentation/apk/*.apk
 id_rsa*
 id_ed25519*
@@ -66,6 +67,11 @@ tmp/
 temp/
 *.tmp
 *.bak
+/st-*.xml
+/st-*.png
+/*-qa.png
+/*-qa.mp4
+/*.apk
 
 # Machine-specific editor and operating system files
 .idea/
