@@ -15,6 +15,7 @@ import { pages, pageFromHash } from "./navigation";
 import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessage, loadStaffSession, staffMobileDigits } from './auth';
 import type { StaffAccount as Account, LoginResponse, OtpAcknowledgement } from './auth';
 import { istDateTime } from './india';
+import { apkDownloadUrl, loadApkMetadata } from './apkDownload';
 type DocumentItem = {
   id: number;
   document_type: string;
@@ -71,6 +72,14 @@ function App() {
   const currentPage = pages.find(item => item.id === page)!;
   const [sessionMessage, setSessionMessage] = useState("");
   const [mobile, setMobile] = useState("");
+  const [apkMetadata, setApkMetadata] = useState<Awaited<ReturnType<typeof loadApkMetadata>>>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadApkMetadata(controller.signal).then(metadata => {
+      if (!controller.signal.aborted) setApkMetadata(metadata);
+    }).catch(() => { /* The download is optional when the release is unavailable. */ });
+    return () => controller.abort();
+  }, []);
   const [otp, setOtp] = useState("");
   const [otpRequested, setOtpRequested] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -324,6 +333,10 @@ function App() {
             <h1>{currentPage.title}</h1>
           </div>
           <div className="topbar-actions">
+            {apkMetadata && <div className="apk-download">
+              <a className="button button-quiet" href={apkDownloadUrl} download>Download Android App (.apk)</a>
+              <small>v{apkMetadata.version} · Updated {istDateTime(apkMetadata.updatedAt)}</small>
+            </div>}
             <span className={`connection-badge ${apiStatus}`} role="status">API {apiStatus === "checking" ? "checking…" : apiStatus}</span>
             {apiStatus === 'unavailable' && <button className="button button-quiet" onClick={() => setHealthAttempt(value => value + 1)}>Retry API connection</button>}
             {account && <span className="environment-badge" title={`Roles: ${account.staff_profile?.roles.join(', ') || 'none'}; permissions: ${account.staff_profile?.permissions.join(', ') || 'none'}`}>STAFF ACCOUNT {account.id}</span>}

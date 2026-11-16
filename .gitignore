@@ -22,6 +22,8 @@ apps/mobile/android/.gradle/
 apps/mobile/android/.cxx/
 apps/mobile/android/app/.cxx/
 client-presentation/apk/*.apk
+releases/apk/*.apk
+releases/apk/apk-meta.json
 id_rsa*
 id_ed25519*
 

@@ -67,6 +67,7 @@ services:
       - "80:80"
     volumes:
       - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./releases/apk:/usr/share/nginx/html/downloads:ro
       - static_volume:/srv/static:ro
       - media_volume:/srv/public-media:ro
     depends_on:

@@ -23,6 +23,9 @@ nav a.active, nav a:hover { background: #245442; color: white; }
 .main-content { max-width: 1480px; margin-left: 248px; padding: 38px 48px; }
 .topbar, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
+.apk-download { display: grid; justify-items: start; gap: 4px; }
+.apk-download a { text-decoration: none; }
+.apk-download small { color: #52645d; }
 .eyebrow { margin: 0 0 9px; color: #16845e; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 30px; }
