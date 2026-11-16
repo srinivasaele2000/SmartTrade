@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from './Button';
@@ -30,9 +31,9 @@ export default function RoleSelectScreen({choose, cancel}: {choose: (role: Accou
   </ScrollView>;
 }
 const s = StyleSheet.create({
-  content: {padding: 20, gap: 12}, heading: {fontSize: 30, fontWeight: '800', color: '#17392d'},
+  content: {padding: trade.gutter, gap: 10}, heading: {fontSize: 17, lineHeight: 26, fontWeight: '800', color: trade.ink},
   cards: {flexDirection: 'row', flexWrap: 'wrap', gap: 10},
-  card: {flexGrow: 1, flexBasis: 145, minHeight: 124, gap: 8, padding: 12, backgroundColor: '#fff',
-    borderColor: '#dce7e0', borderWidth: 1, borderRadius: 12},
-  pressed: {backgroundColor: '#edf7f0'}, title: {fontWeight: '800', color: '#17392d'}, body: {color: '#40594d', lineHeight: 20},
+  card: {flexGrow: 1, flexBasis: 145, minHeight: 104, gap: 6, padding: 10, backgroundColor: trade.surface,
+    borderColor: trade.border, borderWidth: 1, borderRadius: 12},
+  pressed: {backgroundColor: trade.accentTint}, title: {fontSize: 14, fontWeight: '800', color: trade.ink}, body: {color: trade.secondary, fontSize: 13, lineHeight: 19},
 });

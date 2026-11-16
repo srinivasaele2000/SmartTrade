@@ -12,6 +12,7 @@ export type Account = {
   account_type: AccountType | 'STAFF';
   access_state: string;
   mobile_verified: boolean;
+  dealer_contacts_complete?: boolean;
   staff_profile?: {state: string; roles: string[]} | null;
 };
 export type Tokens = { access: string; refresh: string; expires_in: number; authentication_mode?: string };

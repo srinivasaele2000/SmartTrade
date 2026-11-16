@@ -1,16 +1,20 @@
+import {trade} from './trade-theme';
 import {StickyBottomBar} from './StickyBottomBar';
 import {Button} from './Button';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {OrderTracking, orderStatusLabel} from './OrderTracking';
 import {invoiceFileScope} from './local-file-model';
 import {useCallback,useEffect,useState} from 'react';
-import {ActivityIndicator,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,Share,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
 import {openLocalPdf} from './open-local-pdf';
 import {ApiClient,ApiError} from './api';import {cancelOrder,issueInvoice,orderAction,orders,type InvoiceLine,type Order} from './orders';import {useSession} from './session';import {useHistoryPage} from './useHistoryPage';
 import {HistoryPager} from './HistoryPager';
 import {inr,istDateTime} from './india';
 import {downloadApiFile, moveLocalFileScope} from './local-files';
 import LocalFileVault from './LocalFileVault';
+import * as Print from 'expo-print';
+import * as Clipboard from 'expo-clipboard';
+import {DocumentHeader, DocumentLedgerRow, DocumentTable, DocumentTotals} from './TradeDocument';
 const states=['CONFIRM','REJECT','PROCESSING','READY','COMPLETE','CANCEL'];
 
 function Field({label,value,change}:{label:string;value:string;change:(x:string)=>void}){return <View><Text style={s.label}>{label}</Text><TextInput accessibilityLabel={label} style={s.input} value={value} onChangeText={change}/></View>}
@@ -22,5 +26,84 @@ const invoiceId = selected?.invoice?.id ?? null;
 const updateInvoiceAvailability = useCallback((available: boolean) => {
   setSavedInvoiceId(current => available ? invoiceId : current === invoiceId ? null : current);
 }, [invoiceId]);
-const data=useHistoryPage(useCallback((page:number,signal:AbortSignal)=>orders(api,token,dealer,page,signal),[api,token,dealer]));useEffect(()=>{if(selected)setLines(selected.items.map(x=>({order_item:x.id,hsn:'',discount:'0',tax_rate:'0',tax_mode:'NONE'})))},[selected?.id]);async function run(fn:()=>Promise<Order>,label:string){setBusy(true);setError('');try{const x=await fn();setSelected(x);setMessage(label+' confirmed by the server.');void data.reload()}catch(e){if(e instanceof ApiError&&e.status===401)expired();setError(e instanceof Error?e.message:'Request failed.')}finally{setBusy(false)}}async function downloadInvoice(order:Order){if(!order.invoice)return;setBusy(true);setError('');try{const safe=order.invoice.invoice_number.replace(/[^A-Za-z0-9-]/g,'-')+'.pdf';const scope=invoiceFileScope(accountId,order.invoice.id);await moveLocalFileScope('invoice',`invoice-${order.invoice.id}`,scope);const saved=await downloadApiFile(api.base,order.invoice.download_url,{Authorization:'Bearer '+token},safe,'invoice',scope,'application/pdf');setMessage('Invoice saved on this device.');setSavedInvoiceId(order.invoice.id);setLocalVersion(v=>v+1);await openLocalPdf(saved.uri);}catch(e){setError(e instanceof Error?e.message:'Invoice download failed.')}finally{setBusy(false)}}return <View style={s.screen}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content,{paddingBottom:Math.max(60,bottom+8)}]}><Text style={s.kicker}>SMARTTRADE / {dealer?'DEALER':'BUYER'}</Text><Text style={s.title}>{dealer?'Incoming orders':'Orders and invoices'}</Text><Text>Orders preserve accepted quotation quantities and INR prices. Payment collection is not included.</Text><Button variant="tertiary" icon="refresh" title="Refresh orders" disabled={busy||data.state.status==='loading'} onPress={data.refresh}/>{message&&<Text style={s.notice}>{message}</Text>}{error&&<Text style={s.error}>{error}</Text>}{data.state.status==='loading'?<ActivityIndicator/>:data.state.status==='error'?<><Text style={s.error}>{data.state.message}</Text><Button variant="tertiary" icon="refresh" title="Retry" onPress={data.retry}/></>:<View style={s.card}>{data.state.data.results.length===0&&<Text>No orders found.</Text>}{data.state.data.results.map(x=><Button variant="secondary" key={x.id} title={`${x.order_number} · ${orderStatusLabel(x.state)}`} onPress={()=>setSelected(x)}/>)}</View>}<HistoryPager {...data} disabled={busy}/>{selected&&<><View style={s.card}><Text style={s.heading}>{selected.order_number}</Text><Text>{selected.dealer_business_name} · {selected.branch_name}</Text><OrderTracking order={selected} />{selected.items.map(x=><Text key={x.id}>{x.product_name} · {x.variant_sku||'product-level'} · {x.quantity} × {inr(x.unit_price)}</Text>)}<Text style={s.price}>Total {inr(selected.total)}</Text>{selected.invoice&&<View><Text style={s.heading}>{selected.invoice.kind.replaceAll('_',' ')} · {selected.invoice.invoice_number}</Text><Text>Issued {istDateTime(selected.invoice.issued_at)} · Grand total {inr(selected.invoice.grand_total)}</Text><Text>Save a copy to view on this device without internet.</Text></View>}{dealer&&!selected.invoice&&['CONFIRMED','PROCESSING','READY','COMPLETED'].includes(selected.state)&&<><Text style={s.heading}>Issue immutable invoice</Text><View style={s.row}><Button variant="navigation" selected={kind === 'BILL_OF_SUPPLY'} title="Bill of supply" onPress={()=>setKind('BILL_OF_SUPPLY')}/><Button variant="navigation" selected={kind === 'TAX_INVOICE'} title="Tax invoice" onPress={()=>setKind('TAX_INVOICE')}/></View><Text style={s.heading}>Supplier tax/supply basis</Text><View style={s.row}>{['REGISTERED_TAXABLE','COMPOSITION','EXEMPT','UNREGISTERED'].map(basis=><Button variant="navigation" selected={supplyBasis === basis} key={basis} title={basis} onPress={()=>setSupplyBasis(basis)}/>)}</View><Field label="Place of supply (Indian state/UT)" value={place} change={setPlace}/><Field label="Buyer GSTIN (optional)" value={buyerGstin} change={setBuyerGstin}/>{lines.map((line,i)=><View key={line.order_item}><Text>{selected.items[i]?.product_name}</Text><Field label="HSN" value={line.hsn} change={v=>setLines(lines.map((x,j)=>j===i?{...x,hsn:v}:x))}/><Field label="Discount INR" value={line.discount} change={v=>setLines(lines.map((x,j)=>j===i?{...x,discount:v}:x))}/><Field label="GST rate %" value={line.tax_rate} change={v=>setLines(lines.map((x,j)=>j===i?{...x,tax_rate:v}:x))}/><View style={s.row}>{(['NONE','CGST_SGST','IGST'] as const).map(mode=><Button variant="navigation" selected={line.tax_mode === mode} key={mode} title={mode} onPress={()=>setLines(lines.map((x,j)=>j===i?{...x,tax_mode:mode}:x))}/>)}</View></View>)}<Button variant="primary" icon="check" loading={Boolean(busy)} title="Issue invoice" disabled={busy} onPress={()=>void run(()=>issueInvoice(api,token,selected,kind,supplyBasis,place,buyerGstin,lines),'Invoice issuance')}/></>}{dealer&&<><Field label="Transition reason" value={reason} change={setReason}/><View style={s.row}>{states.map(action=><Button variant={['REJECT','CANCEL'].includes(action) ? 'destructive' : 'primary'} key={action} title={action} disabled={busy} onPress={()=>void run(()=>orderAction(api,token,selected.id,action,reason),`Order ${action.toLowerCase()}`)}/>)}</View></>}{!dealer&&['PENDING','CONFIRMED'].includes(selected.state)&&<><Field label="Cancellation reason" value={reason} change={setReason}/><Button variant="destructive" icon="close" loading={Boolean(busy)} title="Cancel order" disabled={busy} onPress={()=>void run(()=>cancelOrder(api,token,selected.id,reason),'Cancellation')}/></>}</View>{selected.invoice&&<LocalFileVault key={`${selected.invoice.id}-${localVersion}`} onAvailabilityChange={updateInvoiceAvailability} category="invoice" ownerKey={invoiceFileScope(accountId,selected.invoice.id)} legacyOwnerKey={`invoice-${selected.invoice.id}`} title="Invoice copies on this device" description="Your saved invoices are available offline." allowedMimeTypes={['application/pdf']} selectable={false}/>}</>}</ScrollView>{selected?.invoice && <StickyBottomBar><Button variant="primary" icon={savedInvoiceId === invoiceId ? "view" : "download"} title={savedInvoiceId === invoiceId ? "View Invoice • Saved offline" : "Download Invoice (PDF)"} loading={busy} disabled={busy} onPress={() => downloadInvoice(selected)} /></StickyBottomBar>}</View>}
-const s=StyleSheet.create({screen:{flex:1},content:{padding:20,paddingBottom:60,gap:14},kicker:{color:'#087f5b',fontWeight:'800'},title:{fontSize:28,fontWeight:'800',color:'#17392d'},heading:{fontSize:19,fontWeight:'700',color:'#17392d'},card:{padding:16,borderWidth:1,borderColor:'#dce7e0',borderRadius:14,gap:10,backgroundColor:'#fff'},label:{fontWeight:'700'},input:{borderWidth:1,borderColor:'#9fb7aa',padding:10,borderRadius:8},row:{flexDirection:'row',flexWrap:'wrap',gap:8},price:{fontSize:21,fontWeight:'700',color:'#126743'},notice:{color:'#126743'},error:{color:'#9c2820'}})
+const data=useHistoryPage(useCallback((page:number,signal:AbortSignal)=>orders(api,token,dealer,page,signal),[api,token,dealer]));useEffect(()=>{if(selected)setLines(selected.items.map(x=>({order_item:x.id,hsn:'',discount:'0',tax_rate:'0',tax_mode:'NONE'})))},[selected?.id]);async function run(fn:()=>Promise<Order>,label:string){setBusy(true);setError('');try{const x=await fn();setSelected(x);setMessage(label+' confirmed by the server.');void data.reload()}catch(e){if(e instanceof ApiError&&e.status===401)expired();setError(e instanceof Error?e.message:'Request failed.')}finally{setBusy(false)}}async function downloadInvoice(order: Order, action: 'open' | 'print' = 'open') {
+  if (!order.invoice) return;
+  setBusy(true); setError('');
+  try {
+    const safe = order.invoice.invoice_number.replace(/[^A-Za-z0-9-]/g, '-') + '.pdf';
+    const scope = invoiceFileScope(accountId, order.invoice.id);
+    await moveLocalFileScope('invoice', `invoice-${order.invoice.id}`, scope);
+    const saved = await downloadApiFile(api.base, order.invoice.download_url, {Authorization: 'Bearer ' + token},
+      safe, 'invoice', scope, 'application/pdf');
+    setMessage('Invoice saved on this device.');
+    setSavedInvoiceId(order.invoice.id);
+    setLocalVersion(value => value + 1);
+    if (action === 'print') await Print.printAsync({uri: saved.uri});
+    else await openLocalPdf(saved.uri);
+  } catch (error) {
+    setError(error instanceof Error ? error.message : 'Invoice download failed.');
+  } finally {
+    setBusy(false);
+  }
+}
+async function invoiceSummary(order: Order, action: 'copy' | 'share') {
+  if (!order.invoice) return;
+  const invoice = order.invoice;
+  const summary = `${invoice.invoice_number} · ${invoice.supplier_name} · ${inr(invoice.grand_total)}`;
+  try {
+    if (action === 'share') await Share.share({message: summary});
+    else {
+      await Clipboard.setStringAsync(summary);
+      setMessage('Invoice summary copied.');
+    }
+  } catch (error) {
+    setError(error instanceof Error ? error.message : 'Invoice summary could not be opened.');
+  }
+}
+return <View style={s.screen}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content,{paddingBottom:Math.max(60,bottom+8)}]}><Text style={s.kicker}>SMARTTRADE / {dealer?'DEALER':'BUYER'}</Text><Text style={s.title}>{dealer?'Incoming orders':'Orders and invoices'}</Text><Text>Orders preserve accepted quotation quantities and INR prices. Payment collection is not included.</Text><Button variant="tertiary" icon="refresh" title="Refresh orders" disabled={busy||data.state.status==='loading'} onPress={data.refresh}/>{message&&<Text style={s.notice}>{message}</Text>}{error&&<Text style={s.error}>{error}</Text>}{data.state.status==='loading'?<ActivityIndicator/>:data.state.status==='error'?<><Text style={s.error}>{data.state.message}</Text><Button variant="tertiary" icon="refresh" title="Retry" onPress={data.retry}/></>:<View style={s.card}>{data.state.data.results.length===0&&<Text>No orders found.</Text>}{data.state.data.results.map(x => x.invoice ? <DocumentLedgerRow key={x.id}
+  party={dealer ? 'Buyer #' + x.buyer_id : x.invoice.supplier_name}
+  reference={`${x.invoice.invoice_number} · ${istDateTime(x.invoice.issued_at)} · ${x.items.length} items`}
+  amount={x.invoice.grand_total} status="Issued" onPress={() => setSelected(x)} />
+  : <Button variant="secondary" key={x.id} title={`${x.order_number} · ${orderStatusLabel(x.state)}`} onPress={() => setSelected(x)} />)}</View>}<HistoryPager {...data} disabled={busy}/>{selected&&<><View style={s.card}><Text style={s.heading}>{selected.order_number}</Text><Text>{selected.dealer_business_name} · {selected.branch_name}</Text><OrderTracking order={selected} />{selected.items.map(x=><Text key={x.id}>{x.product_name} · {x.variant_sku||'product-level'} · {x.quantity} × {inr(x.unit_price)}</Text>)}<Text style={s.price}>Total {inr(selected.total)}</Text>{selected.invoice && <>
+  <OrderInvoiceDocument order={selected} />
+  <View style={s.row}>
+    <Button variant="tertiary" title="Copy Summary" disabled={busy} onPress={() => invoiceSummary(selected, 'copy')} />
+    <Button variant="tertiary" title="Print" disabled={busy} onPress={() => downloadInvoice(selected, 'print')} />
+  </View>
+</>}{dealer&&!selected.invoice&&['CONFIRMED','PROCESSING','READY','COMPLETED'].includes(selected.state)&&<><Text style={s.heading}>Issue immutable invoice</Text><View style={s.row}><Button variant="navigation" selected={kind === 'BILL_OF_SUPPLY'} title="Bill of supply" onPress={()=>setKind('BILL_OF_SUPPLY')}/><Button variant="navigation" selected={kind === 'TAX_INVOICE'} title="Tax invoice" onPress={()=>setKind('TAX_INVOICE')}/></View><Text style={s.heading}>Supplier tax/supply basis</Text><View style={s.row}>{['REGISTERED_TAXABLE','COMPOSITION','EXEMPT','UNREGISTERED'].map(basis=><Button variant="navigation" selected={supplyBasis === basis} key={basis} title={basis} onPress={()=>setSupplyBasis(basis)}/>)}</View><Field label="Place of supply (Indian state/UT)" value={place} change={setPlace}/><Field label="Buyer GSTIN (optional)" value={buyerGstin} change={setBuyerGstin}/>{lines.map((line,i)=><View key={line.order_item}><Text>{selected.items[i]?.product_name}</Text><Field label="HSN" value={line.hsn} change={v=>setLines(lines.map((x,j)=>j===i?{...x,hsn:v}:x))}/><Field label="Discount INR" value={line.discount} change={v=>setLines(lines.map((x,j)=>j===i?{...x,discount:v}:x))}/><Field label="GST rate %" value={line.tax_rate} change={v=>setLines(lines.map((x,j)=>j===i?{...x,tax_rate:v}:x))}/><View style={s.row}>{(['NONE','CGST_SGST','IGST'] as const).map(mode=><Button variant="navigation" selected={line.tax_mode === mode} key={mode} title={mode} onPress={()=>setLines(lines.map((x,j)=>j===i?{...x,tax_mode:mode}:x))}/>)}</View></View>)}<Button variant="primary" icon="check" loading={Boolean(busy)} title="Issue invoice" disabled={busy} onPress={()=>void run(()=>issueInvoice(api,token,selected,kind,supplyBasis,place,buyerGstin,lines),'Invoice issuance')}/></>}{dealer&&<><Field label="Transition reason" value={reason} change={setReason}/><View style={s.row}>{states.map(action=><Button variant={['REJECT','CANCEL'].includes(action) ? 'destructive' : 'primary'} key={action} title={action} disabled={busy} onPress={()=>void run(()=>orderAction(api,token,selected.id,action,reason),`Order ${action.toLowerCase()}`)}/>)}</View></>}{!dealer&&['PENDING','CONFIRMED'].includes(selected.state)&&<><Field label="Cancellation reason" value={reason} change={setReason}/><Button variant="destructive" icon="close" loading={Boolean(busy)} title="Cancel order" disabled={busy} onPress={()=>void run(()=>cancelOrder(api,token,selected.id,reason),'Cancellation')}/></>}</View>{selected.invoice&&<LocalFileVault key={`${selected.invoice.id}-${localVersion}`} onAvailabilityChange={updateInvoiceAvailability} category="invoice" ownerKey={invoiceFileScope(accountId,selected.invoice.id)} legacyOwnerKey={`invoice-${selected.invoice.id}`} title="Invoice copies on this device" description="Your saved invoices are available offline." allowedMimeTypes={['application/pdf']} selectable={false}/>}</>}</ScrollView>{selected?.invoice && <StickyBottomBar aboveTabs>
+  <View style={s.row}>
+    <Button variant="secondary" title="Back to List" disabled={busy} onPress={() => setSelected(null)} />
+    <Button variant="tertiary" title="Share Summary" disabled={busy} onPress={() => invoiceSummary(selected, 'share')} />
+    <Button variant="primary" icon={savedInvoiceId === invoiceId ? "view" : "download"}
+      title={savedInvoiceId === invoiceId ? "View Invoice • Saved offline" : "Download Invoice (PDF)"}
+      loading={busy} disabled={busy} onPress={() => downloadInvoice(selected)} />
+  </View>
+</StickyBottomBar>}</View>}
+export function OrderInvoiceDocument({order}: {order: Order}) {
+  const invoice = order.invoice;
+  if (!invoice) return null;
+  const issuedLines = new Map(invoice.items?.map(line => [line.order_item, line]));
+  const lines = order.items.map(item => {
+    const issued = issuedLines.get(item.id);
+    return {
+      id: item.id, name: issued?.product_name ?? item.product_name, code: issued?.product_code ?? item.product_code,
+      hsn: issued?.hsn, quantity: issued?.quantity ?? item.quantity, rate: issued?.unit_price ?? item.unit_price,
+      gst: issued?.tax_mode === 'NONE' ? undefined : issued?.tax_rate, amount: item.line_total,
+    };
+  });
+  const date = istDateTime(invoice.issued_at);
+  const fields: [string, string][] = [['Taxable Amount', invoice.taxable_total], ['Discount', invoice.discount_total]];
+  if (Number(invoice.cgst_total) || Number(invoice.sgst_total)) fields.push(['CGST', invoice.cgst_total], ['SGST', invoice.sgst_total]);
+  if (Number(invoice.igst_total)) fields.push(['IGST', invoice.igst_total]);
+  return <>
+    <DocumentHeader kind={invoice.kind === 'TAX_INVOICE' ? 'TAX INVOICE' : 'BILL OF SUPPLY'}
+      number={invoice.invoice_number} status="Issued" date={date}
+      party={[[ 'Buyer', '#' + order.buyer_id ], ['GSTIN', invoice.buyer_gstin]]}
+      meta={[[ 'Issued', date ], ['Place of supply', invoice.place_of_supply], ['Order', order.order_number],
+        ['Supplier', invoice.supplier_name], ['Supplier GSTIN', invoice.supplier_gstin]]} />
+    <DocumentTable lines={lines} subtotal={invoice.subtotal} />
+    <DocumentTotals amount={invoice.grand_total} fields={fields} />
+  </>;
+}
+
+const s=StyleSheet.create({screen:{flex:1},content:{padding:trade.gutter,paddingBottom:60,gap:8},kicker:{color:trade.accent,fontWeight:'800'},title:{fontSize:17,fontWeight:'800',color:trade.ink},heading:{fontSize:14,fontWeight:'700',color:trade.ink},card:{padding:trade.gutter,borderWidth:1,borderColor:trade.border,borderRadius:14,gap:10,backgroundColor:trade.surface},label:{fontWeight:'700'},input:{borderWidth:1,borderColor:trade.border,padding:10,borderRadius:8},row:{flexDirection:'row',flexWrap:'wrap',gap:8},price:{fontSize:14,fontWeight:'700',color:trade.accent},notice:{color:trade.accent},error:{color:'#9c2820'}})

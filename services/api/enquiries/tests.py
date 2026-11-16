@@ -77,7 +77,7 @@ class EnquiryQuotationTests(TestCase):
 
     def test_expired_quote_cannot_be_accepted_and_is_reported(self):
         enquiry = self.create_enquiry()
-        response = self.quote(enquiry)
+        self.quote(enquiry)
         future = timezone.now() + timedelta(days=4)
         with patch('enquiries.serializers.timezone.now', return_value=future):
             detail = self.buyer_client.get(f"/api/v1/enquiries/{enquiry['id']}")

@@ -127,3 +127,25 @@ class CatalogueAudit(models.Model):
     reason = models.TextField(blank=True)
     snapshot = models.JSONField(default=dict)
     occurred_at = models.DateTimeField(auto_now_add=True)
+
+
+def extracted_image_path(instance, filename):
+    return f'catalogue/products/extracted/{uuid4().hex}.png'
+
+
+class DraftCatalogueItem(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = 'DRAFT', 'Draft'
+        APPROVED = 'APPROVED', 'Approved'
+        DISCARDED = 'DISCARDED', 'Discarded'
+
+    source_document = models.ForeignKey(CatalogueDocument, on_delete=models.PROTECT, related_name='draft_items')
+    page = models.PositiveSmallIntegerField()
+    name = models.CharField(max_length=200)
+    product_code = models.CharField(max_length=100)
+    hsn_sac_code = models.CharField(max_length=8, blank=True)
+    price_per_unit = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    category = models.CharField(max_length=120, blank=True)
+    image = models.ImageField(upload_to=extracted_image_path, storage=vault_storage, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    product = models.OneToOneField(Product, on_delete=models.PROTECT, null=True, blank=True)

@@ -1,5 +1,6 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import Account, BusinessProfile
 from companies.tests import grant_staff_permissions, make_account
@@ -58,6 +59,56 @@ class ClientOnboardingTests(TestCase):
         self.client.force_authenticate(other_dealer)
         self.assertEqual(self.client.get(self.directory).status_code, 403)
         self.assertEqual(other_dealer.business_profile.trade_contacts.count(), 0)
+
+    def test_authenticated_incomplete_dealer_only_has_onboarding_access(self):
+        dealer = make_account('+919800000071', 'BUSINESS')
+        token = RefreshToken.for_user(dealer)
+        token['token_version'] = dealer.token_version
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + str(token.access_token))
+        me = '/api/v1/auth/me'
+        self.assertIs(self.client.get(me).data['account']['dealer_contacts_complete'], False)
+        self.assertEqual(self.client.get('/api/v1/businesses/me/trade-contacts').status_code, 200)
+        for path in ('businesses/me', 'businesses/me/orders', 'businesses/me/enquiries',
+                     'dealers/listings', 'catalogue/products', 'catalogues/'):
+            with self.subTest(path=path):
+                response = self.client.get('/api/v1/' + path)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.data['code'], 'ONBOARDING_STEP_2_REQUIRED')
+        self.assertEqual(self.client.post('/api/v1/businesses/me/trade-contacts', self.contacts[0], format='json').status_code, 403)
+        self.assertEqual(self.client.post(self.batch, {'contacts': self.contacts}, format='json').status_code, 201)
+        self.assertIs(self.client.get(me).data['account']['dealer_contacts_complete'], True)
+        self.assertEqual(self.client.get('/api/v1/businesses/me').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/catalogue/products').status_code, 200)
+        dealer.business_profile.trade_contacts.order_by('pk').first().delete()
+        self.assertIs(self.client.get(me).data['account']['dealer_contacts_complete'], False)
+        self.assertEqual(self.client.get('/api/v1/businesses/me/orders').status_code, 403)
+        self.assertEqual(self.client.post(self.batch, {'contacts': self.contacts}, format='json').status_code, 201)
+
+    def test_worker_phone_conflicts_are_normalized_row_indexed_and_atomic(self):
+        dealer = make_account('+919800000071', 'BUSINESS')
+        other = make_account('+919800000074', 'BUSINESS')
+        contact_url = '/api/v1/businesses/me/trade-contacts'
+        self.client.force_authenticate(other)
+        claimed = {**self.contacts[2], 'mobile_e164': '0 (98000) 001-02'}
+        response = self.client.post(contact_url, claimed, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['mobile_e164'], self.contacts[2]['mobile_e164'])
+
+        self.client.force_authenticate(dealer)
+        self.assertEqual(self.client.post(contact_url, claimed, format='json').status_code, 400)
+        contacts = [dict(contact) for contact in self.contacts]
+        contacts[2]['mobile_e164'] = '98000 00102'
+        contacts[9]['mobile_e164'] = '+91 (98000) 001-00'
+        response = self.client.post(self.batch, {'contacts': contacts}, format='json')
+        self.assertEqual(response.status_code, 400)
+        errors = response.data['worker_errors']
+        self.assertEqual([(row['index'], row['phone']) for row in errors],
+                         [(0, '9800000100'), (2, '9800000102'), (9, '9800000100')])
+        self.assertIn('already registered', errors[1]['message'])
+        self.assertIn('row 10', errors[2]['message'])
+        self.assertFalse(dealer.business_profile.trade_contacts.exists())
+        dealer.business_profile.refresh_from_db()
+        self.assertIsNone(dealer.business_profile.contacts_submitted_at)
 
     def test_directory_requires_separate_contact_permission(self):
         dealer = make_account('+919800000071', 'BUSINESS')

@@ -8,7 +8,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
 test('sidebar and direct onboarding paths resolve to distinct page identities', () => {
-  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'catalogues', 'dealers', 'dealer-directory', 'enquiries', 'orders', 'audit']);
+  assert.deepEqual(pages.map(item => item.id), ['overview', 'verification', 'review-requests', 'catalogue', 'catalogues', 'dealers', 'dealer-directory', 'messages', 'banners', 'enquiries', 'orders', 'audit']);
   for (const page of pages) assert.equal(pageFromHash(`#${page.id}`), page.id);
   assert.equal(pageFromHash(''), 'overview');
   assert.equal(pageFromHash('#missing'), 'overview');

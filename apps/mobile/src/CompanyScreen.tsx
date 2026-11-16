@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {StickyBottomBar} from './StickyBottomBar';
 import {Button as Action} from './Button';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -86,6 +87,6 @@ function Workspace({ api, token, accountId, expired }: { api: ApiClient; token: 
 }
 const s = StyleSheet.create({
   screen: {flex: 1},
-  content: { padding: 20, gap: 14, paddingBottom: 64 }, kicker: { color: '#087f5b', letterSpacing: 1.5, fontWeight: '800' }, title: { fontSize: 28, fontWeight: '800', color: '#17392d' }, heading: { fontSize: 20, color: '#17392d', fontWeight: '700' }, body: { color: '#52675c', fontSize: 15, lineHeight: 23 },
-  card: { backgroundColor: '#fff', padding: 18, gap: 14, borderRadius: 16, borderWidth: 1, borderColor: '#dce7e0' }, field: { gap: 6 }, label: { fontWeight: '700', color: '#294b3a' }, input: { minHeight: 48, padding: 12, borderRadius: 10, borderColor: '#9fb7aa', borderWidth: 1, color: '#17392d', fontSize: 16 }, readonly: { backgroundColor: '#f2f5f3' }, tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, tab: { padding: 12, borderRadius: 9, borderColor: '#b4d4c2', borderWidth: 1, backgroundColor: '#fff' },     error: { color: '#9c2820', lineHeight: 22 }, notice: { padding: 12, backgroundColor: '#edf7f0', color: '#294b3a', lineHeight: 22 }, document: { gap: 6, borderTopWidth: 1, borderColor: '#dce7e0', paddingTop: 12 },
+  content: { padding: trade.gutter, gap: 8, paddingBottom: 64 }, kicker: { color: trade.accent, letterSpacing: 1.5, fontWeight: '800' }, title: { fontSize: 17, fontWeight: '800', color: trade.ink }, heading: { fontSize: 14, color: trade.ink, fontWeight: '700' }, body: { color: trade.secondary, fontSize: 13, lineHeight: 19 },
+  card: { backgroundColor: trade.surface, padding: trade.gutter, gap: 8, borderRadius: 16, borderWidth: 1, borderColor: trade.border }, field: { gap: 6 }, label: { fontWeight: '700', color: trade.heading }, input: { minHeight: 48, padding: 12, borderRadius: 10, borderColor: trade.border, borderWidth: 1, color: trade.ink, fontSize: 13 }, readonly: { backgroundColor: '#f2f5f3' }, tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, tab: { padding: 12, borderRadius: 9, borderColor: '#b4d4c2', borderWidth: 1, backgroundColor: trade.surface },     error: { color: '#9c2820', lineHeight: 19 }, notice: { padding: 12, backgroundColor: trade.successTint, color: trade.heading, lineHeight: 19 }, document: { gap: 6, borderTopWidth: 1, borderColor: trade.border, paddingTop: 12 },
 });

@@ -1,6 +1,8 @@
 import { ApiClient, ApiError, type Page } from './api';
 export type OrderItem={id:number;product_id:number;product_name:string;product_code:string;variant_id:number|null;variant_sku:string;quantity:string;unit_price:string;currency:'INR';line_total:string};
-export type Invoice={id:number;invoice_number:string;financial_year:string;kind:'TAX_INVOICE'|'BILL_OF_SUPPLY';supplier_name:string;supplier_gstin:string;buyer_gstin:string;place_of_supply:string;subtotal:string;discount_total:string;taxable_total:string;cgst_total:string;sgst_total:string;igst_total:string;grand_total:string;issued_at:string;download_url:string};
+export type Invoice={id:number;invoice_number:string;financial_year:string;kind:'TAX_INVOICE'|'BILL_OF_SUPPLY';supplier_name:string;supplier_gstin:string;buyer_gstin:string;place_of_supply:string;subtotal:string;discount_total:string;taxable_total:string;cgst_total:string;sgst_total:string;igst_total:string;grand_total:string;issued_at:string;download_url:string;items?:IssuedInvoiceItem[]};
+export type IssuedInvoiceItem = {order_item: number; product_name: string; product_code: string; hsn: string;
+  quantity: string; unit_price: string; taxable_value: string; tax_rate: string; tax_mode: InvoiceLine['tax_mode']};
 export type Order={id:number;order_number:string;quotation_id:number;buyer_id:number;business_id:number;branch_id:number;branch_name:string;dealer_business_name:string;state:string;created_at:string;updated_at:string;confirmed_at:string|null;items:OrderItem[];total:string;invoice:Invoice|null};
 export type InvoiceLine={order_item:number;hsn:string;discount:string;tax_rate:string;tax_mode:'NONE'|'CGST_SGST'|'IGST'};
 function order(value:unknown):Order{const x=value as Order;if(!x||!Number.isInteger(x.id)||!Array.isArray(x.items)||x.items.some(i=>i.currency!=='INR'))throw new ApiError('Order response is incomplete.');return x}

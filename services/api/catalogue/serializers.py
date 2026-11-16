@@ -1,4 +1,3 @@
-import re
 from rest_framework import serializers
 from .media import attachment, media_metadata, media_url
 from .models import Brand, BrandCategory, Category, Product, ProductVariant

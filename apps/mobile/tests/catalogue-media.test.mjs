@@ -14,3 +14,13 @@ test('official media accepts only the configured origin and versioned catalogue 
     'http://127.0.0.1:8000/media/private_uploads/company.pdf',
   ]) assert.equal(catalogueMediaUrl(api, reference), null);
 });
+
+test('catalogue thumbnails resolve through the configured API host on Android', () => {
+  const emulator = 'http://10.0.2.2:8000/api/v1';
+  const path = '/media/catalogue/' + key;
+  assert.equal(catalogueMediaUrl(emulator, path)?.href, 'http://10.0.2.2:8000' + path);
+  assert.equal(catalogueMediaUrl(emulator, url)?.href, 'http://10.0.2.2:8000' + path);
+  assert.equal(catalogueMediaUrl(api, 'http://localhost:8000' + path)?.href, url);
+  assert.equal(catalogueMediaUrl(emulator, '//127.0.0.1:8000' + path), null);
+  assert.equal(catalogueMediaUrl(emulator, 'http://127.0.0.1:8001' + path), null);
+});

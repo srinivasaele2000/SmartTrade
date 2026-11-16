@@ -76,6 +76,9 @@ STATIC_URL = "static/"
 MEDIA_ROOT = os.environ.get("PRIVATE_FILE_STORAGE_ROOT") or str(BASE_DIR / "private_uploads")
 MEDIA_URL = "/media/"
 CATALOGUE_MEDIA_ROOT = BASE_DIR / "media"
+DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
+# Stream larger file uploads to temporary files instead of keeping them in memory.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2_621_440
 FILE_UPLOAD_PERMISSIONS = 0o600
 FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o700
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

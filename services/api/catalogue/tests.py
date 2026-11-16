@@ -289,7 +289,7 @@ class CatalogueTests(TestCase):
 
     def test_variant_edit_duplicate_sku_and_immutable_product(self):
         pk = self.create_product()
-        one = self.client.post(f'{self.base}/{pk}/variants', {'sku': 'ONE', 'name': 'One'}, format='json')
+        self.client.post(f'{self.base}/{pk}/variants', {'sku': 'ONE', 'name': 'One'}, format='json')
         two = self.client.post(f'{self.base}/{pk}/variants', {'sku': 'TWO', 'name': 'Two'}, format='json')
         path = f"{self.base}/{pk}/variants/{two.data['id']}"
         self.assertEqual(self.client.patch(path, {'sku': 'ONE'}, format='json').status_code, 400)

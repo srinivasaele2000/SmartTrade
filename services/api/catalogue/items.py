@@ -2,6 +2,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Case, Q, When
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.parsers import JSONParser, MultiPartParser
@@ -70,6 +71,26 @@ def require_available_code(code, *, exclude=None):
         raise serializers.ValidationError({'product_code': 'This product code is already in use.'})
 
 
+def create_catalogue_item(request, fields, saved_files):
+    require_available_code(fields['product_code'])
+    product = Product.objects.create(
+        brand_category=fields['brand_category'], name=fields['name'], code=fields['product_code'],
+        specifications={'HSN': fields['hsn_sac_code']}, unit='Unit',
+        catalogue_price=fields['price_per_unit'], currency='INR', state='PUBLISHED',
+    )
+    upload = fields.get('image')
+    if upload:
+        media = ProductMedia.objects.create(product=product, kind=ProductMedia.Kind.IMAGE,
+            key=uuid4(), filename=upload.name, content_type=upload.content_type, size=upload.size)
+        saved_name = storage().save(media.storage_name, upload)
+        saved_files.append(saved_name)
+        if saved_name != media.storage_name:
+            raise OSError('Could not allocate catalogue image storage.')
+    result = ItemOutput(product, context={'request': request}).data
+    audit(request, 'PRODUCT_CREATED', product, result)
+    return product, result
+
+
 class CatalogueItems(APIView):
     parser_classes = [MultiPartParser]
     required_staff_permission = 'MODERATE_PRODUCTS'
@@ -79,6 +100,33 @@ class CatalogueItems(APIView):
 
     def get(self, request):
         query = products().filter(pk__in=eligible_products().values('pk'), catalogue_price__isnull=False)
+        for parameter, field in [('category', 'brand_category__category_id'), ('brand', 'brand_category__brand_id')]:
+            value = request.query_params.get(parameter)
+            if value:
+                if not value.isdecimal():
+                    raise serializers.ValidationError({parameter: 'Expected a numeric ID.'})
+                query = query.filter(**{field: value})
+        terms = request.query_params.get('search', '').split()
+        if terms:
+            phrase = ' '.join(terms)
+            code_match = Q(code__icontains=phrase)
+            name_match = Q()
+            secondary_match = Q()
+            for term in terms:
+                name_match &= Q(name__icontains=term)
+                secondary_match &= (
+                    Q(name__icontains=term) | Q(code__icontains=term) | Q(specifications__HSN__icontains=term)
+                    | Q(brand_category__brand__name__icontains=term)
+                    | Q(brand_category__category__name__icontains=term)
+                )
+            query = query.filter(code_match | name_match | secondary_match).alias(search_rank=Case(
+                When(code__iexact=phrase, then=0),
+                When(code__istartswith=phrase, then=1),
+                When(code_match, then=2),
+                When(name_match & Q(name__istartswith=terms[0]), then=3),
+                When(name_match, then=4),
+                default=5,
+            )).order_by('search_rank', 'pk')
         paginator = Pages()
         items = paginator.paginate_queryset(query, request)
         return paginator.get_paginated_response(ItemOutput(items, many=True, context={'request': request}).data)
@@ -86,28 +134,13 @@ class CatalogueItems(APIView):
     def post(self, request):
         serializer = ItemInput(data=request.data)
         serializer.is_valid(raise_exception=True)
-        fields = serializer.validated_data
-        upload = fields.get('image')
-        saved_name = None
+        saved_files = []
         try:
             with transaction.atomic():
-                require_available_code(fields['product_code'])
-                product = Product.objects.create(
-                    brand_category=fields['brand_category'], name=fields['name'], code=fields['product_code'],
-                    specifications={'HSN': fields['hsn_sac_code']}, unit='Unit',
-                    catalogue_price=fields['price_per_unit'], currency='INR', state='PUBLISHED',
-                )
-                if upload:
-                    media = ProductMedia.objects.create(product=product, kind=ProductMedia.Kind.IMAGE,
-                        key=uuid4(), filename=upload.name, content_type=upload.content_type, size=upload.size)
-                    saved_name = storage().save(media.storage_name, upload)
-                    if saved_name != media.storage_name:
-                        raise OSError('Could not allocate catalogue image storage.')
-                result = ItemOutput(product, context={'request': request}).data
-                audit(request, 'PRODUCT_CREATED', product, result)
+                _, result = create_catalogue_item(request, serializer.validated_data, saved_files)
         except Exception as error:
-            if saved_name:
-                storage().delete(saved_name)
+            for name in saved_files:
+                storage().delete(name)
             if isinstance(error, IntegrityError):
                 raise serializers.ValidationError({'product_code': 'Duplicate code or an ineligible brand/category.'}) from error
             raise

@@ -1,4 +1,3 @@
-import {StickyBottomBar} from './StickyBottomBar';
 import { useEffect, useRef, useState } from 'react';
 import {Button} from './Button';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -11,9 +10,12 @@ import {registerDealer} from './dealer-onboarding';
 import RoleSelectScreen from './RoleSelectScreen';
 import {WorkforceFields} from './WorkforceProfileScreen';
 import {isWorkforce, profileInput, saveWorkforceProfile, workforce, type ProfileDraft} from './workforce-profile';
+import {trade, tradeType} from './trade-theme';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 export default function AuthScreen({ api, done }: { api: ApiClient; done: (profile: Account, registered: boolean) => void }) {
   const { establishSession } = useSession();
+  const {bottom} = useSafeAreaInsets();
   const [mobile, setMobile] = useState(''), [code, setCode] = useState('');
   const [creating, setCreating] = useState(false), [type, setType] = useState<AccountType>();
   const [dealer, setDealer] = useState<DealerRegistrationDraft>({firm: '', gstin: '', businessType: ''});
@@ -91,11 +93,10 @@ export default function AuthScreen({ api, done }: { api: ApiClient; done: (profi
   }
   if (creating && !type) return <RoleSelectScreen choose={role => {setType(role); setProfileDraft({}); setError('');}}
     cancel={() => {setCreating(false); setError('');}} />;
-  return <View style={s.screen}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content}>
+  return <View style={s.screen}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content, {paddingBottom: bottom + 16}]}>
+    <View style={s.card}>
     <Text style={s.kicker}>{dealerSignup || registered === 'BUSINESS' ? 'DEALER ONBOARDING · STEP 1 OF 3' : 'YOUR SMARTTRADE ACCOUNT'}</Text>
     <Text accessibilityRole="header" style={s.title}>{creating && isWorkforce(type) ? workforce[type].title + ' registration' : creating ? 'Join SmartTrade' : 'Welcome back'}</Text>
-    <Text style={s.body}>Browse freely. Sign in to discover dealers and manage your business.</Text>
-    <View style={s.card}>
       {creating && <Button variant="tertiary" title="Change account type" disabled={busy} onPress={() => {setType(undefined); setError('');}} />}
       {dealerSignup && <DealerRegistrationFields draft={dealer} change={setDealer} disabled={busy} />}
       {creating && isWorkforce(type) && <WorkforceFields role={type} draft={profileDraft} change={setProfileDraft} disabled={busy} />}
@@ -105,14 +106,26 @@ export default function AuthScreen({ api, done }: { api: ApiClient; done: (profi
       {requested && <><Text style={s.label}>Verification code</Text><TextInput accessibilityLabel="Verification code" style={s.input} value={code} onChangeText={setCode} editable={!busy} autoCorrect={false} autoCapitalize="none" maxLength={256} onSubmitEditing={() => { if (!busy) void submit(); }} /></>}
       {message !== '' && <Text accessibilityLiveRegion="polite" style={s.notice}>{message}</Text>}
       {error !== '' && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}
+      <Button variant="primary" icon={requested?'check':'send'} loading={busy} disabled={busy} onPress={submit}
+        title={requested ? 'Verify and continue' : creating ? 'Create account and send code' : 'Send verification code'} />
       {requested && <Button variant="tertiary" disabled={busy || seconds > 0} onPress={resend} title={seconds > 0 ? `Resend code in ${seconds}s` : 'Resend code'} />}
       <Button variant="tertiary" disabled={busy} onPress={() => { pendingTokens.current = null; setRequested(false); setRegistered(undefined); setType(undefined); setCreating(requested ? false : !creating); setCode(''); setMessage(''); setError(''); setResendAt(0); setSeconds(0); }} title={requested ? 'Change mobile number' : creating ? 'Already registered? Sign in' : 'New here? Create an account'} />
     </View>
-  </ScrollView><StickyBottomBar clearance={22}><Button variant="primary" icon={requested?'check':'send'} loading={busy} disabled={busy} onPress={submit} title={requested ? 'Verify and continue' : creating ? 'Create account and send code' : 'Send verification code'} /></StickyBottomBar></View>;
+  </ScrollView></View>;
 }
 const s = StyleSheet.create({
   screen: {flex: 1},
-  phone: {flexDirection: 'row', gap: 8, alignItems: 'center'}, prefix: {backgroundColor: '#edf7f0', color: '#17392d', padding: 14, borderRadius: 10, fontWeight: '700'}, phoneInput: {flex: 1},
-  content: { padding: 22, gap: 16, paddingBottom: 60 }, kicker: { color: '#087f5b', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 }, title: { fontSize: 32, color: '#17392d', fontWeight: '800' }, body: { color: '#52675c', fontSize: 15, lineHeight: 23 },
-  card: { backgroundColor: '#fff', padding: 20, gap: 14, borderRadius: 18, borderColor: '#dce7e0', borderWidth: 1 }, label: { fontSize: 15, fontWeight: '700', color: '#294b3a' }, input: { borderWidth: 1, borderColor: '#9fb7aa', padding: 12, borderRadius: 10, fontSize: 16, minHeight: 50, color: '#17392d' }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },      notice: { backgroundColor: '#edf7f0', padding: 12, color: '#294b3a', lineHeight: 22 }, error: { color: '#9c2820', lineHeight: 22 },
+  phone: {flexDirection: 'row', gap: 8, alignItems: 'center'},
+  prefix: {backgroundColor: trade.accentTint, color: trade.accent, padding: 10, borderRadius: 8, fontWeight: '700'},
+  phoneInput: {flex: 1, minWidth: 0},
+  content: {padding: trade.gutter, flexGrow: 1, justifyContent: 'center'},
+  kicker: {...tradeType.meta, fontWeight: '700', letterSpacing: 1},
+  title: tradeType.title,
+  card: {width: '100%', maxWidth: 400, alignSelf: 'center', backgroundColor: trade.surface,
+    padding: 16, gap: 8, borderRadius: trade.radius, borderColor: trade.border, borderWidth: 1},
+  label: tradeType.row,
+  input: {borderWidth: 1, borderColor: trade.border, paddingHorizontal: 12, paddingVertical: 7, borderRadius: trade.radius, fontSize: 13, minHeight: 40, color: trade.ink},
+  row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  notice: {backgroundColor: '#edf7f0', padding: 8, color: '#294b3a', fontSize: 13, lineHeight: 19},
+  error: {color: '#9c2820', fontSize: 13, lineHeight: 19},
 });

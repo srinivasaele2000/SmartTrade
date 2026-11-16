@@ -1,3 +1,4 @@
+import * as theme from '../src/trade-theme.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -26,7 +27,7 @@ function render(name, states, role = 'BUSINESS', editable = true) {
   native.StyleSheet = {create: value => value};
   native.Animated = {View: native.View, Value: class {interpolate() {return '0%';}}};
   let index = 0;
-  const imports = {
+  const imports = { './trade-theme': theme,
     react: React, 'react/jsx-runtime': jsx, 'react-native': native,
     './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button': buttonModule(React, native, jsx), './api': api, './india': india,
     './session': {useSession: () => ({account: {account_type: role}, token: 'fixture-token'})},

@@ -1,5 +1,5 @@
-import re
 import unicodedata
+from decimal import Decimal
 from rest_framework import serializers
 from accounts.models import BusinessProfile
 from accounts.profiles import validate_profile_location
@@ -48,12 +48,19 @@ class BusinessSummarySerializer(BusinessSerializer):
 
 
 class LocationSerializer(StrictSerializer):
+    latitude = serializers.DecimalField(max_digits=8, decimal_places=5, min_value=Decimal('-90'), max_value=Decimal('90'), required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=8, decimal_places=5, min_value=Decimal('-180'), max_value=Decimal('180'), required=False, allow_null=True)
+
     class Meta:
         model = DealerLocation
-        fields = ['id', 'business', 'branch_name', 'address', 'pin_code', 'locality', 'district', 'state', 'country', 'contact_name', 'contact_phone', 'contact_email', 'active', 'admin_hidden', 'visibility_state']
+        fields = ['id', 'business', 'branch_name', 'address', 'pin_code', 'locality', 'district', 'state', 'country', 'latitude', 'longitude', 'contact_name', 'contact_phone', 'contact_email', 'active', 'admin_hidden', 'visibility_state']
         read_only_fields = ['id', 'business', 'admin_hidden']
 
     def validate(self, attrs):
+        lat = attrs.get('latitude', getattr(self.instance, 'latitude', None))
+        lng = attrs.get('longitude', getattr(self.instance, 'longitude', None))
+        if (lat is None) != (lng is None):
+            raise serializers.ValidationError('Provide both latitude and longitude, or clear both.')
         for field in ['pin_code', 'locality', 'district', 'state', 'country']:
             if field in attrs:
                 value = ' '.join(unicodedata.normalize('NFKC', attrs[field]).split()).upper()
@@ -144,9 +151,13 @@ class DiscoverySerializer(ListingSerializer):
     branch = serializers.SerializerMethodField()
     primary_image_url = serializers.SerializerMethodField()
     catalogue_pdf_url = serializers.SerializerMethodField()
+    active_product_count = serializers.SerializerMethodField()
 
     class Meta(ListingSerializer.Meta):
-        fields = ListingSerializer.Meta.fields + ['branch', 'primary_image_url', 'catalogue_pdf_url']
+        fields = ListingSerializer.Meta.fields + ['branch', 'primary_image_url', 'catalogue_pdf_url', 'active_product_count']
+
+    def get_active_product_count(self, item):
+        return self.context.get('branch_product_counts', {}).get(item.location_id)
 
     def get_primary_image_url(self, item):
         return media_url(self.context.get('request'), attachment(item.product, 'image'))

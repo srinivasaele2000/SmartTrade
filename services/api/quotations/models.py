@@ -1,3 +1,5 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django.db import models
 
 
@@ -34,16 +36,41 @@ class Estimate(models.Model):
 
 
 class EstimateLine(models.Model):
+    class DiscountMode(models.TextChoices):
+        PERCENT = 'PERCENT', 'Percent'
+        AMOUNT = 'AMOUNT', 'Amount per unit'
+
     estimate = models.ForeignKey(Estimate, related_name='items', on_delete=models.CASCADE)
-    product = models.ForeignKey('catalogue.Product', on_delete=models.PROTECT)
+    product = models.ForeignKey('catalogue.Product', on_delete=models.PROTECT, null=True, blank=True)
+    dealer_custom_item = models.ForeignKey('dealers.DealerCustomItem', on_delete=models.PROTECT, null=True, blank=True)
     product_name = models.CharField(max_length=200)
-    hsn_sac_code = models.CharField(max_length=8, blank=True)
+    product_code = models.CharField(max_length=100, blank=True, default='')
+    hsn_sac_code = models.CharField(max_length=32, blank=True)
+    list_price_per_unit = models.DecimalField(max_digits=18, decimal_places=4, null=True)
     unit_price = models.DecimalField(max_digits=18, decimal_places=4)
     quantity = models.DecimalField(max_digits=9, decimal_places=3)
+    discount_mode = models.CharField(max_length=7, choices=DiscountMode.choices, default=DiscountMode.PERCENT)
+    discount_value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=24, decimal_places=2)
 
+    @property
+    def net_unit_rate(self):
+        if not self.discount_value:
+            return self.unit_price
+        rate = (self.unit_price - self.discount_value if self.discount_mode == self.DiscountMode.AMOUNT
+                else self.unit_price * (100 - self.discount_value) / 100)
+        return rate.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['estimate', 'product'], name='estimate_unique_product')]
+        ordering = ('pk',)
+        constraints = [
+            models.UniqueConstraint(fields=['estimate', 'product'], name='estimate_unique_product'),
+            models.UniqueConstraint(fields=['estimate', 'dealer_custom_item'], name='estimate_unique_general_item'),
+            models.CheckConstraint(condition=(
+                models.Q(product__isnull=False, dealer_custom_item__isnull=True)
+                | models.Q(product__isnull=True, dealer_custom_item__isnull=False)
+            ), name='estimate_line_one_item_source'),
+        ]
 
 
 class Bill(models.Model):

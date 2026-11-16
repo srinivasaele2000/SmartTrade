@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { recoverSession, SessionRejected } from './session-recovery';
-import { ApiClient, ApiError } from './api';
+import { ApiClient } from './api';
 import { account as loadAccount, type Account, type Tokens } from './auth';
 
 type ExpectedAccount = {role: Account['account_type']; mobile: string};
-type Session = { token: string | null; account: Account | null; message: string; establishSession: (issued: Tokens, expected?: ExpectedAccount) => Promise<Account>; clearSession: () => void; revalidateSession: () => void; signOut: () => Promise<void> };
+type Session = { token: string | null; account: Account | null; restoring: boolean; message: string; establishSession: (issued: Tokens, expected?: ExpectedAccount) => Promise<Account>; clearSession: () => void; revalidateSession: () => void; signOut: () => Promise<void> };
 const Context = createContext<Session | null>(null);
 const SESSION_KEY = 'smarttrade.session.v1';
 type PersistedSession = { tokens: Tokens; account: Account };
@@ -15,10 +15,16 @@ function validPersisted(value: unknown): value is PersistedSession {
   const item = value as { tokens?: Partial<Tokens>; account?: Partial<Account> };
   return typeof item.tokens?.access === 'string' && typeof item.tokens?.refresh === 'string' && typeof item.tokens?.expires_in === 'number' && typeof item.account?.id === 'number' && typeof item.account?.account_type === 'string' && typeof item.account?.access_state === 'string';
 }
-async function persist(tokens: Tokens, account: Account) { await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify({ tokens, account })); }
+async function persist(tokens: Tokens, account: Account) {
+  if (Platform.OS !== 'web') await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify({ tokens, account }));
+}
+async function deleteSavedSession() {
+  if (Platform.OS !== 'web') await SecureStore.deleteItemAsync(SESSION_KEY);
+}
 export function SessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   const [session, setSession] = useState<Tokens | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
+  const [restoring, setRestoring] = useState(Platform.OS !== 'web');
   const [message, setMessage] = useState('');
   const [offline, setOffline] = useState(false);
   const revalidationRunner = useRef<() => void>(()=>{});
@@ -31,8 +37,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     return next;
   }, []);
   const installing = useRef(false);
-  const clearSession = useCallback(() => { generation.current++; setSession(null); setAccount(null); void enqueueStorage(() => SecureStore.deleteItemAsync(SESSION_KEY)); }, [enqueueStorage]);
+  const clearSession = useCallback(() => { generation.current++; setSession(null); setAccount(null); void enqueueStorage(deleteSavedSession); }, [enqueueStorage]);
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     let cancelled = false;
     const revision = generation.current;
     const current = () => !cancelled && revision === generation.current;
@@ -49,12 +56,13 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
           if (!(error instanceof SessionRejected)) {
             if (!cancelled) { setSession(saved.tokens); setAccount(saved.account); setOffline(true); setMessage('You’re browsing offline. Your saved files stay on this device. We’ll reconnect automatically.'); }
           } else {
-            await enqueueStorage(() => SecureStore.deleteItemAsync(SESSION_KEY));
+            await enqueueStorage(deleteSavedSession);
             if (current()) setMessage('Please sign in again to continue.');
           }
         }
-      } catch { if (current()) { await enqueueStorage(() => SecureStore.deleteItemAsync(SESSION_KEY)); if (current()) setMessage('Please sign in again to continue.'); } }
-    }).catch(() => { if (current()) setMessage('We couldn’t restore your sign-in. Please try signing in again.'); });
+      } catch { if (current()) { await enqueueStorage(deleteSavedSession); if (current()) setMessage('Please sign in again to continue.'); } }
+    }).catch(() => { if (current()) setMessage('We couldn’t restore your sign-in. Please try signing in again.'); })
+      .finally(() => { if (current()) setRestoring(false); });
     return () => { cancelled = true; };
   }, [api, enqueueStorage]);
   async function establishSession(issued: Tokens, expected?: ExpectedAccount) {
@@ -105,7 +113,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       catch { setMessage('You’re signed out on this device. We couldn’t confirm sign-out online.'); }
     }
   }
-  return <Context.Provider value={{ token: session?.access ?? null, account, message, establishSession, clearSession, revalidateSession, signOut }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ token: session?.access ?? null, account, restoring, message, establishSession, clearSession, revalidateSession, signOut }}>{children}</Context.Provider>;
 }
 export function useSession() {
   const session = useContext(Context);

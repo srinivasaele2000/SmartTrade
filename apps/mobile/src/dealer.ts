@@ -8,7 +8,7 @@ export const branchFields = [
   ['locality', 'Locality', 120], ['district', 'District', 120], ['state', 'Indian state / union territory', 120], ['country', 'Country', 2],
   ['contact_name', 'Private contact name', 160], ['contact_phone', 'Private Indian mobile (+91)', 13], ['contact_email', 'Private contact email', 254],
 ] as const;
-export type BranchInput = Record<typeof branchFields[number][0], string> & { active: boolean; visibility_state: 'PRIVATE_DRAFT' | 'VISIBLE' };
+export type BranchInput = Record<typeof branchFields[number][0], string> & { latitude?: string | null; longitude?: string | null; active: boolean; visibility_state: 'PRIVATE_DRAFT' | 'VISIBLE' };
 export type OwnedBranch = BranchInput & { id: number; business: number; admin_hidden: boolean };
 export type ListingFilters = { search?: string; state?: string; stock_status?: string; location?: string };
 export type OwnedListing = { company_name?: string; product_code?: string; variant_sku?: string | null; variant_name?: string | null; eligible?: boolean; id: number; location: number; branch_name: string; product: number; product_name: string; variant: number | null; brand_id: number; brand_name: string; company_id: number; selling_price: string; currency: string; stock_status: 'IN_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN'; quantity: string | null; state: 'PUBLISHED' | 'WITHDRAWN'; company_catalogue_price: string | null; company_catalogue_currency: string };
@@ -22,6 +22,11 @@ export function validateBranch(value: BranchInput): string[] {
   if (!INDIAN_STATES.some(state => state.toLowerCase() === value.state.trim().toLowerCase())) errors.push('Choose a valid Indian state or union territory.');
   if (value.contact_phone && !INDIAN_MOBILE.test(value.contact_phone)) errors.push('Private phone must use +91XXXXXXXXXX format.');
   if (value.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.contact_email)) errors.push('Private email is invalid.');
+  const lat = value.latitude?.trim(), lng = value.longitude?.trim();
+  const coordinate = /^-?\d{1,3}(?:\.\d{1,5})?$/;
+  if ((lat || lng) && (!lat || !lng || !coordinate.test(lat) || !coordinate.test(lng) || Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180)) {
+    errors.push('Enter valid latitude and longitude with up to five decimal places, or leave both blank.');
+  }
   return errors;
 }
 const decimal = /^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/;
@@ -62,7 +67,8 @@ export async function saveBusiness(api: ApiClient, token: string, legal_name: st
 }
 export async function saveBranch(api: ApiClient, token: string, form: BranchInput, id?: number) {
   const errors = validateBranch(form); if (errors.length) throw new ApiError(errors.join(' '));
-  const data = { ...Object.fromEntries(branchFields.map(([key]) => [key, form[key].trim()])), country: form.country.trim().toUpperCase(), active: form.active, visibility_state: form.visibility_state };
+  const data = { ...Object.fromEntries(branchFields.map(([key]) => [key, form[key].trim()])), country: form.country.trim().toUpperCase(), active: form.active, visibility_state: form.visibility_state,
+    ...(form.latitude !== undefined || form.longitude !== undefined ? {latitude: form.latitude?.trim() || null, longitude: form.longitude?.trim() || null} : {}) };
   const value = await api.get(`/businesses/me/locations${id ? `/${id}` : ''}`, undefined, token, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(data) }); confirmed(value); return value;
 }
 export async function saveListing(api: ApiClient, token: string, form: InventoryInput, selected: { location: number; product: number; variant: number | null }, id?: number) {

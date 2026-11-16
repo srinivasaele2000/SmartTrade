@@ -24,10 +24,8 @@ from .models import (
     CompanyActivityState,
     CompanyAuditEvent,
     CompanyCaseState,
-    CompanyAuditEvent,
     CompanyDocument,
     CompanyProfile,
-    CompanyVerificationCase,
     CompanyVerificationCase,
     CompanyVerificationState,
 )

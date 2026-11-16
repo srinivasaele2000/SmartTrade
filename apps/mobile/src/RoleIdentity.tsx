@@ -29,7 +29,7 @@ export function RoleBadge({role, heading = false, admin = false}: {role: Account
   const Icon = identity.Icon;
 
   return <View style={[styles.badge, heading && styles.heading, {backgroundColor}]}>
-    <Icon size={heading ? 24 : 18} color={color} accessible={false} />
+    <Icon size={heading ? 20 : 16} color={color} aria-hidden={true} />
     <Text accessibilityRole={heading ? 'header' : undefined}
       accessibilityLabel={'Account role: ' + label}
       style={[styles.label, heading && styles.headingLabel, {color}]}>{label}</Text>
@@ -37,8 +37,8 @@ export function RoleBadge({role, heading = false, admin = false}: {role: Account
 }
 
 const styles = StyleSheet.create({
-  badge: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', gap: 8, borderRadius: 24, paddingHorizontal: 11, paddingVertical: 7},
-  heading: {paddingHorizontal: 14, paddingVertical: 10},
-  label: {fontSize: 13, fontWeight: '800', letterSpacing: 0.35, flexShrink: 1},
-  headingLabel: {fontSize: 23},
+  badge: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', gap: 5, borderRadius: 24, paddingHorizontal: 8, paddingVertical: 5},
+  heading: {paddingHorizontal: 10, paddingVertical: 7},
+  label: {fontSize: 11, fontWeight: '800', letterSpacing: 0.35, flexShrink: 1},
+  headingLabel: {fontSize: 19},
 });

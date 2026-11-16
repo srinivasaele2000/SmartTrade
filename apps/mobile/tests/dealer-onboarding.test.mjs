@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {ApiClient} from '../src/api.ts';
-import {catalogueDocumentLabel, registerDealer, submitWorkers, targetedCatalogues, workerProgress} from '../src/dealer-onboarding.ts';
+import {catalogueDocumentLabel, duplicateWorkerRows, normalizeWorkerMobile, registerDealer, submitWorkers, targetedCatalogues, workerProgress, workerSubmissionErrors} from '../src/dealer-onboarding.ts';
 
 const base = 'http://127.0.0.1:8000/api/v1';
 const json = value => Response.json(value);
@@ -44,6 +44,30 @@ test('worker progress counts only valid unique entries and requires consent befo
   await assert.rejects(submitWorkers(api, 'test-session', workers, false), /consent/);
   await submitWorkers(api, 'test-session', workers, true);
   assert.equal(calls, 1);
+});
+
+test('formatted contact numbers normalize without accepting foreign or truncated numbers', () => {
+  for (const value of ['+91 (98000) 000-10', '0 98000 00010', '919800000010']) {
+    assert.equal(normalizeWorkerMobile(value), workers[0].mobile);
+    assert.deepEqual(duplicateWorkerRows([workers[0], {...workers[1], mobile: value}]).map(Boolean), [true, true]);
+  }
+  for (const value of ['+1 98000 00010', '98000000100', '9800000010 ext 2', '1234567890']) {
+    assert.equal(normalizeWorkerMobile(value), '');
+  }
+});
+
+test('cross-dealer conflicts retain structured row errors through the API client', async () => {
+  const message = 'This number is already registered as a dealer worker. Please provide another number.';
+  const api = new ApiClient(base, async () => Response.json({
+    detail: 'Use a different mobile number for each flagged worker.',
+    worker_errors: [{index: 2, phone: workers[2].mobile, message}],
+  }, {status: 400}));
+  await assert.rejects(submitWorkers(api, 'test-session', workers, true), failure => {
+    assert.deepEqual(workerSubmissionErrors(failure, workers), {2: message});
+    assert.deepEqual(workerSubmissionErrors(failure, workers.map((worker, index) =>
+      index === 2 ? {...worker, mobile: '9876543210'} : worker)), {});
+    return true;
+  });
 });
 
 test('targeted catalogue data and card labels are projected from the filtered API response', async () => {

@@ -13,7 +13,10 @@ from catalogue.taxonomy import SUB_CATEGORIES
 from companies.permissions import HasStaffPermission
 from config.india import GSTIN_PATTERN, INDIAN_MOBILE_PATTERN
 from .models import TradeWorkerContact
-from .onboarding import ContactSerializer, DealerView, MINIMUM_CONTACTS, StaffContacts, StaffView
+from .onboarding import (
+    ContactSerializer, DealerView, MINIMUM_CONTACTS, StaffContacts, StaffView,
+    WORKER_NUMBER_TAKEN, lock_worker_numbers,
+)
 from .views import audit, business, page
 
 
@@ -53,21 +56,34 @@ class DealerRegistration(AccountRegistrationView):
 class BatchInput(serializers.Serializer):
     contacts = ContactSerializer(many=True, min_length=MINIMUM_CONTACTS, max_length=MINIMUM_CONTACTS)
 
-    def validate_contacts(self, contacts):
-        if len({item['mobile_e164'] for item in contacts}) != len(contacts):
-            raise serializers.ValidationError('Enter ten contacts with distinct mobile numbers.')
-        return contacts
-
 
 class BatchContacts(DealerView):
     @transaction.atomic
     def post(self, request):
         dealer = business(request)
-        if dealer.contacts_submitted_at is not None:
+        if dealer.contacts_submitted_at is not None and dealer.trade_contacts.count() >= MINIMUM_CONTACTS:
             return Response({'detail': 'The onboarding contacts have already been submitted.'}, status=409)
         serializer = BatchInput(data=request.data)
         serializer.is_valid(raise_exception=True)
         contacts = serializer.validated_data['contacts']
+        numbers = [item['mobile_e164'] for item in contacts]
+        lock_worker_numbers(numbers)
+        taken = set(TradeWorkerContact.objects.filter(mobile_e164__in=numbers)
+                    .exclude(business=dealer).values_list('mobile_e164', flat=True))
+        errors = []
+        for index, number in enumerate(numbers):
+            if numbers.count(number) > 1:
+                message = f'Duplicate number entered in row {index + 1}. Please provide another number.'
+            elif number in taken:
+                message = WORKER_NUMBER_TAKEN
+            else:
+                continue
+            errors.append({'index': index, 'phone': number[3:], 'message': message})
+        if errors:
+            return Response({
+                'detail': 'Use a different mobile number for each flagged worker.',
+                'worker_errors': errors,
+            }, status=400)
         existing = {item.mobile_e164: item for item in dealer.trade_contacts.all()}
         submitted = {item['mobile_e164']: item for item in contacts}
         if any(number not in submitted or any(

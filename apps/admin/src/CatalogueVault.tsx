@@ -3,10 +3,13 @@ import {apiResponse, requestApi} from './api';
 import {catalogueBusinessTypes, SUB_BUSINESS_TAXONOMY, type CatalogueBusinessType} from './BusinessType';
 import {indianNumber, istDateTime} from './india';
 import {useAdminPage} from './useAdminPage';
+import CatalogueExtractionReview from './CatalogueExtractionReview';
 
 type Document = {key: string; business_type: CatalogueBusinessType; sub_category: string; brand_name: string; title: string;
   filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean};
 const path = '/admin/catalogues/';
+const pdfLimitMb = 20;
+const imageLimitMb = 2;
 
 export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: string; token: string; allowed: boolean}) {
   const [business, setBusiness] = useState('');
@@ -25,6 +28,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
   const [preview, setPreview] = useState<{document: Document; url: string} | null>(null);
   const [remove, setRemove] = useState<Document | null>(null);
   const [edit, setEdit] = useState<Document | null>(null);
+  const [extraction, setExtraction] = useState<Document | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const editing = edit !== null;
   useEffect(() => {
@@ -46,6 +50,12 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     const form = event.currentTarget;
     const body = new FormData(form);
     void run(async () => {
+      const file = body.get('file');
+      if (file instanceof File) {
+        const isPdf = file.type === 'application/pdf' || (file.type === '' && /\.pdf$/i.test(file.name));
+        const limit = isPdf ? pdfLimitMb : imageLimitMb;
+        if (file.size > limit * 1024 * 1024) throw new Error(`File size exceeds the ${limit} MB limit.`);
+      }
       await requestApi<Document>(baseUrl, path, token, {method: 'POST', body});
       form.reset();
       setBusiness('');
@@ -87,7 +97,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       <label>Brand name <input name="brand_name" maxLength={200} required /></label>
       <label>Catalogue title <input name="title" maxLength={200} required /></label>
       <label>Catalogue file <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" required /></label>
-      <p>PDF up to 10 MB. JPEG, PNG or WebP up to 2 MB and 4096 × 4096 pixels.</p>
+      <p>PDF up to {pdfLimitMb} MB. JPEG, PNG or WebP up to {imageLimitMb} MB and 4096 × 4096 pixels.</p>
       <button className="button" disabled={busy}>Upload catalogue</button>
     </form>
     {notice && <p role="status">{notice}</p>}
@@ -120,13 +130,20 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
           <button disabled={busy} onClick={() => void run(async () => {
             const response = await apiResponse(baseUrl, path + item.key + '/file/', token);
             setPreview({document: item, url: URL.createObjectURL(await response.blob())});
-          })}>Preview / download</button>{item.is_active && <button disabled={busy} onClick={() => setRemove(item)}>Archive</button>}</td>
+          })}>Preview / download</button>{item.is_active && <button disabled={busy} onClick={() => setRemove(item)}>Archive</button>}
+          {item.is_active && item.content_type === 'application/pdf' && <button disabled={busy}
+            onClick={() => {setNotice(''); setError(''); setExtraction(item);}}>Extract Items &amp; Images from PDF</button>}</td>
         </tr>)}</tbody>
       </table></div>}
     {page.data && <nav aria-label="Catalogue pages">
       <button disabled={!page.data.previous} onClick={() => page.setNumber(page.number - 1)}>Previous</button>
       <button disabled={!page.data.next} onClick={() => page.setNumber(page.number + 1)}>Next</button>
     </nav>}
+    {extraction && <CatalogueExtractionReview baseUrl={baseUrl} token={token} documentKey={extraction.key}
+      title={extraction.title} close={() => setExtraction(null)} onCommit={(count, discarded) => {
+        setExtraction(null);
+        setNotice(`${count} catalogue items published. ${discarded} drafts discarded.`);
+      }} />}
     {edit && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="edit-catalogue-title"
       onCancel={event => {event.preventDefault(); if (!busy) setEdit(null);}}>
       <h3 id="edit-catalogue-title">Edit catalogue</h3>

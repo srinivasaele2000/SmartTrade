@@ -57,6 +57,33 @@ class ProductMediaTests(TestCase):
         self.public = APIClient()
         self.route = f'/api/v1/staff/catalogue/products/{self.product.pk}'
 
+    def test_priced_catalogue_search_ranks_matches_before_pagination(self):
+        self.brand.name = 'Ziva 1 Way Switch 68001'
+        self.brand.save(update_fields=['name'])
+        link = self.product.brand_category
+        for code, name in (
+            ('BRAND-ONLY', 'Socket'),
+            ('PREFIX-68001', 'Cable'),
+            ('68001B', 'Black switch'),
+            ('68002', 'Premium Ziva 1 Way Switch'),
+            ('68001', 'Ziva 6A, 1 Way Switch'),
+        ):
+            Product.objects.create(brand_category=link, code=code, name=name, unit='each',
+                                   state='PUBLISHED', catalogue_price='39', currency='INR')
+
+        def codes(**filters):
+            response = self.public.get('/api/v1/catalogue/items/', filters)
+            self.assertEqual(response.status_code, 200, response.data)
+            return [row['product_code'] for row in response.data['results']]
+
+        self.assertEqual(codes(search=' 68001 ', page_size=2), ['68001', '68001B'])
+        self.assertEqual(codes(search='68001', page_size=2, page=2), ['PREFIX-68001', 'BRAND-ONLY'])
+        self.assertEqual(codes(search='680')[:4], ['68001B', '68002', '68001', 'PREFIX-68001'])
+        self.assertEqual(codes(search=' ZIVA   1 WAY ')[:2], ['68001', '68002'])
+        self.assertEqual(codes(search='1 way switch')[:2], ['68002', '68001'])
+        self.assertEqual(codes(search='ziva 6a'), ['68001'])
+        self.assertEqual(codes(search='  '), ['BRAND-ONLY', 'PREFIX-68001', '68001B', '68002', '68001'])
+
     def test_item_edit_replaces_image_and_archive_removes_discovery(self):
         self.product.catalogue_price = '10.00'
         self.product.currency = 'INR'
@@ -84,6 +111,12 @@ class ProductMediaTests(TestCase):
         self.assertFalse((self.root / old).exists())
         self.assertEqual((self.root / self.product.official_media.get().storage_name).read_bytes(), png('blue'))
         self.assertEqual(self.public.get('/api/v1/catalogue/items/').data['count'], 1)
+        self.assertEqual(self.public.get('/api/v1/catalogue/items/', {
+            'search': '8536', 'brand': self.brand.pk, 'category': category.pk,
+        }).data['results'][0]['product_code'], 'MEDIA-UPDATED')
+        self.assertEqual(self.public.get('/api/v1/catalogue/items/', {
+            'search': '8536', 'category': self.category.pk,
+        }).data['count'], 0)
         self.assertEqual(self.client.delete(endpoint).status_code, 204)
         self.assertEqual(self.client.delete(endpoint).status_code, 204)
         self.assertEqual(self.public.get('/api/v1/catalogue/items/').data['count'], 0)
@@ -142,7 +175,7 @@ class ProductMediaTests(TestCase):
             ('image', 'image/svg+xml', b'<svg/>'),
             ('image', 'image/jpeg', png()),
             ('image', 'image/png', b'not an image'),
-            ('catalogue-pdf', 'application/pdf', b'x' * (10 * 1024 * 1024 + 1)),
+            ('catalogue-pdf', 'application/pdf', b'x' * (20 * 1024 * 1024 + 1)),
             ('catalogue-pdf', 'text/plain', pdf('Wrong type')),
             ('catalogue-pdf', 'application/pdf', b'%PDF-1.4 incomplete'),
         ]:

@@ -1,11 +1,12 @@
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from accounts.models import AccountType
 from companies.models import CompanyProfile
 from companies.tests import make_account, grant_staff_permissions
 from catalogue.models import Brand, BrandCategory, Category, Product, ProductVariant
-from .models import AuthorizedDealerGrant, DealerAudit, DealerLocation, DealerProductListing
+from .models import AuthorizedDealerGrant, DealerAudit, DealerLocation, DealerProductListing, TradeWorkerContact
 
 
 class DealerTests(TestCase):
@@ -49,6 +50,53 @@ class DealerTests(TestCase):
     def discover(self, **filters):
         return self.client.get('/api/v1/dealers/listings', filters)
 
+    def test_nearby_discovery_radius_manual_filters_and_visibility(self):
+        url = '/api/v1/dealers/discover/'
+        client = APIClient()
+        nearest = self.create_location(branch_name='Nearest', latitude='12.99000', longitude='77.60000')
+        farther = self.create_location(branch_name='Farther', latitude='13.09000', longitude='77.60000')
+        self.create_listing(location=nearest)
+        self.create_listing(location=farther)
+        self.create_listing()
+        now = timezone.now()
+        self.business.contacts_submitted_at = now
+        self.business.save(update_fields=['contacts_submitted_at'])
+        TradeWorkerContact.objects.bulk_create([
+            TradeWorkerContact(business=self.business, name=f'Test worker {i}', trade='Electrician',
+                               mobile_e164=f'+9198000990{i:02}', consent_confirmed_at=now)
+            for i in range(9)
+        ])
+        self.assertEqual(client.get(url, {'city': 'Bengaluru'}).data['count'], 0)
+        TradeWorkerContact.objects.create(business=self.business, name='Tenth worker', trade='Electrician',
+                                          mobile_e164='+919800099099', consent_confirmed_at=now)
+        gps = {'lat': 12.97, 'lng': 77.6}
+        close = client.get(url, gps | {'radius_km': 5}).data['results']
+        self.assertEqual([row['id'] for row in close], [nearest])
+        self.assertAlmostEqual(close[0]['distance_km'], 2.2)
+        self.assertEqual([row['id'] for row in client.get(url, gps | {'radius_km': 25}).data['results']], [nearest, farther])
+        mixed = client.get(url, gps | {'city': 'bengaluru', 'q': 'supplier H1', 'brand_id': self.brand.pk}).data['results']
+        self.assertEqual([row['id'] for row in mixed], [nearest, farther, self.location])
+        self.assertIsNone(mixed[-1]['distance_km'])
+        self.assertEqual(mixed[0]['matched_items_count'], 1)
+        self.assertNotIn('contact_email', mixed[0])
+        for params in ({'area': 'market'}, {'pincode': '560001'}, {'city': 'Bengaluru', 'category_id': self.category.pk}):
+            self.assertEqual(client.get(url, params).data['count'], 3)
+        self.assertEqual(client.get(url, {'city': 'Bengaluru', 'brand_id': self.brand.pk + 999}).data['count'], 0)
+        self.assertEqual(client.get(url, {'lat': 12.97}).status_code, 400)
+        self.assertEqual(client.get(url, gps | {'radius_km': 201}).status_code, 400)
+        self.assertEqual(client.get(url, {'pincode': '123'}).status_code, 400)
+        item_url = f'/api/v1/catalogue/items/{self.product.pk}/nearby-dealers/'
+        self.assertEqual(client.get(item_url, gps).data['count'], 2)
+        branch_url = f'/api/v1/dealers/discover/{nearest}/catalogue/'
+        self.assertEqual(client.get(branch_url).data['results'][0]['product'], self.product.pk)
+        self.grant(active=False)
+        self.assertEqual(client.get(item_url, gps).data['count'], 0)
+        self.assertEqual(client.get(branch_url).data['count'], 0)
+        self.business.verification_state = 'PENDING'
+        self.business.save(update_fields=['verification_state'])
+        self.assertEqual(client.get(url, {'city': 'Bengaluru'}).data['count'], 0)
+        self.assertEqual(client.get(branch_url).status_code, 404)
+
     def test_discovery_rejects_invalid_pin_even_with_locality_fallback(self):
         for pin in ['123', '012345', 'abcdef', '', '   ', '5600017']:
             with self.subTest(pin=pin):
@@ -69,6 +117,7 @@ class DealerTests(TestCase):
         self.assertEqual(row['selling_price'], '12.5000')
         self.assertEqual(row['company_catalogue_price'], '10.0000')
         self.assertEqual(row['currency'], 'INR')
+        self.assertEqual(row['active_product_count'], 1)
         self.assertNotIn('contact_phone', row['branch'])
         self.assertNotIn('contact_email', row['branch'])
         self.assertEqual(row['branch']['locality'], 'CENTRAL MARKET')
@@ -76,6 +125,7 @@ class DealerTests(TestCase):
         self.assertEqual(fallback.data['match_level'], 'LOCALITY')
         self.assertEqual(fallback.data['results'][0]['location'], branch)
         self.assertEqual(self.discover(district='bengaluru').data['count'], 2)
+        self.assertEqual([item['id'] for item in self.discover(location=self.location).data['results']], [first])
         self.assertEqual(APIClient().get('/api/v1/dealers/listings').status_code, 401)
 
     def test_cross_dealer_ownership_and_variant_product_isolation(self):

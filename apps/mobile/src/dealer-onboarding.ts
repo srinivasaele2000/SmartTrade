@@ -13,6 +13,24 @@ export type VaultDocument = {key: string; title: string; brand_name: string; con
   file_size_bytes: number; created_at: string; url: string};
 export const workerCount = 10;
 
+export function normalizeWorkerMobile(value: string) {
+  return value.replace(/[\s()\-]/g, '').match(/^(?:\+?91|0)?([6-9][0-9]{9})$/)?.[1] ?? '';
+}
+
+export function duplicateWorkerRows(workers: Worker[]) {
+  const numbers = workers.map(worker => normalizeWorkerMobile(worker.mobile));
+  return numbers.map((number, index) => number && numbers.indexOf(number) !== numbers.lastIndexOf(number)
+    ? `Duplicate number entered in row ${index + 1}. Please provide another number.` : '');
+}
+
+export function workerSubmissionErrors(failure: unknown, workers: Worker[]): Record<number, string> {
+  if (!(failure instanceof ApiError) || failure.status !== 400 || !Array.isArray(failure.workerErrors)) return {};
+  return Object.fromEntries(failure.workerErrors.flatMap(error =>
+    Number.isInteger(error?.index) && workers[error.index] &&
+    normalizeWorkerMobile(workers[error.index].mobile) === error.phone && typeof error.message === 'string'
+      ? [[error.index, error.message]] : []));
+}
+
 export async function registerDealer(api: ApiClient, firm: string, gstin: string, mobile: string, type: BusinessType | '') {
   if (!firm.trim() || firm.trim().length > 200) throw new ApiError('Enter your firm name (up to 200 characters).');
   const taxId = gstin.trim().toUpperCase();
@@ -25,7 +43,8 @@ export async function registerDealer(api: ApiClient, firm: string, gstin: string
 export function workerProgress(workers: Worker[]) {
   const seen = new Set<string>();
   for (const worker of workers) {
-    if (worker.name.trim() && worker.trade.trim() && INDIAN_MOBILE.test('+91' + worker.mobile)) seen.add(worker.mobile);
+    const number = normalizeWorkerMobile(worker.mobile);
+    if (worker.name.trim() && worker.trade.trim() && number) seen.add(number);
   }
   return seen.size;
 }
@@ -35,7 +54,7 @@ export async function submitWorkers(api: ApiClient, token: string, workers: Work
     throw new ApiError('Enter ten distinct workers and confirm their consent.');
   }
   return api.post('/dealers/contacts/batch/', {contacts: workers.map(worker => ({
-    name: worker.name.trim(), mobile_e164: '+91' + worker.mobile, trade: worker.trade.trim(),
+    name: worker.name.trim(), mobile_e164: '+91' + normalizeWorkerMobile(worker.mobile), trade: worker.trade.trim(),
     location: worker.location ?? '', consent: true,
   }))}, token);
 }

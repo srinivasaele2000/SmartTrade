@@ -286,4 +286,9 @@ class AccountMeView(APIView):
     permission_classes = [IsActiveAccount]
 
     def get(self, request):
-        return Response({"account": AccountResponseSerializer(request.user).data})
+        from .dealer_gate import dealer_contacts_complete
+
+        payload = AccountResponseSerializer(request.user).data
+        if request.user.account_type == AccountType.BUSINESS:
+            payload['dealer_contacts_complete'] = dealer_contacts_complete(request.user)
+        return Response({"account": payload})

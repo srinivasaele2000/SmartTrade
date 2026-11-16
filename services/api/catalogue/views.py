@@ -53,7 +53,6 @@ def audit(request, action, instance, snapshot, reason=''):
 
 
 class PublicProducts(generics.ListAPIView):
-    authentication_classes = []
     permission_classes = [AllowAny]
     serializer_class = ProductSerializer
     pagination_class = Pages
@@ -74,6 +73,7 @@ class PublicProducts(generics.ListAPIView):
             qs = qs.filter(
                 Q(name__icontains=term)
                 | Q(code__icontains=term)
+                | Q(specifications__HSN__icontains=term)
                 | Q(description__icontains=term)
                 | Q(brand_category__brand__name__icontains=term)
                 | Q(brand_category__category__name__icontains=term)
@@ -83,7 +83,6 @@ class PublicProducts(generics.ListAPIView):
 
 
 class PublicBrands(generics.ListAPIView):
-    authentication_classes = []
     permission_classes = [AllowAny]
     serializer_class = PublicBrandSerializer
     pagination_class = Pages
@@ -112,7 +111,6 @@ class PublicBrands(generics.ListAPIView):
 
 
 class PublicProduct(generics.RetrieveAPIView):
-    authentication_classes = []
     permission_classes = [AllowAny]
     serializer_class = ProductSerializer
 
@@ -125,7 +123,6 @@ class PublicProduct(generics.RetrieveAPIView):
 
 class Categories(generics.ListAPIView):
     permission_classes = [AllowAny]
-    authentication_classes = []
     queryset = Category.objects.filter(active=True).order_by('name')
     serializer_class = CategorySerializer
     pagination_class = Pages

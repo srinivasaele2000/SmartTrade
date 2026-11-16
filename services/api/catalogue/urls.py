@@ -1,5 +1,5 @@
 from django.urls import path
-from . import items, vault
+from . import extraction, items, vault
 from .media import StaffProductMedia
 from .views import OwnerBrand, StaffBrands, StaffCategory, StaffCatalogueAudit, Categories, ModerateProduct, OwnerCatalogue, OwnerProduct, OwnerVariant, OwnerVariants, PublicBrands, PublicProduct, PublicProducts, StaffCategories, StaffProducts
 
@@ -10,6 +10,9 @@ urlpatterns = [
     path('catalogues/', vault.PublicCatalogueVault.as_view()),
     path('catalogues/<uuid:key>/file/', vault.PublicCatalogueFile.as_view(), name='vault-public-file'),
     path('admin/catalogues/', vault.StaffCatalogueVault.as_view()),
+    path('admin/catalogues/<uuid:key>/extract/', extraction.StaffExtraction.as_view()),
+    path('admin/catalogues/<uuid:key>/drafts/commit/', extraction.CommitDrafts.as_view()),
+    path('admin/catalogues/<uuid:key>/drafts/<int:pk>/image/', extraction.DraftImage.as_view(), name='catalogue-draft-image'),
     path('admin/catalogues/<uuid:key>/', vault.StaffCatalogueDocument.as_view()),
     path('admin/catalogues/<uuid:key>/file/', vault.StaffCatalogueFile.as_view(), name='vault-staff-file'),
     *[path(f'staff/catalogue/products/<int:pk>/{kind}', StaffProductMedia.as_view(), {'kind': kind})

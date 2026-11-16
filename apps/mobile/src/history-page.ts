@@ -13,7 +13,7 @@ export class HistoryPage<T> {
   private load:HistoryLoader<T>;
   constructor(load:HistoryLoader<T>) {this.load=load;}
   subscribe(listener:(value:HistorySnapshot<T>)=>void) {this.listener=listener;}
-  start(load:HistoryLoader<T>) {this.load=load;return this.request(this.snapshot.page);}
+  start(load:HistoryLoader<T>,reset=false) {this.load=load;return this.request(reset?1:this.snapshot.page);}
   dispose() {this.generation++;this.abort?.abort();this.listener=()=>{};}
   private publish(value:HistorySnapshot<T>) {this.snapshot=value;this.listener(value);}
   private async request(page:number) {

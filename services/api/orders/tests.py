@@ -8,7 +8,7 @@ from django.utils import timezone
 from catalogue.models import Brand,BrandCategory,Category,Product,ProductVariant
 from companies.models import CompanyProfile
 from dealers.models import AuthorizedDealerGrant,DealerLocation,DealerProductListing
-from .models import Invoice,InvoiceAudit,Order,OrderAudit,OrderItem
+from .models import Invoice,InvoiceAudit,OrderAudit,OrderItem
 
 
 class OrderInvoiceTests(TestCase):
@@ -39,6 +39,10 @@ class OrderInvoiceTests(TestCase):
 
     def test_bill_of_supply_pdf_and_immutability(self):
         order=self.create_order();confirmed=self.confirm(order);response=self.dealer_client.post(f"/api/v1/businesses/me/orders/{order['id']}/invoice",self.bill(confirmed.data),format='json');self.assertEqual(response.status_code,201,response.data);self.assertEqual(response.data['invoice']['kind'],'BILL_OF_SUPPLY');download=self.buyer_client.get(f"/api/v1/orders/{order['id']}/invoice/download");self.assertEqual(download.status_code,200);self.assertEqual(download['Content-Type'],'application/pdf');self.assertTrue(download.content.startswith(b'%PDF'))
+        invoice_line = response.data['invoice']['items'][0]
+        self.assertEqual(invoice_line['order_item'], confirmed.data['items'][0]['id'])
+        self.assertEqual(invoice_line['tax_mode'], 'NONE')
+        self.assertEqual(invoice_line['product_code'], confirmed.data['items'][0]['product_code'])
         self.assertEqual(self.dealer_client.post(f"/api/v1/businesses/me/orders/{order['id']}/invoice",self.bill(confirmed.data),format='json').status_code,409)
         with self.assertRaises(DatabaseError),transaction.atomic(): Invoice.objects.filter(order_id=order['id']).update(grand_total=1)
         with self.assertRaises(DatabaseError),transaction.atomic(): InvoiceAudit.objects.filter(invoice__order_id=order['id']).delete()

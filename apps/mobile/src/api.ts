@@ -12,18 +12,22 @@ export type Listing = {
   id: number; business_id: number; business_name: string; location: number; product: number; product_name: string;
   variant: number | null; selling_price: string; currency: string; stock_status: 'IN_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN';
   quantity: string | null; branch: Branch;
+  active_product_count?: number;
   primary_image_url?: string | null; catalogue_pdf_url?: string | null;
 };
 export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 export type Discovery = Page<Listing> & { match_level: string };
 export type CatalogueFilters = { search?: string; category?: string; brand?: string };
 export type BrandFilters = { search?: string; category?: string };
-export type DealerFilters = { variant?: string; pin_code?: string; locality?: string; district?: string; stock_status?: string };
+export type DealerFilters = { variant?: string; pin_code?: string; locality?: string; district?: string; stock_status?: string; location?: string };
 
 export class ApiError extends Error {
   status: number;
   code?: string;
-  constructor(message: string, status = 0, code?: string) { super(message); this.status = status; this.code = code; }
+  readonly workerErrors?: unknown;
+  constructor(message: string, status = 0, code?: string, workerErrors?: unknown) {
+    super(message); this.status = status; this.code = code; this.workerErrors = workerErrors;
+  }
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError('Unexpected API response.');
@@ -61,6 +65,7 @@ export function mapListing(value: unknown): Listing {
     ...mediaFields(item),
     id: number(item.id), business_id: number(item.business_id), business_name: text(item.business_name), location: number(item.location), product: number(item.product), product_name: text(item.product_name),
     variant: item.variant === null ? null : number(item.variant), selling_price: text(item.selling_price), currency: text(item.currency), stock_status: stock as Listing['stock_status'], quantity: nullable(item.quantity),
+    ...(typeof item.active_product_count === 'number' ? {active_product_count: item.active_product_count} : {}),
     branch: { id: number(b.id), branch_name: text(b.branch_name), address: text(b.address), pin_code: text(b.pin_code), locality: text(b.locality), district: text(b.district), state: text(b.state), country: text(b.country) },
   };
 }
@@ -88,14 +93,17 @@ const setupMessage = 'SmartTrade can’t connect with this app setup. Please con
 export class ApiClient {
   base: string;
   transport: typeof fetch;
-  constructor(base: string, transport: typeof fetch = fetch) { this.base = base.replace(/\/+$/, ''); this.transport = transport; }
+  constructor(base: string, transport: typeof fetch = (...args) => fetch(...args)) {
+    this.base = base.replace(/\/+$/, '');
+    this.transport = transport;
+  }
   async get(path: string, signal?: AbortSignal, token?: string, init: RequestInit = {}): Promise<unknown> {
     if (!this.base) throw new ApiError(setupMessage);
     let url: URL;
     try { url = new URL(this.base); } catch { throw new ApiError(setupMessage); }
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new ApiError(setupMessage);
     let response: Response;
-    try { response = await this.transport(`${this.base}${path}`, { ...init, signal, headers: { Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) } }); }
+    try { response = await this.transport(`${this.base}${path}`, { ...init, signal, headers: { Accept: 'application/json', ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) } }); }
     catch (error) { if (signal?.aborted) throw error; throw new ApiError(connectionMessage); }
     if (!response.ok) {
       if (init.method || (path.startsWith('/companies') || path.startsWith('/businesses'))) {
@@ -103,7 +111,10 @@ export class ApiClient {
         const fields = error.field_errors ?? Object.fromEntries(Object.entries(error).filter(([key]) => !['message', 'code', 'detail'].includes(key)));
         const describe = (value: unknown): string => typeof value === 'string' ? value : Array.isArray(value) ? value.map(describe).join(' ') : value && typeof value === 'object' ? Object.entries(value).map(([key, val]) => `${key}: ${describe(val)}`).join(' ') : '';
         if (response.status === 503) throw new ApiError(connectionMessage, 503, typeof error.code === 'string' ? error.code : undefined);
-        throw new ApiError([typeof error.message === 'string' ? error.message : 'The request could not be completed.', describe(fields)].filter(Boolean).join(' '), response.status, typeof error.code === 'string' ? error.code : undefined);
+        const message = typeof error.message === 'string' ? error.message :
+          typeof error.detail === 'string' ? error.detail : 'The request could not be completed.';
+        throw new ApiError([message, error.worker_errors ? '' : describe(fields)].filter(Boolean).join(' '),
+          response.status, typeof error.code === 'string' ? error.code : undefined, error.worker_errors);
       }
       if (response.status === 401) throw new ApiError('Please sign in again to continue.', 401);
       if (response.status === 403) throw new ApiError('This action isn’t available for your account.', 403);
@@ -131,9 +142,9 @@ export class ApiClient {
     if (filters.category && !/^\d+$/.test(filters.category.trim())) throw new ApiError('Category ID must contain digits only.');
     return mapPage(await this.get(`/catalogue/brands?${query(filters, page)}`, signal), mapBrand);
   }
-  async dealers(product: number, filters: DealerFilters, page: number, token: string | null, signal?: AbortSignal): Promise<Discovery> {
+  async dealers(product: number | null, filters: DealerFilters, page: number, token: string | null, signal?: AbortSignal): Promise<Discovery> {
     if (!token) throw new ApiError('Sign in is required to discover dealer branches.', 401);
-    const value = await this.get(`/dealers/listings?${query({ ...filters, product: String(product) }, page)}`, signal, token);
+    const value = await this.get(`/dealers/listings?${query({ ...filters, product: product === null ? undefined : String(product) }, page)}`, signal, token);
     return { ...mapPage(value, mapListing), match_level: text(object(value).match_level) };
   }
   async validateSession(token: string) {

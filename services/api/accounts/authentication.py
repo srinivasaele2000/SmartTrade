@@ -11,6 +11,9 @@ class AccountJWTAuthentication(JWTAuthentication):
             from .dev_auth import local_request
             if not local_request(request):
                 raise AuthenticationFailed("Development authentication requires loopback.")
+        if result:
+            from .dealer_gate import enforce_dealer_gate
+            enforce_dealer_gate(request, result[0])
         return result
 
     def get_user(self, validated_token):

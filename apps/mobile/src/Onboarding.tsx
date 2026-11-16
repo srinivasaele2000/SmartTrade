@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {StickyBottomBar} from './StickyBottomBar';
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {AccessibilityInfo, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -302,22 +303,22 @@ export function DealerContacts({api, token, editable, header}: Props & {header?:
 }
 
 const styles = StyleSheet.create({
-  screen: {flex: 1}, contactContent: {padding: 20, gap: 16},
-  phoneInput: {flex: 1}, prefix: {padding: 12, borderRadius: 8, backgroundColor: '#edf7f0', color: '#17392d', fontWeight: '700'},
-  milestone: {padding: 14, gap: 8, borderRadius: 10, backgroundColor: '#edf7f0'},
+  screen: {flex: 1}, contactContent: {padding: trade.gutter, gap: 8},
+  phoneInput: {flex: 1}, prefix: {padding: 12, borderRadius: 8, backgroundColor: trade.successTint, color: trade.ink, fontWeight: '700'},
+  milestone: {padding: trade.gutter, gap: 8, borderRadius: 10, backgroundColor: trade.successTint},
   celebration: {borderColor: '#77aa8a', borderWidth: 1, backgroundColor: '#e0f3e7'},
-  celebrationIcon: {color: '#fff', backgroundColor: '#14553e', borderRadius: 18, width: 36, lineHeight: 36, textAlign: 'center', fontSize: 21, fontWeight: '800'},
+  celebrationIcon: {color: trade.surface, backgroundColor: trade.accent, borderRadius: 18, width: 36, lineHeight: 36, textAlign: 'center', fontSize: 14, fontWeight: '800'},
   celebrationTitle: {flex: 1},
   progressTrack: {height: 8, borderRadius: 4, backgroundColor: '#d0e2d7', overflow: 'hidden'},
   progressFill: {height: '100%', backgroundColor: '#24734f'},
   consent: {minHeight: 48, flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 8},
-  consentText: {flex: 1, color: '#17392d'},
+  consentText: {flex: 1, color: trade.ink},
   content: {padding: 16},
-  card: {backgroundColor: '#fff', borderColor: '#dce7e0', borderWidth: 1, borderRadius: 14, padding: 16, gap: 12},
-  heading: {fontSize: 19, fontWeight: '700', color: '#17392d'},
+  card: {backgroundColor: trade.surface, borderColor: trade.border, borderWidth: 1, borderRadius: 14, padding: 16, gap: 12},
+  heading: {fontSize: 14, fontWeight: '700', color: trade.ink},
   field: {gap: 5},
-  label: {fontWeight: '600', color: '#17392d'},
-  input: {minHeight: 48, borderWidth: 1, borderColor: '#9fb7aa', borderRadius: 8, padding: 10, color: '#17392d'},
+  label: {fontWeight: '600', color: trade.ink},
+  input: {minHeight: 48, borderWidth: 1, borderColor: trade.border, borderRadius: 8, padding: 10, color: trade.ink},
   row: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8},
   error: {color: '#9c2820'},
 });

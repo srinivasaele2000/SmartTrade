@@ -31,18 +31,24 @@ function CatalogueCard({item}: {item: VaultDocument}) {
     } catch (failure) {setError(failure instanceof Error ? failure.message : 'Could not open this catalogue.');}
   }
   return <View style={s.card}>
-    <View style={s.row}>
-      {pdf ? <FileText color="#14553e" /> : <ImageIcon color="#14553e" />}
-      <Text style={s.kicker}>{item.brand_name}</Text>
+    <View style={styles.summary}>
+      <View style={styles.icon}>
+        {pdf ? <FileText size={22} color="#14553e" aria-hidden={true} /> : <ImageIcon size={22} color="#14553e" aria-hidden={true} />}
+      </View>
+      <View style={styles.details}>
+        <Text style={s.kicker}>{item.brand_name}</Text>
+        <Text style={s.label}>{item.title}</Text>
+        <Text style={styles.metadata}>{catalogueDocumentLabel(item)} · {istDateTime(item.created_at)}</Text>
+      </View>
     </View>
-    <Text style={s.label}>{item.title}</Text>
-    <Text style={s.body}>{catalogueDocumentLabel(item)} · {istDateTime(item.created_at)}</Text>
     {!pdf && expanded && (imageFailed
       ? <Text accessibilityRole="alert" style={s.error}>The preview could not load. Close it and try again.</Text>
       : <Image source={{uri: item.url}} style={styles.preview} cachePolicy="memory-disk" contentFit="contain"
           accessibilityLabel={item.title + ' preview'} accessible onError={() => setImageFailed(true)} />)}
     {error && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}
-    <Button variant="secondary" title={expanded ? 'Close preview' : 'View Catalogue'} icon={expanded ? 'close' : 'view'} onPress={view} />
+    <View style={styles.action}>
+      <Button variant="secondary" title={expanded ? 'Close preview' : 'View Catalogue'} icon={expanded ? 'close' : 'view'} onPress={view} />
+    </View>
   </View>;
 }
 
@@ -72,4 +78,11 @@ export default function DealerCataloguesScreen({api, token, type}: {api: ApiClie
   </ScrollView>;
 }
 
-const styles = StyleSheet.create({preview: {width: '100%', height: 240, backgroundColor: '#edf2ef', borderRadius: 8}});
+const styles = StyleSheet.create({
+  summary: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  icon: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: '#edf2ef', borderRadius: 8},
+  details: {flex: 1, minWidth: 0, gap: 3},
+  metadata: {fontSize: 12, lineHeight: 16, color: '#52675c'},
+  action: {alignSelf: 'flex-end', maxWidth: '100%'},
+  preview: {width: '100%', height: 180, backgroundColor: '#edf2ef', borderRadius: 8},
+});

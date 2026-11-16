@@ -1,3 +1,4 @@
+import * as theme from '../src/trade-theme.ts';
 import {buttonModule} from './button-adapter.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,7 +28,7 @@ function render({ role = 'BUSINESS', tab = 'Dashboard', profile = { status: 'rea
     native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, ...(name === 'TextInput' ? { value: props.value, readOnly: true } : {}) }, props.children);
   }
   native.StyleSheet = { create: value => value };
-  const imports = { './Button':buttonModule(React,native,jsx),
+  const imports = { './trade-theme': theme, './Button':buttonModule(React,native,jsx),
     'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
     './DealerActivity': {DealerActivity: () => null},
     './Onboarding': {DealerContacts: () => null, DealerDeclarations: () => null, IdentityFields: () => null},

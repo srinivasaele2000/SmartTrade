@@ -1,3 +1,4 @@
+import * as theme from '../src/trade-theme.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -57,7 +58,7 @@ function workspace() {
   };
   const native = {StyleSheet: {create: styles => styles}};
   for (const name of ['View','Text','ScrollView','ActivityIndicator','TextInput']) native[name] = name;
-  const imports = {
+  const imports = { './trade-theme': theme,
     'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
     './DealerActivity': {DealerActivity: () => null},
     react: React, 'react/jsx-runtime': {jsx, jsxs: jsx, Fragment: 'fragment'}, 'react-native': native,

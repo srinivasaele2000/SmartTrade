@@ -1,7 +1,30 @@
 from django.urls import path
 from . import client_onboarding, onboarding, views
+from .nearby import NearbyBranchCatalogue, NearbyDealers
+from .support import AdminInbox, AdminSupport, SupportView
+from .banners import AdminBannerReorder, AdminBanners, DealerBanners
+from .general_items import GeneralItemDetail, GeneralItems
 
 urlpatterns = [
+    path('dealers/general-items/', GeneralItems.as_view()),
+    path('dealers/general-items/<int:pk>/', GeneralItemDetail.as_view()),
+    path('banners/dealer/', DealerBanners.as_view()),
+    path('banners/dealer/<int:pk>/image/', DealerBanners.as_view()),
+    path('banners/admin/', AdminBanners.as_view()),
+    path('banners/admin/reorder/', AdminBannerReorder.as_view()),
+    path('banners/admin/<int:pk>/', AdminBanners.as_view()),
+    path('banners/admin/<int:pk>/image/', AdminBanners.as_view(), {'image': True}),
+    *[path(f'messages/dealer/{action}/', SupportView.as_view(), {'action': action})
+      for action in ('thread', 'messages', 'mark-read', 'unread')],
+    path('messages/dealer/attachments/<int:message_id>/', SupportView.as_view(), {'action': 'attachment'}),
+    path('messages/admin/threads/', AdminInbox.as_view()),
+    path('messages/admin/threads/<int:thread_id>/', AdminSupport.as_view()),
+    *[path(f'messages/admin/threads/<int:thread_id>/{action}/', AdminSupport.as_view(), {'action': action})
+      for action in ('messages', 'mark-read')],
+    path('messages/admin/threads/<int:thread_id>/attachments/<int:message_id>/', AdminSupport.as_view(), {'action': 'attachment'}),
+    path('dealers/discover/', NearbyDealers.as_view()),
+    path('dealers/discover/<int:branch_id>/catalogue/', NearbyBranchCatalogue.as_view()),
+    path('catalogue/items/<int:item_id>/nearby-dealers/', NearbyDealers.as_view()),
     path('auth/dealer/register/', client_onboarding.DealerRegistration.as_view()),
     path('dealers/contacts/batch/', client_onboarding.BatchContacts.as_view()),
     path('admin/dealers/', client_onboarding.DealerDirectory.as_view()),

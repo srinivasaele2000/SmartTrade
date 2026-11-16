@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404

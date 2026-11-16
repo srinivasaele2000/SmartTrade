@@ -1,3 +1,4 @@
+import * as theme from '../src/trade-theme.ts';
 import {buttonModule} from './button-adapter.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,7 +23,7 @@ function render({ role = 'COMPANY', tab = 'Dashboard', state = {status:'ready',d
  const native = {};
  for (const name of ['Text', 'View', 'ScrollView', 'Pressable', 'TextInput', 'ActivityIndicator']) native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, ...(name === 'TextInput' ? { value: props.value, readOnly: !props.editable } : {}) }, props.children);
  native.StyleSheet = { create: value => value };
- const imports = { './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button':buttonModule(React,native,jsx), './india': india, './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, './LocalFileVault': {default:props=>React.createElement('div',null,props.title,props.description)}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
+ const imports = { './trade-theme': theme, './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button':buttonModule(React,native,jsx), './india': india, './CompanyAuthorizations': {default:()=>React.createElement('div',null,'Company dealer authorization workspace')}, './CompanyCatalogue': {default:()=>React.createElement('div',null,'Company catalogue workspace')}, './LocalFileVault': {default:props=>React.createElement('div',null,props.title,props.description)}, react: {...React,useRef:value=>refSlot??React.useRef(value),useState:value=>React.useState(value==='Dashboard'?tab:value)}, 'react/jsx-runtime':jsx, 'react-native':native, './company':company, './api':api, './session':{useSession:()=>({account:{account_type:role},token:'isolated-test-token',clearSession(){}})}, './useResource':{useResource:()=>({state,retry(){}})} };
  const module={exports:{}};
  new Function('require','module','exports',compiled)(name=>{if(!(name in imports))throw new Error(name);return imports[name];},module,module.exports);
  return renderToStaticMarkup(React.createElement(module.exports.default,{api:new api.ApiClient('http://example.test/api/v1')}));

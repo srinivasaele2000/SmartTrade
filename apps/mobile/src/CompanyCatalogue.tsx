@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {Button} from './Button';
 import { useCallback, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -77,4 +78,4 @@ export default function CompanyCatalogue({api,token,writable,expired,refreshComp
   </>}
  </ScrollView>;
 }
-const s=StyleSheet.create({content:{padding:20,gap:14,paddingBottom:80},kicker:{fontWeight:'800',color:'#087f5b',letterSpacing:1},title:{fontSize:28,fontWeight:'800',color:'#17392d'},heading:{fontSize:20,fontWeight:'700',color:'#17392d'},label:{fontWeight:'700',color:'#294b3a'},card:{padding:18,gap:14,borderRadius:16,borderWidth:1,borderColor:'#dce7e0',backgroundColor:'#fff'},field:{gap:7},input:{minHeight:48,borderWidth:1,borderColor:'#9fb7aa',padding:12,borderRadius:10,color:'#17392d',fontSize:16},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},notice:{padding:12,backgroundColor:'#edf7f0',color:'#294b3a',lineHeight:22},error:{color:'#9c2820',lineHeight:22},muted:{color:'#52675c',lineHeight:22}});
+const s=StyleSheet.create({content:{padding: trade.gutter,gap: 8,paddingBottom:80},kicker:{fontWeight:'800',color:trade.accent,letterSpacing:1},title:{fontSize: 17,fontWeight:'800',color:trade.ink},heading:{fontSize: 14,fontWeight:'700',color:trade.ink},label:{fontWeight:'700',color:trade.heading},card:{padding: trade.gutter,gap: 8,borderRadius:16,borderWidth:1,borderColor:trade.border,backgroundColor:trade.surface},field:{gap:7},input:{minHeight:48,borderWidth:1,borderColor:trade.border,padding:12,borderRadius:10,color:trade.ink,fontSize: 13},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},notice:{padding:12,backgroundColor:trade.successTint,color:trade.heading,lineHeight: 19},error:{color:'#9c2820',lineHeight: 19},muted:{color:trade.secondary,lineHeight: 19}});

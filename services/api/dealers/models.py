@@ -4,6 +4,71 @@ from django.db.models import Q
 from config.india import INDIAN_STATES_AND_UTS
 
 
+class DealerCustomItem(models.Model):
+    dealer = models.ForeignKey('accounts.BusinessProfile', related_name='custom_items', on_delete=models.CASCADE)
+    product_name = models.CharField(max_length=200)
+    product_code = models.CharField(max_length=64, blank=True, default='')
+    hsn_sac_code = models.CharField(max_length=32, blank=True, default='')
+    list_price_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(list_price_per_unit__gte=0), name='dealer_custom_item_nonnegative_price')]
+
+
+class DealerBanner(models.Model):
+    TARGETS = [(value, value) for value in ('none', 'brand', 'category', 'item', 'support_chat')]
+    TYPES = [('image', 'Image'), ('text', 'Text')]
+    THEMES = [(value, value) for value in ('emerald', 'indigo', 'amber', 'slate', 'crimson')]
+    title = models.CharField(max_length=140, blank=True)
+    subtitle = models.CharField(max_length=240, blank=True)
+    image = models.ImageField(upload_to='dealer_banners/%Y/%m/', null=True, blank=True)
+    image_mime = models.CharField(max_length=32, blank=True)
+    banner_type = models.CharField(max_length=16, choices=TYPES, default='image')
+    theme_preset = models.CharField(max_length=32, choices=THEMES, default='emerald')
+    badge_text = models.CharField(max_length=40, blank=True, default='')
+    target_type = models.CharField(max_length=24, choices=TARGETS, default='none')
+    target_brand = models.ForeignKey('catalogue.Brand', null=True, blank=True, on_delete=models.SET_NULL)
+    target_category = models.ForeignKey('catalogue.Category', null=True, blank=True, on_delete=models.SET_NULL)
+    target_item = models.ForeignKey('catalogue.Product', null=True, blank=True, on_delete=models.SET_NULL)
+    sort_order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('sort_order', '-created_at', '-pk')
+
+
+class AdminSupportThread(models.Model):
+    dealer = models.OneToOneField('accounts.BusinessProfile', on_delete=models.PROTECT, related_name='support_thread')
+    last_message_at = models.DateTimeField(null=True, db_index=True)
+    last_message_preview = models.CharField(max_length=255, blank=True)
+    dealer_unread_count = models.PositiveIntegerField(default=0)
+    admin_unread_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class AdminSupportMessage(models.Model):
+    thread = models.ForeignKey(AdminSupportThread, related_name='messages', on_delete=models.CASCADE)
+    sender_role = models.CharField(max_length=6, choices=[('dealer', 'Dealer'), ('admin', 'Admin')])
+    sender_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    body = models.TextField(blank=True)
+    attachment = models.FileField(upload_to='support_messages/%Y/%m/', blank=True)
+    attachment_type = models.CharField(max_length=16, blank=True)
+    attachment_mime = models.CharField(max_length=32, blank=True)
+    attachment_name = models.CharField(max_length=255, blank=True)
+    attachment_size = models.PositiveIntegerField(null=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
 class DealerLocation(models.Model):
     business = models.ForeignKey('accounts.BusinessProfile', on_delete=models.PROTECT, related_name='locations')
     branch_name = models.CharField(max_length=160)
@@ -13,6 +78,8 @@ class DealerLocation(models.Model):
     district = models.CharField(max_length=120, db_index=True)
     state = models.CharField(max_length=120)
     country = models.CharField(max_length=2, default='IN')
+    latitude = models.DecimalField(max_digits=8, decimal_places=5, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=8, decimal_places=5, null=True, blank=True)
     contact_name = models.CharField(max_length=160, blank=True)
     contact_phone = models.CharField(max_length=16, blank=True)
     contact_email = models.EmailField(blank=True)

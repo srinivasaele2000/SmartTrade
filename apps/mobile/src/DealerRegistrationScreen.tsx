@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {StyleSheet, Text, TextInput, View} from 'react-native';
 import {Button} from './Button';
 import {businessTypes, type BusinessType} from './dealer-onboarding';
@@ -23,7 +24,7 @@ export function DealerRegistrationFields({draft, change, disabled}: {
 }
 
 const styles = StyleSheet.create({
-  label: {fontSize: 15, fontWeight: '700', color: '#294b3a'},
-  input: {borderWidth: 1, borderColor: '#9fb7aa', borderRadius: 10, minHeight: 50, padding: 12, color: '#17392d'},
+  label: {fontSize: 13, fontWeight: '700', color: trade.heading},
+  input: {borderWidth: 1, borderColor: trade.border, borderRadius: 10, minHeight: 50, padding: 12, color: trade.ink},
   pills: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
 });

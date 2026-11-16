@@ -73,6 +73,30 @@ class CatalogueVaultTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data['content_type'], 'image/png')
 
+    def test_multipart_upload_enforces_pdf_and_image_size_limits(self):
+        grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])
+        self.client.force_authenticate(self.moderator)
+        buffer = BytesIO()
+        pdf = Canvas(buffer, pageCompression=0)
+        pdf.drawString(20, 100, 'Large catalogue fixture')
+        pdf.addLiteral(('%' + 'x' * 1022 + '\n') * (15 * 1024))
+        pdf.save()
+        content = buffer.getvalue()
+        uploaded = self.upload(SimpleUploadedFile('large.pdf', content, 'application/pdf'))
+        self.assertEqual(uploaded.status_code, 201, uploaded.data)
+        self.assertEqual(uploaded.data['file_size_bytes'], len(content))
+
+        oversized_pdf = content.replace(b'%%EOF', b' ' * (6 * 1024 * 1024) + b'%%EOF')
+        for name, mime, payload, limit in (
+            ('oversized.pdf', 'application/pdf', oversized_pdf, 20),
+            ('oversized.png', 'image/png', b'x' * (2 * 1024 * 1024 + 1), 2),
+        ):
+            with self.subTest(name=name):
+                rejected = self.upload(SimpleUploadedFile(name, payload, mime))
+                self.assertEqual(rejected.status_code, 400, rejected.data)
+                self.assertContains(rejected, f'File size exceeds the {limit} MB limit.', status_code=400)
+        self.assertEqual(CatalogueDocument.objects.count(), 1)
+
     def test_sub_category_upload_validation_and_public_and_staff_filters(self):
         grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])
         self.client.force_authenticate(self.moderator)

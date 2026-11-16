@@ -8,8 +8,19 @@ type Item = {id: number; name: string; product_code: string; hsn_sac_code: strin
 type Option = {id: number; brand_id: number; brand__name: string; category__name: string};
 const path = '/catalogue/items/';
 
+export function itemFilters(search: string) {
+  const filters = new URLSearchParams({page_size: '25'});
+  const query = search.trim().replace(/\s+/g, ' ');
+  if (query) filters.set('search', query);
+  return filters.toString();
+}
+
 export default function CreateProductItem({baseUrl, token}: {baseUrl: string; token: string}) {
-  const page = useAdminPage<Item>(baseUrl, token, path);
+  const [search, setSearch] = useState('');
+  const filters = itemFilters(search);
+  const searching = Boolean(search.trim());
+  const page = useAdminPage<Item>(baseUrl, token, path, filters);
+  const total = useAdminPage<Item>(baseUrl, token, path, 'page_size=1');
   const [options, setOptions] = useState<Option[]>();
   const [optionsError, setOptionsError] = useState('');
   const [revision, retry] = useState(0);
@@ -44,6 +55,7 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
       form.reset();
       setNotice('Catalogue item created.');
       page.reload();
+      total.reload();
     } catch (failure) {setError(failure instanceof Error ? failure.message : 'Could not create the catalogue item.');}
     finally {setBusy(false);}
   }
@@ -67,6 +79,7 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
         page.setNumber(page.number - 1);
       }
       page.reload();
+      total.reload();
     } catch (failure) {setError(failure instanceof Error ? failure.message : 'Could not update the catalogue item.');}
     finally {setBusy(false);}
   }
@@ -80,8 +93,18 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
     if (!busy) {setError(''); setAction(null);}
   }
 
-  return <section className="detail-card" aria-label="Create catalogue item">
-    <h3>Create catalogue item</h3>
+  function updateSearch(value: string) {
+    setSearch(value);
+    page.setNumber(1);
+  }
+
+  const results = page.data?.results;
+  const count = page.data?.count;
+  const totalCount = total.data?.count;
+
+  return <section className="detail-card catalogue-items" aria-labelledby="catalogue-items-title">
+    <details className="catalogue-item-create">
+    <summary>Create catalogue item</summary>
     {optionsError && <><p role="alert">{optionsError}</p><button onClick={() => retry(value => value + 1)}>Retry brand and category options</button></>}
     {!options && !optionsError && <p role="status">Loading brands and categories…</p>}
     {options?.length === 0 && <p>No eligible brand and category pairs are available.</p>}
@@ -98,26 +121,45 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
       <button className="button" disabled={busy || !options?.length}>Create Item</button>
     </form>
     {error && !action && <p role="alert">{error}</p>}
+    </details>
     {notice && <p role="status">{notice}</p>}
+    <div className="catalogue-items-toolbar">
+      <div className="catalogue-items-heading">
+        <h3 id="catalogue-items-title">Catalogue items</h3>
+        {count !== undefined && <span className="catalogue-items-count" role="status">
+          {searching && totalCount !== undefined ? `Showing ${count} of ${totalCount} items` : `${count} items`}
+        </span>}
+      </div>
+      <div className="catalogue-items-search">
+        <span className="catalogue-search-icon" aria-hidden="true" />
+        <input aria-label="Search catalogue items" value={search} onChange={event => updateSearch(event.target.value)}
+          placeholder="Search by item name, code, HSN, or category..." />
+        {search && <button type="button" aria-label="Clear catalogue search" onClick={() => updateSearch('')}>×</button>}
+      </div>
+    </div>
     {page.error ? <><p role="alert">{page.error}</p><button onClick={page.reload}>Retry items</button></>
-      : !page.data ? <p role="status">Loading catalogue items…</p>
-      : page.data.results.length === 0 ? <p>No priced catalogue items.</p>
-      : <div className="onboarding-table"><table>
-        <caption>Catalogue items</caption>
+      : !results ? <p role="status">Loading catalogue items…</p>
+      : results.length === 0 ? <p>{searching ? 'No items match this search.' : 'No priced catalogue items.'}</p>
+      : <div className="catalogue-items-scroll" tabIndex={0} role="region" aria-label="Catalogue items table">
+        <table className="catalogue-items-table" aria-labelledby="catalogue-items-title">
+        <colgroup>{['image', 'name', 'code', 'hsn', 'price', 'category', 'actions'].map(column =>
+          <col key={column} className={`catalogue-items-col-${column}`} />)}</colgroup>
         <thead><tr>{['Image', 'Item', 'Code', 'HSN / SAC', 'Unit price', 'Category', 'Actions'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
-        <tbody>{page.data.results.map(item => <tr key={item.id}>
-          <td>{item.image_url ? <img width="48" height="48" style={{objectFit:'contain'}} src={item.image_url} alt="" /> : '—'}</td>
-          <th scope="row">{item.name}</th><td>{item.product_code}</td><td>{item.hsn_sac_code || '—'}</td>
-          <td>{inr(item.price_per_unit)}</td><td>{item.category_name}</td>
-          <td><div className="decision-buttons">
+        <tbody>{results.map(item => <tr key={item.id}>
+          <td>{item.image_url ? <img className="catalogue-item-thumbnail" src={item.image_url} alt="" />
+            : <span className="catalogue-item-placeholder" aria-label="No image">▧</span>}</td>
+          <th scope="row"><span title={item.name}>{item.name}</span></th>
+          <td title={item.product_code}>{item.product_code}</td><td>{item.hsn_sac_code || '—'}</td>
+          <td>{inr(item.price_per_unit)}</td><td><span title={item.category_name}>{item.category_name}</span></td>
+          <td><div className="catalogue-items-actions">
             <button type="button" className="button button-quiet catalogue-item-edit" disabled={busy}
-              onClick={() => openAction('edit', item)}><span aria-hidden="true">✎ </span>Edit</button>
+              onClick={() => openAction('edit', item)}>Edit</button>
             <button type="button" className="button button-quiet catalogue-item-delete" disabled={busy}
-              onClick={() => openAction('delete', item)}><span aria-hidden="true">🗑 </span>Delete</button>
+              onClick={() => openAction('delete', item)}>Delete</button>
           </div></td>
         </tr>)}</tbody>
       </table></div>}
-    {page.data && <nav aria-label="Item pages">
+    {page.data && (page.data.previous || page.data.next) && <nav className="catalogue-items-pagination" aria-label="Item pages">
       <button disabled={!page.data.previous} onClick={() => page.setNumber(page.number - 1)}>Previous</button>
       <button disabled={!page.data.next} onClick={() => page.setNumber(page.number + 1)}>Next</button>
     </nav>}

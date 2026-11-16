@@ -10,10 +10,15 @@ class OrderItemSerializer(serializers.Serializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     download_url=serializers.SerializerMethodField()
+    items = serializers.SerializerMethodField()
     class Meta:
         model=Invoice
         exclude=['pdf','tax_snapshot']
     def get_download_url(self,obj): return f'/api/v1/orders/{obj.order_id}/invoice/download'
+    def get_items(self, obj):
+        fields = ('order_item', 'product_name', 'product_code', 'hsn', 'quantity', 'unit_price',
+                  'taxable_value', 'tax_rate', 'tax_mode')
+        return [{field: row.get(field) for field in fields} for row in obj.tax_snapshot.get('items', [])]
 
 class OrderSerializer(serializers.ModelSerializer):
     items=OrderItemSerializer(many=True,read_only=True); branch_name=serializers.CharField(source='branch.branch_name',read_only=True); dealer_business_name=serializers.CharField(source='business.legal_name',read_only=True); invoice=serializers.SerializerMethodField(); total=serializers.SerializerMethodField()

@@ -8,6 +8,7 @@ import * as apiModule from '../src/api.ts';
 import * as resourceModule from '../src/resource.ts';
 import * as indiaModule from '../src/india.ts';
 import * as browseModule from '../src/catalogue-browse.ts';
+import * as theme from '../src/trade-theme.ts';
 import * as demoRoles from '../src/demo-roles.ts';
 import * as workforce from '../src/workforce-profile.ts';
 
@@ -49,13 +50,14 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
   const cards = {exports: {}};
   new Function('require', 'module', 'exports', browseCardsCompiled)(name => ({
     'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': new Proxy({}, {get: () => () => null}),
-    './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule,
+    './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule, './trade-theme': theme,
   })[name], cards, cards.exports);
   const imports = { './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
     './src/RoleIdentity': identity.exports,
     './src/CatalogueMedia': catalogueMedia,
     './src/CatalogueBrowseCards': cards.exports,
     './src/catalogue-browse': browseModule,
+    './src/trade-theme': theme,
     './src/Onboarding': {PersonalProfile: () => null},
     react: {...React, useState: value => React.useState(value?.name === 'catalogue' ? {name: screen} : value)},
     'react/jsx-runtime': jsx,
@@ -69,6 +71,11 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/CompanyScreen': { default: () => null },
     './src/DealerWorkspace': { default: () => null },
     './src/DealerOnboardingScreen': { default: () => null },
+    './src/NearbyDealersScreen': { default: () => null },
+    './src/SupportChat': { default: () => null, useDealerSupportUnread: () => 0 },
+    './src/DealerBannerCarousel': {default: () => null},
+    './src/useCustomerLocation': {useCustomerLocation: () => ({})},
+    './src/DealerWorkerContactsScreen': { default: () => React.createElement('div', {}, 'Worker contact form') },
     './src/DealerEstimateScreen': { default: () => null },
     './src/WorkforceProfileScreen': { default: () => null },
     './src/workforce-profile': workforce,
@@ -96,18 +103,31 @@ test('authenticated header and account dashboard identify each role and signed-o
     ['EMPLOYER', 'EMPLOYER', 'Briefcase', '#37308B'],
     ['STAFF', 'PLATFORM ADMIN', 'ShieldCheck', '#8A241B'],
   ]) {
-    const account = {...base, account_type: code, staff_profile: code === 'STAFF' ? {state: 'ACTIVE', roles: ['PLATFORM_ADMIN']} : null};
+    const account = {...base, account_type: code, dealer_contacts_complete: true, staff_profile: code === 'STAFF' ? {state: 'ACTIVE', roles: ['PLATFORM_ADMIN']} : null};
     const html = render(account, 'account', 'light');
     assert.equal((html.match(new RegExp('Account role: ' + label, 'g')) ?? []).length, 2);
     assert.match(html, new RegExp('data-icon="' + icon + '"'));
     assert.match(html, new RegExp('data-palette="' + palette + '"'));
-    assert.match(html, /SmartTrade/);
+    assert.match(html, /My account/);
     assert.doesNotMatch(html, /PLATFORM_ADMIN|>PERSONAL<|>BUSINESS</);
   }
   assert.match(render({...base, account_type: 'STAFF'}, 'account', 'light'), /Account role: STAFF/);
   assert.match(render({...base, account_type: 'COMPANY'}, 'catalogue', 'dark'), /data-palette="#E8D3FF"/);
   assert.doesNotMatch(render(null, 'catalogue', 'light'), /Account role:/);
   assert.match(render({...base, account_type: 'PERSONAL'}, 'account', 'light'), /Offline Documents/);
+});
+
+test('incomplete or unknown dealer onboarding status replaces every requested route with Step 2', () => {
+  for (const status of [false, undefined]) {
+    for (const route of ['catalogue', 'auth', 'account', 'orders', 'dealer-workspace']) {
+      const account = {id: 1, account_type: 'BUSINESS', access_state: 'ACTIVE', dealer_contacts_complete: status};
+      const html = renderToStaticMarkup(React.createElement(moduleWith([], account, route).default));
+      assert.match(html, /Add 10 unique worker contacts/);
+      assert.match(html, /Worker contact form/);
+      assert.match(html, /Sign Out/);
+      assert.doesNotMatch(html, /My account|Browse|>Back</);
+    }
+  }
 });
 
 test('public registration picker renders six distinct cards and excludes staff', () => {
@@ -120,6 +140,7 @@ test('public registration picker renders six distinct cards and excludes staff',
     'react-native-safe-area-context': {useSafeAreaInsets: () => ({bottom: 48})},
     './Button': {Button: props => React.createElement('button', {}, props.title)},
     './RoleIdentity': {RoleBadge: () => null},
+    './trade-theme': theme,
   };
   const exports = {};
   new Function('require', 'exports', output)(name => imports[name], exports);

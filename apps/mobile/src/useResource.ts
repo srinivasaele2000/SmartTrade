@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import { resourceReducer, type Resource } from './resource';
 
 export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, { retainData = false } = {}) {
@@ -14,5 +14,6 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, { reta
     });
     return () => controller.abort();
   }, [load, attempt, retainData]);
-  return { state, retry: () => retry(value => value + 1) };
+  const refresh = useCallback(() => retry(value => value + 1), []);
+  return { state, retry: refresh };
 }

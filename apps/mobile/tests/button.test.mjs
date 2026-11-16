@@ -16,7 +16,7 @@ function harness(props){
 test('primary, secondary, tertiary and destructive have distinct readable intent',()=>{
  const colors=['primary','secondary','tertiary','destructive'].map(variant=>harness({variant}).tree.props.style({pressed:false})[1]);
  assert.equal(new Set(colors.map(c=>c.backgroundColor)).size,4);
- assert.equal(colors[0].backgroundColor,'#14553E');assert.equal(colors[3].backgroundColor,'#B42318');
+ assert.equal(colors[0].backgroundColor,'#1D4ED8');assert.equal(colors[3].backgroundColor,'#B42318');
  for(const variant of ['primary','destructive'])assert.equal(harness({variant}).palette[variant].color,'#FFFFFF');
 });
 test('selected navigation exposes tab semantics and does not use primary styling',()=>{

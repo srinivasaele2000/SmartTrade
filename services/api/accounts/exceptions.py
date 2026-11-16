@@ -5,6 +5,9 @@ def safe_api_exception_handler(exc, context):
     response = exception_handler(exc, context)
     if response is None:
         return None
+    if getattr(exc, 'default_code', '') == 'ONBOARDING_STEP_2_REQUIRED':
+        response.data = {'detail': str(exc.detail), 'code': exc.default_code}
+        return response
 
     original = response.data
     if isinstance(original, dict):

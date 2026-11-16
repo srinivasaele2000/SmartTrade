@@ -3,7 +3,7 @@ import json
 import re
 import unicodedata
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -12,16 +12,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import BusinessProfile
+from accounts.dealer_gate import WORKER_CONTACT_TARGET
 from catalogue.models import Brand
 from catalogue.serializers import StrictSerializer
 from companies.permissions import HasStaffPermission
-from config.india import INDIAN_MOBILE_PATTERN
 from .models import BrandSuggestion, DealerAudit, DealerDeclarations, TradeWorkerContact
 from .serializers import BusinessSerializer
 from .views import IsBusiness, audit, business, page
 
 
-MINIMUM_CONTACTS = 10
+MINIMUM_CONTACTS = WORKER_CONTACT_TARGET
 CATEGORIES = {
     'Electrical': ('Electrical',),
     'Plumbing': ('Plumbing',),
@@ -160,7 +160,18 @@ class Suggestions(DealerView):
         return Response(serializer.data, status=201)
 
 
+WORKER_NUMBER_TAKEN = 'This number is already registered as a dealer worker. Please provide another number.'
+
+
+def lock_worker_numbers(numbers):
+    # Serialize ownership checks across dealer profiles, including concurrent batches.
+    with connection.cursor() as cursor:
+        for number in sorted(set(numbers)):
+            cursor.execute('SELECT pg_advisory_xact_lock(46123803, hashtext(%s))', [number])
+
+
 class ContactSerializer(StrictSerializer):
+    mobile_e164 = serializers.CharField(max_length=40)
     consent = serializers.BooleanField(write_only=True)
     consent_confirmed = serializers.BooleanField(read_only=True, default=True)
     consent_confirmed_at = serializers.DateTimeField(read_only=True)
@@ -170,9 +181,11 @@ class ContactSerializer(StrictSerializer):
         fields = ['id', 'name', 'mobile_e164', 'trade', 'location', 'consent', 'consent_confirmed', 'consent_confirmed_at']
 
     def validate_mobile_e164(self, value):
-        if not INDIAN_MOBILE_PATTERN.fullmatch(value):
-            raise serializers.ValidationError('Use an Indian mobile number in +91 format.')
-        return value
+        compact = re.sub(r'[\s()\-]', '', value)
+        match = re.fullmatch(r'(?:\+?91|0)?([6-9][0-9]{9})', compact)
+        if not match:
+            raise serializers.ValidationError('Enter a valid 10-digit Indian mobile number.')
+        return '+91' + match[1]
 
     def validate(self, attrs):
         if attrs.pop('consent', False) is not True:
@@ -194,6 +207,11 @@ class Contacts(DealerView):
     def save_contact(self, request, dealer, item=None):
         serializer = ContactSerializer(item, data=request.data, partial=item is not None)
         serializer.is_valid(raise_exception=True)
+        number = serializer.validated_data.get('mobile_e164')
+        if number and (item is None or number != item.mobile_e164):
+            lock_worker_numbers([number])
+            if TradeWorkerContact.objects.filter(mobile_e164=number).exists():
+                raise serializers.ValidationError({'mobile_e164': WORKER_NUMBER_TAKEN})
         try:
             with transaction.atomic():
                 saved = serializer.save(business=dealer)

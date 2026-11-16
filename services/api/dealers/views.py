@@ -1,7 +1,7 @@
 import unicodedata
 from config.india import INDIAN_PIN_PATTERN
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Q, Value, BooleanField
+from django.db.models import BooleanField, Count, Exists, OuterRef, Q, Value
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers
 from rest_framework.exceptions import PermissionDenied
@@ -273,7 +273,8 @@ class Discovery(APIView):
             pin = ''.join(unicodedata.normalize('NFKC', request.query_params['pin_code']).split())
             if not INDIAN_PIN_PATTERN.fullmatch(pin):
                 raise serializers.ValidationError({'pin_code': 'Use a six-digit Indian PIN code.'})
-        for param, field in [('product', 'product_id'), ('brand', 'product__brand_category__brand_id'), ('variant', 'variant_id')]:
+        for param, field in [('product', 'product_id'), ('brand', 'product__brand_category__brand_id'),
+                             ('variant', 'variant_id'), ('location', 'location_id')]:
             value = request.query_params.get(param)
             if value:
                 if not value.isdecimal():
@@ -303,7 +304,14 @@ class Discovery(APIView):
             if any(request.query_params.get(key) for key in ['pin_code', 'locality', 'district']):
                 qs = qs_for_fallback
                 match = 'NO_LOCATION_MATCH'
-        response = page(request, qs.prefetch_related('product__official_media'), DiscoverySerializer)
+        pages = Pages()
+        rows = pages.paginate_queryset(qs.prefetch_related('product__official_media'), request)
+        counts = dict(eligible_listings().filter(location_id__in={row.location_id for row in rows})
+                      .order_by().values('location_id').annotate(count=Count('product_id', distinct=True))
+                      .values_list('location_id', 'count'))
+        response = pages.get_paginated_response(DiscoverySerializer(
+            rows, many=True, context={'request': request, 'branch_product_counts': counts},
+        ).data)
         response.data['match_level'] = match
         response['Cache-Control'] = 'private, no-store'
         return response

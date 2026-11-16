@@ -1,3 +1,4 @@
+import * as theme from '../src/trade-theme.ts';
 import {buttonModule} from './button-adapter.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ let handlers={};let companyRefreshCount=0;
 const readyOptions={status:'ready',data:{brands:[],associations:[],categories:[]}};
 function render({tab='Brands',writable=true,options=readyOptions,products={status:'ready',data:{count:0,results:[],next:null,previous:null}}}={}){
  handlers={};companyRefreshCount=0;let call=0;const native={};for(const name of ['Text','View','ScrollView','Pressable','TextInput','ActivityIndicator'])native[name]=props=>{if(name==='Pressable')handlers[props.accessibilityLabel]=props.onPress;return React.createElement(name==='Pressable'?'button':name==='TextInput'?'input':'div',{disabled:props.disabled,'aria-label':props.accessibilityLabel,...(name==='TextInput'?{value:props.value,readOnly:true}:{})},props.children);};native.StyleSheet={create:value=>value};
- const imports = { './Button':buttonModule(React,native,jsx),react:{...React,useState:value=>React.useState(value==='Brands'?tab:value)},'react/jsx-runtime':jsx,'react-native':native,'./api':api,'./india':india,'./company-catalogue':catalogue,'./LocalFileVault':{default:props=>React.createElement('div',null,props.title,props.description)},'./useResource':{useResource:()=>({state:call++===0?options:products,retry(){}})}};const module={exports:{}};new Function('require','module','exports',compiled)(name=>{if(!(name in imports))throw new Error(name);return imports[name];},module,module.exports);
+ const imports = { './trade-theme': theme, './Button':buttonModule(React,native,jsx),react:{...React,useState:value=>React.useState(value==='Brands'?tab:value)},'react/jsx-runtime':jsx,'react-native':native,'./api':api,'./india':india,'./company-catalogue':catalogue,'./LocalFileVault':{default:props=>React.createElement('div',null,props.title,props.description)},'./useResource':{useResource:()=>({state:call++===0?options:products,retry(){}})}};const module={exports:{}};new Function('require','module','exports',compiled)(name=>{if(!(name in imports))throw new Error(name);return imports[name];},module,module.exports);
  return renderToStaticMarkup(React.createElement(module.exports.default,{api:new api.ApiClient('http://example.test/api/v1'),token:'isolated-token',writable,expired(){},refreshCompany(){companyRefreshCount++;}}));
 }
 test('actual catalogue component exposes brand form, empty and restricted states',()=>{

@@ -1,3 +1,4 @@
+import {trade} from './trade-theme';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Alert, AppState, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -90,12 +91,12 @@ export default function OfflineDocumentsScreen({accountId}: {accountId: number})
 }
 
 const styles = StyleSheet.create({
-  content: {padding: 18, gap: 14}, title: {fontSize: 28, color: '#17392d', fontWeight: '800'},
-  heading: {fontSize: 17, color: '#17392d', fontWeight: '800'},
-  card: {backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#dce7e0', padding: 14, gap: 8},
-  summary: {padding: 14, gap: 6, borderRadius: 14, backgroundColor: '#e0f3e7'},
-  summaryCount: {fontSize: 16, color: '#14553e', fontWeight: '800'},
+  content: {padding: trade.gutter, gap: 8}, title: {fontSize: 17, color: trade.ink, fontWeight: '800'},
+  heading: {fontSize: 17, color: trade.ink, fontWeight: '800'},
+  card: {backgroundColor: trade.surface, borderRadius: 14, borderWidth: 1, borderColor: trade.border, padding: trade.gutter, gap: 8},
+  summary: {padding: trade.gutter, gap: 6, borderRadius: 14, backgroundColor: '#e0f3e7'},
+  summaryCount: {fontSize: 13, color: trade.accent, fontWeight: '800'},
   row: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8},
-  tag: {backgroundColor: '#edf2ef', color: '#294b3a', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10},
+  tag: {backgroundColor: '#edf2ef', color: trade.heading, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10},
   error: {color: '#9c2820'},
 });

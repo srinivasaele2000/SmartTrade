@@ -3,6 +3,8 @@ import ReviewRequests from "./ReviewRequests";
 import Catalogue from "./Catalogue";
 import CatalogueVault from "./CatalogueVault";
 import DealerDirectory from "./DealerDirectory";
+import SupportInbox, {useSupportUnread} from "./SupportInbox";
+import DealerBanners from "./DealerBanners";
 import Dealers from "./Dealers";
 import Enquiries from "./Enquiries";
 import Orders from "./Orders";
@@ -300,6 +302,8 @@ function App() {
   }
 
   const apiConfigured = Boolean(API_BASE);
+  const canMessage = account?.staff_profile?.permissions?.includes('REVIEW_BUSINESS');
+  const supportUnread = useSupportUnread(API_BASE, canMessage ? accessToken : null);
 
   return (
     <div className="shell">
@@ -308,7 +312,7 @@ function App() {
         <div className="brand-name">SmartTrade</div>
         <div className="brand-caption">ADMIN CONSOLE</div>
         <nav aria-label="Admin navigation">
-          {pages.map(item => <a key={item.id} href={`#${item.id}`} className={page === item.id ? 'active' : undefined} aria-current={page === item.id ? 'page' : undefined}>{item.label}</a>)}
+          {pages.filter(item => !['messages', 'banners'].includes(item.id) || canMessage).map(item => <a key={item.id} href={`#${item.id}`} className={page === item.id ? 'active' : undefined} aria-current={page === item.id ? 'page' : undefined}>{item.label}{item.id === 'messages' && supportUnread > 0 && <span className="support-badge">{supportUnread}</span>}</a>)}
         </nav>
         <p className="sidebar-note">Staff permissions are enforced by the API. Private documents are never served from public URLs.</p>
       </aside>
@@ -437,6 +441,8 @@ function App() {
         {accessToken && page === 'catalogue' && <Catalogue baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'catalogues' && <CatalogueVault baseUrl={API_BASE} token={accessToken} allowed={Boolean(account?.staff_profile?.permissions.includes('MODERATE_PRODUCTS'))} />}
         {accessToken && page === 'dealer-directory' && <DealerDirectory baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
+        {accessToken && canMessage && page === 'messages' && <SupportInbox base={API_BASE} token={accessToken} />}
+        {accessToken && canMessage && page === 'banners' && <DealerBanners base={API_BASE} token={accessToken} />}
         {accessToken && page === 'dealers' && <Dealers baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'enquiries' && <Enquiries baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}
         {accessToken && page === 'audit' && <AuditHistory baseUrl={API_BASE} token={accessToken} permissions={account?.staff_profile?.permissions ?? []} />}

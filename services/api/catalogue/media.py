@@ -94,7 +94,7 @@ def validate_file(upload, kind):
         raise serializers.ValidationError({'file': 'Select a file.'})
     content_type = upload.content_type
     image = kind == ProductMedia.Kind.IMAGE
-    limit = 2 if image else 10
+    limit = 2 if image else 20
     if not upload.size:
         raise serializers.ValidationError({'file': 'The selected file is empty. Choose another file.'})
     if upload.size > limit * 1024 * 1024:

@@ -6,6 +6,8 @@ export const pages = [
   { id: 'catalogues', label: 'Catalogue vault', title: 'Catalogue vault', description: 'Upload and manage brand catalogues by business type.' },
   { id: 'dealers', label: 'Dealer network', title: 'Dealer network', description: 'Review businesses, branches, and branch-specific inventory.' },
   { id: 'dealer-directory', label: 'Dealer directory', title: 'Dealer directory', description: 'View dealer registration details and consented worker contacts.' },
+  { id: 'messages', label: 'Messages', title: 'Dealer support messages', description: 'Read and reply to dealer support conversations.' },
+  { id: 'banners', label: 'Banners', title: 'Dealer home banners', description: 'Manage promotional artwork, tap destinations, and schedules.' },
   { id: 'enquiries', label: 'Enquiries', title: 'Enquiries and quotations', description: 'Inspect buyer enquiries and item-wise dealer quotation revisions.' },
   { id: 'orders', label: 'Orders', title: 'Orders and invoices', description: 'Inspect order state, immutable item snapshots, and issued invoices.' },
   { id: 'audit', label: 'Audit history', title: 'Audit history', description: 'Inspect available catalogue, authorization and listing audit histories.' },

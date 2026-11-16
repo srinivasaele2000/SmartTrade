@@ -5,14 +5,22 @@
     "version": "0.1.0",
     "android": {
       "package": "in.smarttrade.localtest",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": ["android.permission.READ_CONTACTS", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION"]
+    },
+    "ios": {
+      "infoPlist": {
+        "NSContactsUsageDescription": "Choose a worker's name and mobile number for dealer onboarding.",
+        "NSLocationWhenInUseUsageDescription": "Use your location to find nearby verified dealers."
+      }
     },
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "plugins": [
       "expo-sharing",
-      "expo-secure-store"
+      "expo-secure-store",
+      ["expo-image-picker", {"cameraPermission": "Take a photo to attach to a SmartTrade support message.", "photosPermission": "Choose a photo to attach to a SmartTrade support message.", "microphonePermission": false}]
     ]
   }
 }
