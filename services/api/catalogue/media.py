@@ -34,7 +34,7 @@ def storage():
 
 
 def media_url(request, item):
-    if item is None or request is None or not settings.DEBUG:
+    if item is None or request is None or not (settings.DEBUG or settings.SMARTTRADE_SERVE_PUBLIC_CATALOGUE_MEDIA):
         return None
     return request.build_absolute_uri(reverse('catalogue-media', kwargs={'key': item.key}))
 
@@ -126,7 +126,7 @@ def file_response(item, private=False):
 
 @require_safe
 def public_media(request, key):
-    if not settings.DEBUG:
+    if not (settings.DEBUG or settings.SMARTTRADE_SERVE_PUBLIC_CATALOGUE_MEDIA):
         raise Http404
     from .views import eligible_products
     item = get_object_or_404(ProductMedia, key=key, product_id__in=eligible_products().values('pk'))

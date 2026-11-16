@@ -132,6 +132,17 @@ class ProductMediaTests(TestCase):
     def detail(self):
         return self.public.get(f'/api/v1/catalogue/products/{self.product.pk}').data
 
+    @override_settings(DEBUG=False, SMARTTRADE_SERVE_PUBLIC_CATALOGUE_MEDIA=True)
+    def test_production_serves_only_visible_catalogue_media(self):
+        self.assertEqual(self.upload('image', 'fixture.png', png(), 'image/png').status_code, 201)
+        url = urlsplit(self.detail()['primary_image_url']).path
+        response = self.public.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b''.join(response.streaming_content), png())
+        self.product.state = 'ARCHIVED'
+        self.product.save(update_fields=['state'])
+        self.assertEqual(self.public.get(url).status_code, 404)
+
     def test_upload_replace_remove_both_slots_and_stream_current_bytes(self):
         self.assertIsNone(self.detail()['primary_image_url'])
         self.assertIsNone(self.detail()['catalogue_pdf_url'])

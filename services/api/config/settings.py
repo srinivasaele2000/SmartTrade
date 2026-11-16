@@ -73,9 +73,11 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
-MEDIA_ROOT = os.environ.get("PRIVATE_FILE_STORAGE_ROOT") or str(BASE_DIR / "private_uploads")
+MEDIA_ROOT = os.environ.get("PRIVATE_FILE_STORAGE_ROOT") or os.environ.get("MEDIA_ROOT") or str(BASE_DIR / "private_uploads")
 MEDIA_URL = "/media/"
-CATALOGUE_MEDIA_ROOT = BASE_DIR / "media"
+STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or BASE_DIR / "staticfiles")
+CATALOGUE_MEDIA_ROOT = Path(os.environ.get("CATALOGUE_MEDIA_ROOT") or BASE_DIR / "media")
+SMARTTRADE_SERVE_PUBLIC_CATALOGUE_MEDIA = False
 DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
 # Stream larger file uploads to temporary files instead of keeping them in memory.
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2_621_440

@@ -1,0 +1,3 @@
+-r requirements.txt
+gunicorn>=23,<24
+django-cors-headers>=4.7,<5

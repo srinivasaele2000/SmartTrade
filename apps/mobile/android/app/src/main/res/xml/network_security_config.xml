@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
-    <!-- USB-local testing only. All other hosts require HTTPS. -->
+    <!-- USB-local testing and the initial IP deployment. -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">189.72.155.44</domain>
     </domain-config>
 </network-security-config>
