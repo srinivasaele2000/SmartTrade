@@ -52,7 +52,7 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': new Proxy({}, {get: () => () => null}),
     './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule, './trade-theme': theme,
   })[name], cards, cards.exports);
-  const imports = { './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
+  const imports = { './src/platform-alert': {showAlert() {}}, './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
     './src/RoleIdentity': identity.exports,
     './src/CatalogueMedia': catalogueMedia,
     './src/CatalogueBrowseCards': cards.exports,

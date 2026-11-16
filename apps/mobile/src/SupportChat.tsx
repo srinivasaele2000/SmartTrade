@@ -9,11 +9,12 @@ import {StickyBottomBar} from './StickyBottomBar';
 import {type ApiClient} from './api';
 import {istDateTime} from './india';
 import {openLocalPdf} from './open-local-pdf';
+import {pickBrowserFile} from './pick-browser-file';
 import {trade} from './trade-theme';
 
 const base = '/messages/dealer/';
 const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-type Attachment = {uri: string; name: string; type: string; size?: number};
+type Attachment = {uri: string; name: string; type: string; size?: number; browserFile?: File};
 type Message = {id: number; sender_role: 'admin' | 'dealer'; body: string; attachment_type: string;
   attachment_name: string; attachment_size: number | null; created_at: string; is_read: boolean};
 type Thread = {messages: Message[]; next: string | null; dealer_unread_count: number};
@@ -78,7 +79,10 @@ export default function SupportChat({api, token}: {api: ApiClient; token: string
     setError(''); setBusy(true);
     try {
       let selected: Attachment | undefined;
-      if (kind === 'pdf') {
+      if (Platform.OS === 'web') {
+        const file = await pickBrowserFile(kind === 'pdf' ? 'application/pdf' : 'image/jpeg,image/png,image/webp');
+        if (file) selected = {uri: '', name: file.name, type: file.type, size: file.size, browserFile: file};
+      } else if (kind === 'pdf') {
         const result = await DocumentPicker.getDocumentAsync({type: 'application/pdf', copyToCacheDirectory: true});
         const asset = result.assets?.[0];
         if (asset) selected = {uri: asset.uri, name: asset.name, type: asset.mimeType ?? 'application/pdf', size: asset.size};
@@ -111,7 +115,7 @@ export default function SupportChat({api, token}: {api: ApiClient; token: string
       const data = new FormData();
       data.append('body', body.trim());
       if (file) {
-        if (Platform.OS === 'web') data.append('attachment', await (await fetch(file.uri)).blob(), file.name);
+        if (file.browserFile) data.append('attachment', file.browserFile, file.name);
         else {
           const source = new NativeFile(file.uri);
           // Expo fetch reads file bytes rather than accepting a React Native URI part.

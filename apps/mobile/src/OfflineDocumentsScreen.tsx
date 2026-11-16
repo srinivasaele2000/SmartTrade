@@ -1,6 +1,7 @@
+import {showAlert} from './platform-alert';
 import {trade} from './trade-theme';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, AppState, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {FileText} from 'lucide-react-native';
 import {Button} from './Button';
@@ -42,7 +43,7 @@ export default function OfflineDocumentsScreen({accountId}: {accountId: number})
   }
 
   function remove(file: LocalFileStatus) {
-    Alert.alert('Remove offline copy?', 'This removes the saved copy from this device.', [
+    showAlert('Remove offline copy?', 'This removes the saved copy from this device.', [
       {text: 'Cancel', style: 'cancel'},
       {text: 'Remove', style: 'destructive', onPress: () => {
         setBusy(true); setActionError('');

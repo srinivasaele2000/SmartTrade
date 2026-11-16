@@ -1,3 +1,4 @@
+import {showAlert} from './src/platform-alert';
 import DealerBannerCarousel, {type DealerBanner} from './src/DealerBannerCarousel';
 import SupportChat, {useDealerSupportUnread} from './src/SupportChat';
 import NearbyDealersScreen from './src/NearbyDealersScreen';
@@ -11,7 +12,7 @@ import WorkforceProfileScreen from './src/WorkforceProfileScreen';
 import {isWorkforce, workforce} from './src/workforce-profile';
 import {Button} from './src/Button';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, BackHandler, RefreshControl, KeyboardAvoidingView, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, RefreshControl, KeyboardAvoidingView, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ApiClient, ApiError, type Branch, type CatalogueFilters, type DealerFilters, type Product } from './src/api';
 import { inventoryLabel, matchLabel, variantListings, type Resource } from './src/resource';
 import { SessionProvider, useSession } from './src/session';
@@ -34,7 +35,10 @@ import { useResource } from './src/useResource';
 import { inr, indianPinDigits, INDIAN_PIN, PIN_HELP } from './src/india';
 import {trade, tradeType} from './src/trade-theme';
 
-const api = new ApiClient(process.env.EXPO_PUBLIC_API_URL ?? '');
+const configuredApi = process.env.EXPO_PUBLIC_API_URL?.trim();
+const api = new ApiClient(Platform.OS === 'web'
+  ? new URL(configuredApi || '/api/v1', window.location.origin).href
+  : configuredApi ?? '');
 const demoPersonas = configuredDemoPersonas(api.base, process.env.EXPO_PUBLIC_ENABLE_DEMO_ROLES, {
   PERSONAL: process.env.EXPO_PUBLIC_DEMO_BUYER_MOBILE,
   BUSINESS: process.env.EXPO_PUBLIC_DEMO_DEALER_MOBILE,
@@ -343,7 +347,7 @@ function AppRoutes() {
   const [finishedStep2, setFinishedStep2] = useState<number | null>(null);
   const locked = session.account?.account_type === 'BUSINESS' && session.account.dealer_contacts_complete !== true;
   useEffect(() => {
-    if (!locked && !session.restoring) return;
+    if (Platform.OS === 'web' || (!locked && !session.restoring)) return;
     const listener = BackHandler.addEventListener('hardwareBackPress', () => true);
     return () => listener.remove();
   }, [locked, session.restoring]);
@@ -400,8 +404,16 @@ function Journey({startAtCatalogues}: {startAtCatalogues: boolean}) {
     if (current.name === 'orders' && current.fromDealerDashboard) return {name: 'dealer-workspace'};
     return { name: current.name === 'personal-profile' || current.name === 'offline-documents' || current.name === 'dealer-onboarding' || current.name === 'workforce-profile' || current.name === 'dealer-estimate' ? 'account' : 'catalogue' };
   }), []);
-  const addToEnquiry = (line: DraftLine) => { setDraft(current => { if (current.length && current[0].branch !== line.branch) { Alert.alert('One branch per enquiry', 'Submit or clear the current draft before selecting another dealer branch.'); return current; } return current.some(item => item.listing === line.listing) ? current : [...current, line]; }); setScreen({ name: 'enquiries' }); };
-  useEffect(() => { const listener = BackHandler.addEventListener('hardwareBackPress', () => { if (screen.name === 'catalogue') return false; back(); return true; }); return () => listener.remove(); }, [screen.name, back]);
+  const addToEnquiry = (line: DraftLine) => { setDraft(current => { if (current.length && current[0].branch !== line.branch) { showAlert('One branch per enquiry', 'Submit or clear the current draft before selecting another dealer branch.'); return current; } return current.some(item => item.listing === line.listing) ? current : [...current, line]; }); setScreen({ name: 'enquiries' }); };
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const listener = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen.name === 'catalogue') return false;
+      back();
+      return true;
+    });
+    return () => listener.remove();
+  }, [screen.name, back]);
   return <SafeAreaView style={s.safe} edges={["top", "left", "right"]}><StatusBar barStyle="dark-content" /><KeyboardAvoidingView style={s.safe} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><View style={s.topbar}>
     <View style={s.brandRow}>
       {screen.name !== 'catalogue' && <Button variant="tertiary" compact icon="back" title="Back" onPress={back} />}

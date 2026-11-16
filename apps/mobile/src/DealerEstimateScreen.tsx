@@ -1,9 +1,12 @@
+import {showAlert} from './platform-alert';
 import {useCallback, useState} from 'react';
-import {ActivityIndicator, Alert, Share, Modal, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, Platform, Share, Modal, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
+import {printBrowserHtml} from './print-browser-html';
+import {printSavedPdf} from './print-document';
 import {DocumentHeader, DocumentLedgerRow, DocumentTable, DocumentTotals} from './TradeDocument';
 import {Button} from './Button';
 import {CatalogueImage} from './CatalogueMedia';
@@ -185,17 +188,18 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
   }
 
   async function shareCustomerPdf(estimate: Estimate, bill?: Bill) {
-    if (!await Sharing.isAvailableAsync()) throw new Error('File sharing is unavailable on this device.');
     const html = customerPdfHtml(estimate, bill?.bill_number ?? 'EST-' + estimate.id,
       bill ? 'INVOICE' : 'ESTIMATE / QUOTATION', bill?.issued_at ?? estimate.created_at,
       bill?.snapshot.dealer_name, bill?.snapshot.dealer_gstin);
+    if (Platform.OS === 'web') return printBrowserHtml(html);
+    if (!await Sharing.isAvailableAsync()) throw new Error('File sharing is unavailable on this device.');
     const file = await Print.printToFileAsync({html, width: 595, height: 842});
     await Sharing.shareAsync(file.uri, {mimeType: 'application/pdf', UTI: 'com.adobe.pdf'});
   }
 
   function convert() {
     if (!saved || dirty || saved.status !== 'SHARED') return;
-    Alert.alert('Convert estimate to bill?', 'This will finalize the bill at the confirmed totals.', [
+    showAlert('Convert estimate to bill?', 'This will finalize the bill at the confirmed totals.', [
       {text: 'Cancel', style: 'cancel'},
       {text: 'Convert', onPress: () => void perform(async () => {
         await api.post(estimatesPath + saved.id + '/convert-to-bill/', {}, token);
@@ -276,7 +280,7 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
           <Text style={tradeType.section}>Estimate builder · {items.length} items</Text>
           {(saved || items.length > 0) && <Button variant="tertiary" compact title="New estimate" disabled={busy} onPress={() => {
             if (!dirty) {resetEstimate(); return;}
-            Alert.alert('Discard unsaved estimate changes?', '', [{text: 'Cancel', style: 'cancel'},
+            showAlert('Discard unsaved estimate changes?', '', [{text: 'Cancel', style: 'cancel'},
               {text: 'New estimate', onPress: resetEstimate}]);
           }} />}
         </View>
@@ -371,11 +375,11 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
             <Button variant="secondary" icon="download" title="Download PDF" disabled={busy} onPress={() => perform(async () => {
               await openLocalPdf((await estimatePdf()).uri);
             })} />
-            <Button variant="tertiary" title="Share PDF" disabled={busy} onPress={() => perform(async () => {
+            <Button variant="tertiary" title={Platform.OS === 'web' ? 'Save customer PDF' : 'Share PDF'} disabled={busy} onPress={() => perform(async () => {
               await shareCustomerPdf(saved && !dirty ? saved : await save('DRAFT'));
             })} />
             <Button variant="tertiary" title="Print" disabled={busy} onPress={() => perform(async () => {
-              await Print.printAsync({uri: (await estimatePdf()).uri});
+              await printSavedPdf((await estimatePdf()).uri);
             })} />
             <Button variant="tertiary" title="Copy summary" disabled={busy} onPress={() => perform(async () => {
               await Clipboard.setStringAsync(`${estimateNumber} · ${customer || 'Walk-in customer'} · ${inr(estimateAmounts.total_amount)}`);
@@ -394,7 +398,7 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
               amount={value.totals.total_amount} status={estimateStatus(value.status)}
               onPress={() => {
                 if (!dirty) {restore(value); return;}
-                Alert.alert('Discard unsaved estimate changes?', '', [{text: 'Cancel', style: 'cancel'},
+                showAlert('Discard unsaved estimate changes?', '', [{text: 'Cancel', style: 'cancel'},
                   {text: 'Open estimate', onPress: () => restore(value)}]);
               }} />)}
         <HistoryPager {...estimates} disabled={busy} />
@@ -414,13 +418,13 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
             subtotal={billTotals.sub_total ?? billTotals.total_amount} />}
           <DocumentTotals amount={billTotals.total_amount} fields={financialFields(billTotals, snapshot.gst_type)} />
           <View style={itemStyles.actions}>
-            <Button variant="tertiary" title="Share PDF" disabled={busy}
+            <Button variant="tertiary" title={Platform.OS === 'web' ? 'Save customer PDF' : 'Share PDF'} disabled={busy}
               onPress={() => perform(() => shareCustomerPdf(snapshot, selectedBill))} />
             <Button variant="secondary" icon="download" title="Download Invoice PDF" disabled={busy}
               onPress={() => perform(() => openPdf(billsPath + selectedBill.id + '/pdf/', selectedBill.bill_number, 'dealer-bill-' + selectedBill.id))} />
             <Button variant="tertiary" title="Print" disabled={busy} onPress={() => perform(async () => {
               const file = await savePdf(billsPath + selectedBill.id + '/pdf/', selectedBill.bill_number, 'dealer-bill-' + selectedBill.id);
-              await Print.printAsync({uri: file.uri});
+              await printSavedPdf(file.uri);
             })} />
             <Button variant="tertiary" title="Copy summary" disabled={busy} onPress={() => perform(async () => {
               await Clipboard.setStringAsync(`${selectedBill.bill_number} · ${snapshot.customer_name || 'Walk-in customer'} · ${inr(billTotals.total_amount)}`);
@@ -475,8 +479,14 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
     </StickyBottomBar>}
     {tab === 'Bills' && selectedBill && <StickyBottomBar aboveTabs><View style={itemStyles.actions}>
       <Button variant="secondary" title="Back to List" disabled={busy} onPress={() => setSelectedBill(undefined)} />
-      <Button variant="primary" title="Share Summary" disabled={busy} onPress={() => perform(() =>
-        Share.share({message: `${selectedBill.bill_number} · ${selectedBill.snapshot.customer_name || 'Walk-in customer'} · ${inr(selectedBill.snapshot.totals.total_amount)}`}).then(() => {}))} />
+      <Button variant="primary" title={Platform.OS === 'web' && typeof navigator.share !== 'function' ? 'Copy Summary' : 'Share Summary'}
+        disabled={busy} onPress={() => perform(async () => {
+          const message = `${selectedBill.bill_number} · ${selectedBill.snapshot.customer_name || 'Walk-in customer'} · ${inr(selectedBill.snapshot.totals.total_amount)}`;
+          if (Platform.OS === 'web' && typeof navigator.share !== 'function') {
+            if (!await Clipboard.setStringAsync(message)) throw new Error('Clipboard access is unavailable in this browser.');
+            setMessage('Invoice summary copied.');
+          } else await Share.share({message});
+        })} />
     </View></StickyBottomBar>}
   </View>;
 }

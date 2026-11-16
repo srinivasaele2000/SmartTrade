@@ -109,6 +109,7 @@ function WorkerForm({api, token, existing, done, reloadStatus}: {
       <Text style={s.kicker}>DEALER ONBOARDING · STEP 2 OF 3</Text>
       <Text accessibilityRole="header" style={s.title}>Add your worker contacts</Text>
       <Text style={s.body}>Enter a name, Indian mobile number and trade for each worker. Your contacts stay private.</Text>
+      {Platform.OS === 'web' && <Text style={s.body}>Enter each contact manually in your browser.</Text>}
       <Text accessibilityLiveRegion="polite" style={s.label}>{progress} of 10 workers added</Text>
       {workers.map((worker, index) => {
         const editable = !busy && picking === null && index >= lockedCount;

@@ -1,11 +1,13 @@
 import {Button} from './Button';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { File } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { deleteLocalFile, importLocalFile, localFiles, moveLocalFileScope } from './local-files';
 import { selectedFileName, type LocalFileCategory, type LocalFileStatus } from './local-file-model';
 import {openLocalPdf} from './open-local-pdf';
+import {pickBrowserFile} from './pick-browser-file';
+import {showAlert} from './platform-alert';
 
 
 export default function LocalFileVault({ category, ownerKey, legacyOwnerKey, title, description, allowedMimeTypes, maxBytes, selectable = true, onAvailabilityChange }: { category: LocalFileCategory; ownerKey: string; legacyOwnerKey?: string; title: string; description: string; allowedMimeTypes?: string[]; maxBytes?: number; selectable?: boolean; onAvailabilityChange?: (available: boolean) => void }) {
@@ -16,6 +18,15 @@ export default function LocalFileVault({ category, ownerKey, legacyOwnerKey, tit
   async function pick() {
     setBusy(true); setError(''); setNotice('');
     try {
+      if (Platform.OS === 'web') {
+        const selected = await pickBrowserFile(allowedMimeTypes?.join(',') || '*/*');
+        if (!selected) return;
+        if (maxBytes && selected.size > maxBytes) throw new Error('The selected file exceeds the configured size limit.');
+        await importLocalFile({uri: '', name: selected.name, mimeType: selected.type, size: selected.size,
+          bytes: new Uint8Array(await selected.arrayBuffer())}, category, ownerKey, {allowedMimeTypes, maxBytes});
+        setNotice('Saved in this browser.'); await refresh();
+        return;
+      }
       const picked = await File.pickFileAsync({ mimeTypes: allowedMimeTypes?.length ? allowedMimeTypes : '*/*' });
       if (!picked.canceled) {
         const selected = picked.result;
@@ -31,14 +42,14 @@ export default function LocalFileVault({ category, ownerKey, legacyOwnerKey, tit
     try {
       const current = await localFiles(category, ownerKey);
       if (!file.exists || !current.find(item => item.id === file.id)?.exists) { setError('This local file is missing. Remove its metadata or select the file again.'); return; }
-      if (file.mimeType === 'application/pdf') { await openLocalPdf(file.uri); return; }
+      if (Platform.OS === 'web' || file.mimeType === 'application/pdf') { await openLocalPdf(file.uri); return; }
       if (!await Sharing.isAvailableAsync()) { setError('No compatible local viewer is available on this device.'); return; }
       await Sharing.shareAsync(file.uri, { mimeType: file.mimeType, dialogTitle: `Open ${file.displayName}` });
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The local file could not be opened.'); }
     finally { setBusy(false); }
   }
   function remove(file: LocalFileStatus) {
-    Alert.alert('Delete local file?', 'This removes the file only from this device. It cannot be recovered by SmartTrade.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { setBusy(true); void deleteLocalFile(file).then(() => { setNotice('Local file deleted.'); return refresh(); }).catch(caught => setError(caught instanceof Error ? caught.message : 'Local deletion failed.')).finally(() => setBusy(false)); } }]);
+    showAlert('Delete local file?', 'This removes the file only from this device. It cannot be recovered by SmartTrade.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { setBusy(true); void deleteLocalFile(file).then(() => { setNotice('Local file deleted.'); return refresh(); }).catch(caught => setError(caught instanceof Error ? caught.message : 'Local deletion failed.')).finally(() => setBusy(false)); } }]);
   }
   return <View style={s.card}><Text style={s.heading}>{title}</Text><Text style={s.body}>{description}</Text><Text style={s.warning}>Saved only on this device. These files aren’t shared, synced, or backed up.</Text>{selectable && <Button variant="secondary" title="Select file for this device" disabled={busy} onPress={() => void pick()} />}{loading && <ActivityIndicator accessibilityLabel="Loading local files" />}{notice !== '' && <Text style={s.notice}>{notice}</Text>}{error !== '' && <><Text accessibilityRole="alert" style={s.error}>{error}</Text><Button variant="tertiary" icon="refresh" title="Retry local files" disabled={busy} onPress={() => void refresh()} /></>}{!loading && !error && files.length === 0 && <Text>No files saved on this device.</Text>}{files.map(file => <View style={s.file} key={file.id}><Text style={s.label}>{file.displayName}</Text><Text>{file.mimeType} · {Math.ceil(file.size / 1024)} KB</Text><Text>{file.exists ? 'Available offline on this device' : 'File missing; metadata retained'}</Text><View style={s.row}><Button variant="tertiary" icon="view" title={`Open ${file.displayName}`} disabled={busy || !file.exists} onPress={() => void open(file)} /><Button variant="destructive" icon="delete" loading={Boolean(busy)} title={`Delete ${file.displayName}`} disabled={busy} onPress={() => remove(file)} /></View></View>)}</View>;
 }

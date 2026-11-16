@@ -1,5 +1,6 @@
+import {showAlert} from './platform-alert';
 import {useCallback, useState} from 'react';
-import {ActivityIndicator, Alert, StyleSheet, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Button} from './Button';
 import type {ApiClient} from './api';
 import {estimatePage, generalItemPrice, type GeneralItem, type EstimateLine} from './dealer-estimates';
@@ -88,7 +89,7 @@ export default function GeneralItems({api, token, items, initiallyAdding, disabl
               <Button variant="secondary" compact title="Edit" disabled={busy || disabled}
                 onPress={() => {setEditing(item.id); setForm(item); setError('');}} />
               <Button variant="destructive" compact title="Delete" disabled={busy || disabled} onPress={() =>
-                Alert.alert('Remove General Item?', 'Saved estimates keep their item details.', [
+                showAlert('Remove General Item?', 'Saved estimates keep their item details.', [
                   {text: 'Cancel', style: 'cancel'}, {text: 'Remove', style: 'destructive', onPress: () => void run(async () => {
                     await api.get(path + item.id + '/', undefined, token, {method: 'DELETE'});
                     if (editing === item.id) {setForm(null); setEditing(undefined);}

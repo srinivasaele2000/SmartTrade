@@ -16,15 +16,24 @@ function validPersisted(value: unknown): value is PersistedSession {
   return typeof item.tokens?.access === 'string' && typeof item.tokens?.refresh === 'string' && typeof item.tokens?.expires_in === 'number' && typeof item.account?.id === 'number' && typeof item.account?.account_type === 'string' && typeof item.account?.access_state === 'string';
 }
 async function persist(tokens: Tokens, account: Account) {
-  if (Platform.OS !== 'web') await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify({ tokens, account }));
+  const value = JSON.stringify({ tokens, account });
+  if (Platform.OS === 'web') {
+    try { window.sessionStorage.setItem(SESSION_KEY, value); } catch { /* Keep the current session in memory. */ }
+  } else await SecureStore.setItemAsync(SESSION_KEY, value);
 }
 async function deleteSavedSession() {
-  if (Platform.OS !== 'web') await SecureStore.deleteItemAsync(SESSION_KEY);
+  if (Platform.OS === 'web') {
+    try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* Browser storage is unavailable. */ }
+  } else await SecureStore.deleteItemAsync(SESSION_KEY);
+}
+async function readSavedSession() {
+  if (Platform.OS !== 'web') return SecureStore.getItemAsync(SESSION_KEY);
+  try { return window.sessionStorage.getItem(SESSION_KEY); } catch { return null; }
 }
 export function SessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   const [session, setSession] = useState<Tokens | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
-  const [restoring, setRestoring] = useState(Platform.OS !== 'web');
+  const [restoring, setRestoring] = useState(true);
   const [message, setMessage] = useState('');
   const [offline, setOffline] = useState(false);
   const revalidationRunner = useRef<() => void>(()=>{});
@@ -39,11 +48,10 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const installing = useRef(false);
   const clearSession = useCallback(() => { generation.current++; setSession(null); setAccount(null); void enqueueStorage(deleteSavedSession); }, [enqueueStorage]);
   useEffect(() => {
-    if (Platform.OS === 'web') return;
     let cancelled = false;
     const revision = generation.current;
     const current = () => !cancelled && revision === generation.current;
-    void SecureStore.getItemAsync(SESSION_KEY).then(async raw => {
+    void readSavedSession().then(async raw => {
       if (!raw || !current()) return;
       try {
         const saved: unknown = JSON.parse(raw);
@@ -102,8 +110,14 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     };
     const timer = setInterval(() => void revalidate(), offline ? 15000 : Math.max(1000, Math.min(60000,(session.expires_in-30)*1000)));
     const active = AppState.addEventListener('change',state=>{if(state==='active')void revalidate();});
+    const reconnect = () => void revalidate();
+    if (Platform.OS === 'web') window.addEventListener('online', reconnect);
     revalidationRunner.current=()=>void revalidate();
-    return () => { cancelled = true; clearInterval(timer); active.remove(); revalidationRunner.current=()=>{}; };
+    return () => {
+      cancelled = true; clearInterval(timer); active.remove();
+      if (Platform.OS === 'web') window.removeEventListener('online', reconnect);
+      revalidationRunner.current=()=>{};
+    };
   }, [session, api, clearSession, offline, enqueueStorage]);
   async function signOut() {
     const current = session;

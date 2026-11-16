@@ -5,14 +5,14 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {OrderTracking, orderStatusLabel} from './OrderTracking';
 import {invoiceFileScope} from './local-file-model';
 import {useCallback,useEffect,useState} from 'react';
-import {ActivityIndicator,Share,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,Platform,Share,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
 import {openLocalPdf} from './open-local-pdf';
 import {ApiClient,ApiError} from './api';import {cancelOrder,issueInvoice,orderAction,orders,type InvoiceLine,type Order} from './orders';import {useSession} from './session';import {useHistoryPage} from './useHistoryPage';
 import {HistoryPager} from './HistoryPager';
 import {inr,istDateTime} from './india';
 import {downloadApiFile, moveLocalFileScope} from './local-files';
 import LocalFileVault from './LocalFileVault';
-import * as Print from 'expo-print';
+import {printSavedPdf} from './print-document';
 import * as Clipboard from 'expo-clipboard';
 import {DocumentHeader, DocumentLedgerRow, DocumentTable, DocumentTotals} from './TradeDocument';
 const states=['CONFIRM','REJECT','PROCESSING','READY','COMPLETE','CANCEL'];
@@ -38,7 +38,7 @@ const data=useHistoryPage(useCallback((page:number,signal:AbortSignal)=>orders(a
     setMessage('Invoice saved on this device.');
     setSavedInvoiceId(order.invoice.id);
     setLocalVersion(value => value + 1);
-    if (action === 'print') await Print.printAsync({uri: saved.uri});
+    if (action === 'print') await printSavedPdf(saved.uri);
     else await openLocalPdf(saved.uri);
   } catch (error) {
     setError(error instanceof Error ? error.message : 'Invoice download failed.');
@@ -51,9 +51,10 @@ async function invoiceSummary(order: Order, action: 'copy' | 'share') {
   const invoice = order.invoice;
   const summary = `${invoice.invoice_number} · ${invoice.supplier_name} · ${inr(invoice.grand_total)}`;
   try {
-    if (action === 'share') await Share.share({message: summary});
+    if (action === 'share' && (Platform.OS !== 'web' || typeof navigator.share === 'function')) await Share.share({message: summary});
     else {
-      await Clipboard.setStringAsync(summary);
+      const copied = await Clipboard.setStringAsync(summary);
+      if (Platform.OS === 'web' && !copied) throw new Error('Clipboard access is unavailable in this browser.');
       setMessage('Invoice summary copied.');
     }
   } catch (error) {
@@ -73,7 +74,8 @@ return <View style={s.screen}><ScrollView keyboardShouldPersistTaps="handled" co
 </>}{dealer&&!selected.invoice&&['CONFIRMED','PROCESSING','READY','COMPLETED'].includes(selected.state)&&<><Text style={s.heading}>Issue immutable invoice</Text><View style={s.row}><Button variant="navigation" selected={kind === 'BILL_OF_SUPPLY'} title="Bill of supply" onPress={()=>setKind('BILL_OF_SUPPLY')}/><Button variant="navigation" selected={kind === 'TAX_INVOICE'} title="Tax invoice" onPress={()=>setKind('TAX_INVOICE')}/></View><Text style={s.heading}>Supplier tax/supply basis</Text><View style={s.row}>{['REGISTERED_TAXABLE','COMPOSITION','EXEMPT','UNREGISTERED'].map(basis=><Button variant="navigation" selected={supplyBasis === basis} key={basis} title={basis} onPress={()=>setSupplyBasis(basis)}/>)}</View><Field label="Place of supply (Indian state/UT)" value={place} change={setPlace}/><Field label="Buyer GSTIN (optional)" value={buyerGstin} change={setBuyerGstin}/>{lines.map((line,i)=><View key={line.order_item}><Text>{selected.items[i]?.product_name}</Text><Field label="HSN" value={line.hsn} change={v=>setLines(lines.map((x,j)=>j===i?{...x,hsn:v}:x))}/><Field label="Discount INR" value={line.discount} change={v=>setLines(lines.map((x,j)=>j===i?{...x,discount:v}:x))}/><Field label="GST rate %" value={line.tax_rate} change={v=>setLines(lines.map((x,j)=>j===i?{...x,tax_rate:v}:x))}/><View style={s.row}>{(['NONE','CGST_SGST','IGST'] as const).map(mode=><Button variant="navigation" selected={line.tax_mode === mode} key={mode} title={mode} onPress={()=>setLines(lines.map((x,j)=>j===i?{...x,tax_mode:mode}:x))}/>)}</View></View>)}<Button variant="primary" icon="check" loading={Boolean(busy)} title="Issue invoice" disabled={busy} onPress={()=>void run(()=>issueInvoice(api,token,selected,kind,supplyBasis,place,buyerGstin,lines),'Invoice issuance')}/></>}{dealer&&<><Field label="Transition reason" value={reason} change={setReason}/><View style={s.row}>{states.map(action=><Button variant={['REJECT','CANCEL'].includes(action) ? 'destructive' : 'primary'} key={action} title={action} disabled={busy} onPress={()=>void run(()=>orderAction(api,token,selected.id,action,reason),`Order ${action.toLowerCase()}`)}/>)}</View></>}{!dealer&&['PENDING','CONFIRMED'].includes(selected.state)&&<><Field label="Cancellation reason" value={reason} change={setReason}/><Button variant="destructive" icon="close" loading={Boolean(busy)} title="Cancel order" disabled={busy} onPress={()=>void run(()=>cancelOrder(api,token,selected.id,reason),'Cancellation')}/></>}</View>{selected.invoice&&<LocalFileVault key={`${selected.invoice.id}-${localVersion}`} onAvailabilityChange={updateInvoiceAvailability} category="invoice" ownerKey={invoiceFileScope(accountId,selected.invoice.id)} legacyOwnerKey={`invoice-${selected.invoice.id}`} title="Invoice copies on this device" description="Your saved invoices are available offline." allowedMimeTypes={['application/pdf']} selectable={false}/>}</>}</ScrollView>{selected?.invoice && <StickyBottomBar aboveTabs>
   <View style={s.row}>
     <Button variant="secondary" title="Back to List" disabled={busy} onPress={() => setSelected(null)} />
-    <Button variant="tertiary" title="Share Summary" disabled={busy} onPress={() => invoiceSummary(selected, 'share')} />
+    {(Platform.OS !== 'web' || typeof navigator.share === 'function') &&
+      <Button variant="tertiary" title="Share Summary" disabled={busy} onPress={() => invoiceSummary(selected, 'share')} />}
     <Button variant="primary" icon={savedInvoiceId === invoiceId ? "view" : "download"}
       title={savedInvoiceId === invoiceId ? "View Invoice • Saved offline" : "Download Invoice (PDF)"}
       loading={busy} disabled={busy} onPress={() => downloadInvoice(selected)} />

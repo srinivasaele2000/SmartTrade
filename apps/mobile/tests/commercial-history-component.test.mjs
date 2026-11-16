@@ -93,7 +93,7 @@ function workspace(kind,dealer,{empty=false}={}){
  const fixture=n=>kind==='orders'?{id:n,order_number:'ORDER-'+n,state:'PENDING',dealer_business_name:'Fixture dealer',branch_name:'Fixture branch',created_at:'2026-11-01T00:00:00Z',items:[],total:'0',invoice:null}:{id:n,branch_name:'Fixture branch',state:'SUBMITTED',items:[],quotations:[],requirements:'',notes:''};
  const api={get:async(path,signal,token)=>{requests.push({path,token});const n=Number(new URL('http://fixture.test'+path).searchParams.get('page'));if(n===failPage)throw Error('History offline');return empty?{count:0,next:null,previous:null,results:[]}:{count:2,next:n===1?'?page=2':null,previous:n===2?'?page=1':null,results:[fixture(n)]}}};
  const imports={react:React,'react/jsx-runtime':{jsx,jsxs:jsx,Fragment:'fragment'},'react-native':native,
-  'expo-print':{},'expo-clipboard':{},'./TradeDocument':{},
+  './print-document':{},'expo-clipboard':{},'./TradeDocument':{},
   './StickyBottomBar':{StickyBottomBar:({children})=>children}, './Button':{Button:props=>jsx('button',props)},'./api':apiModule,'./india':india,'./orders':orders,'./enquiries':enquiries,
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({bottom:48})},'./local-file-model':localModel,
   './open-local-pdf':{openLocalPdf:()=>{throw Error('No viewer in navigation test')}},'./local-files':{downloadApiFile:()=>{throw Error('No download in navigation test')}},'./LocalFileVault':{default:()=>null},

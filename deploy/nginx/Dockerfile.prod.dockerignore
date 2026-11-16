@@ -1,0 +1,17 @@
+**
+!apps/
+!apps/admin/
+!apps/admin/package*.json
+!apps/admin/index.html
+!apps/admin/tsconfig.json
+!apps/admin/vite.config.ts
+!apps/admin/src/
+!apps/admin/src/**
+!apps/mobile/
+!apps/mobile/package*.json
+!apps/mobile/app.json
+!apps/mobile/app.config.js
+!apps/mobile/App.tsx
+!apps/mobile/tsconfig.json
+!apps/mobile/src/
+!apps/mobile/src/**

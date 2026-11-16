@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {Platform} from 'react-native';
 
 export type CustomerLocation = {label: string; filters: Record<string, string>};
 
@@ -20,6 +21,16 @@ export function useCustomerLocation() {
     setBusy(true);
     setError('');
     try {
+      if (Platform.OS === 'web') {
+        if (!window.isSecureContext || !navigator.geolocation) {
+          setError('Location access needs a secure connection. Enter your city, area or PIN code instead.');
+          return false;
+        }
+        const {coords} = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {timeout: 10000}));
+        setLocation({label: 'Current location', filters: {lat: String(coords.latitude), lng: String(coords.longitude)}});
+        return true;
+      }
       const native = await import('expo-location');
       if (!(await native.requestForegroundPermissionsAsync()).granted) {
         setError('Location access is off. Enter your city, area or PIN code instead.');

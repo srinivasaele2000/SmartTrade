@@ -1,0 +1,25 @@
+FROM node:24-bookworm-slim AS admin
+WORKDIR /app
+COPY apps/admin/package.json apps/admin/package-lock.json ./
+RUN npm ci
+COPY apps/admin/ ./
+ARG VITE_API_BASE_URL=/api/v1
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+RUN npm run build
+
+FROM node:24-bookworm-slim AS mobile
+WORKDIR /app
+COPY apps/mobile/package.json apps/mobile/package-lock.json ./
+RUN npm ci
+COPY apps/mobile/ ./
+ARG EXPO_PUBLIC_API_URL=/api/v1
+ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL} \
+    EXPO_PUBLIC_ENABLE_DEMO_ROLES=false \
+    SMARTTRADE_WEB_BASE_PATH=/app \
+    EXPO_NO_DOTENV=1 \
+    CI=1
+RUN npm exec -- expo export --platform web
+
+FROM nginx:alpine
+COPY --from=admin /app/dist/ /usr/share/nginx/html/
+COPY --from=mobile /app/dist/ /usr/share/nginx/html/app/

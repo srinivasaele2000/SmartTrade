@@ -57,10 +57,11 @@ services:
 
   nginx:
     build:
-      context: ./apps/admin
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: deploy/nginx/Dockerfile.prod
       args:
         VITE_API_BASE_URL: /api/v1
+        EXPO_PUBLIC_API_URL: /api/v1
     restart: unless-stopped
     ports:
       - "80:80"
