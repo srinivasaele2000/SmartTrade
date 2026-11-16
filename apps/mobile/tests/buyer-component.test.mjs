@@ -28,8 +28,9 @@ const product = { id: 10, name: 'Impact driver', code: 'ID-10', brand_name: 'Bui
 const page = results => ({ count: results.length, next: null, previous: null, results });
 const ready = data => ({ status: 'ready', data });
 
-function moduleWith(states, account = null, screen = 'catalogue', scheme = 'light', flags = featureFlags) {
+function moduleWith(states, account = null, screen, scheme = 'light', flags = featureFlags, navigation = {}) {
   let calls = 0;
+  let initializedRoute = false;
   const native = {};
   for (const name of ['Text', 'View', 'ScrollView', 'Pressable', 'TextInput', 'ActivityIndicator', 'SafeAreaView', 'KeyboardAvoidingView']) {
     native[name] = props => React.createElement(name === 'Pressable' ? 'button' : name === 'TextInput' ? 'input' : 'div', { disabled: props.disabled, 'aria-label': props.accessibilityLabel, 'data-palette': props.accessibilityLabel?.startsWith('Account role:') ? props.style.at(-1).color : undefined, value: name === 'TextInput' ? props.value : undefined, readOnly: name === 'TextInput' ? true : undefined }, props.children);
@@ -61,7 +62,12 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/catalogue-browse': browseModule,
     './src/trade-theme': theme,
     './src/Onboarding': {PersonalProfile: () => null},
-    react: {...React, useState: value => React.useState(value?.name === 'catalogue' ? {name: screen} : value)},
+    react: {...React, useState: value => {
+      if (initializedRoute || !value?.name) return React.useState(value);
+      initializedRoute = true;
+      const [route, setRoute] = React.useState(screen ? {name: screen} : value);
+      return [route, navigation.setRoute ?? setRoute];
+    }},
     'react/jsx-runtime': jsx,
     'react-native': native,
     './src/api': apiModule,
@@ -69,7 +75,7 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/india': indiaModule,
     './src/useResource': { useResource: () => ({ state: states[calls++], retry() {} }) },
     './src/session': { SessionProvider: props => props.children, useSession: () => ({ token: account ? 'isolated-token' : null, clearSession() {}, account, message: '' }) },
-    './src/AuthScreen': { default: () => null },
+    './src/AuthScreen': { default: ({done}) => { navigation.done = done; return null; } },
     './src/CompanyScreen': { default: () => null },
     './src/DealerWorkspace': { default: () => null },
     './src/DealerOnboardingScreen': { default: () => null },
@@ -78,7 +84,7 @@ function moduleWith(states, account = null, screen = 'catalogue', scheme = 'ligh
     './src/DealerBannerCarousel': {default: () => null},
     './src/useCustomerLocation': {useCustomerLocation: () => ({})},
     './src/DealerWorkerContactsScreen': { default: () => React.createElement('div', {}, 'Worker contact form') },
-    './src/DealerEstimateScreen': { default: () => null },
+    './src/DealerEstimateScreen': { default: ({initialTab}) => React.createElement('div', {}, 'Dealer estimate tab: ' + initialTab) },
     './src/WorkforceProfileScreen': { default: () => null },
     './src/workforce-profile': workforce,
     './src/EnquiryWorkspace': { default: () => React.createElement('div', {}, 'Enquiry workspace fixture') },
@@ -128,7 +134,7 @@ test('Dealer commercial rows and direct routes are hidden by default while Buyer
 
   const dealerAccount = render(dealer, 'account');
   assert.doesNotMatch(dealerAccount, /Incoming enquiries|Incoming orders/);
-  assert.match(dealerAccount, /Catalogue items &amp; estimates/);
+  assert.match(dealerAccount, /Catalog Items/);
   assert.match(dealerAccount, /My bills \/ invoices/);
   assert.match(render(buyer, 'account'), /Enquiries and quotations/);
   assert.match(render(buyer, 'account'), /Orders and invoices/);
@@ -144,15 +150,42 @@ test('Dealer commercial rows and direct routes are hidden by default while Buyer
   }
 });
 
+test('restored Dealer lands on Catalog Items and other restored roles keep Browse', () => {
+  const states = [ready(page([])), ready(page([])), ready(page([]))];
+  const render = account_type => renderToStaticMarkup(React.createElement(moduleWith(states,
+    {id: 1, account_type, access_state: 'ACTIVE', dealer_contacts_complete: true}).default));
+  const dealer = render('BUSINESS');
+  assert.match(dealer, /Catalog Items/);
+  assert.match(dealer, /Dealer estimate tab: Items/);
+  assert.match(dealer, /My account/);
+  for (const role of ['PERSONAL', 'COMPANY', 'STAFF']) {
+    const html = render(role);
+    assert.match(html, /Browse/);
+    assert.doesNotMatch(html, /Dealer estimate tab/);
+  }
+});
+
+test('OTP completion routes Dealers to Catalog Items and retains the other roles’ return screen', () => {
+  const states = [ready(page([])), ready(page([])), ready(page([]))];
+  const navigation = {setRoute: route => { navigation.route = route; }};
+  renderToStaticMarkup(React.createElement(moduleWith(states, null, 'auth', 'light', featureFlags, navigation).default));
+  navigation.done({account_type: 'BUSINESS'});
+  assert.deepEqual(navigation.route, {name: 'dealer-estimate'});
+  for (const role of ['PERSONAL', 'COMPANY', 'STAFF']) {
+    navigation.done({account_type: role});
+    assert.deepEqual(navigation.route, {name: 'catalogue'});
+  }
+});
+
 test('incomplete or unknown dealer onboarding status replaces every requested route with Step 2', () => {
   for (const status of [false, undefined]) {
-    for (const route of ['catalogue', 'auth', 'account', 'orders', 'dealer-workspace']) {
+    for (const route of [undefined, 'catalogue', 'auth', 'account', 'orders', 'dealer-workspace', 'dealer-estimate']) {
       const account = {id: 1, account_type: 'BUSINESS', access_state: 'ACTIVE', dealer_contacts_complete: status};
       const html = renderToStaticMarkup(React.createElement(moduleWith([], account, route).default));
       assert.match(html, /Add 10 unique worker contacts/);
       assert.match(html, /Worker contact form/);
       assert.match(html, /Sign Out/);
-      assert.doesNotMatch(html, /My account|Browse|>Back</);
+      assert.doesNotMatch(html, /My account|Browse|Catalog Items|>Back</);
     }
   }
 });

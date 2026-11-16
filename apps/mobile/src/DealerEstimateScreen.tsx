@@ -214,7 +214,7 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
       <View style={itemStyles.header}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.row}>{(['Items', 'General Items', 'Estimate', 'Bills'] as const).map(value =>
         <Button key={value} variant="navigation" compact selected={tab === value} disabled={busy}
-          title={value === 'Estimate' ? 'Estimate (' + items.length + ' items)' : value === 'Bills' ? 'Invoices' : value} onPress={() => changeTab(value)} />)}</ScrollView>
+          title={value === 'Items' ? 'Catalog Items' : value === 'Estimate' ? 'Estimate (' + items.length + ' items)' : value === 'Bills' ? 'Invoices' : value} onPress={() => changeTab(value)} />)}</ScrollView>
       {tab === 'Items' && <>
         <View style={s.row}>
           <TextInput style={[s.input, itemStyles.search]} accessibilityLabel="Search catalogue items" placeholder="Name, code, HSN or brand"
