@@ -20,6 +20,7 @@ from rest_framework.views import APIView
 from companies.permissions import HasStaffPermission
 from .items import ItemFields, ItemOutput, catalogue_product, eligible_associations, lock_product_codes
 from .media import storage, validate_file, validate_image
+from .views import eligible_products
 from .models import CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
@@ -226,9 +227,22 @@ class StaffExtraction(APIView):
         } if progress else None)
 
     def review(self, document, rows, batch=None):
-        options = document_associations(document).values(
-            'id', 'category__name', 'brand__company__legal_name').order_by('category__name', 'id')
+        associations = document_associations(document)
+        options = associations.values('id', 'category__name', 'brand__company__legal_name').order_by('category__name', 'id')
+        pending = [row for row in rows if row['status'] == DraftCatalogueItem.Status.DRAFT]
+        existing_codes = Product.objects.filter(
+            code__in={row['product_code'].strip() for row in pending},
+        ).order_by('code').values_list('code', flat=True).distinct()
+        published = eligible_products()
         return Response({'rows': rows, 'categories': list(options), 'diagnostics': document.last_extraction,
+                         'summary': {
+                             'pending': len(pending),
+                             'published_from_document': published.filter(draftcatalogueitem__source_document=document).count(),
+                             'published_for_brand': published.filter(
+                                 brand_category__brand_id__in=associations.values('brand_id'),
+                             ).count(),
+                         },
+                         'existing_codes': list(existing_codes),
                          **({'batch': batch} if batch else {})})
 
     @staticmethod
@@ -316,7 +330,8 @@ class CommitDrafts(StaffExtraction):
                     {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
                 )
                 approved = []
-                codes = set()
+                code_rows = {}
+                row_errors = {}
                 for row in rows:
                     draft = drafts[row['id']]
                     if not row['approved']:
@@ -325,23 +340,29 @@ class CommitDrafts(StaffExtraction):
                     label = f'Page {draft.page}, {row.get("product_code") or draft.product_code} (draft {draft.pk})'
                     item = ItemFields(data=row)
                     if not item.is_valid():
-                        raise serializers.ValidationError({'rows': {label: item.errors}})
+                        row_errors[str(draft.pk)] = {'draft': label, **item.errors}
+                        continue
                     association = associations.get(row.get('brand_category'))
                     if association is None:
-                        raise serializers.ValidationError({'rows': {label: 'Choose a category for the PDF brand.'}})
+                        row_errors[str(draft.pk)] = {'draft': label, 'brand_category': 'Choose a category for the PDF brand.'}
+                        continue
                     values = item.validated_data
                     code = values['product_code']
-                    if code in codes:
-                        raise serializers.ValidationError({'rows': {label: 'This product code appears more than once in this batch.'}})
-                    codes.add(code)
+                    code_rows.setdefault(code, []).append((draft.pk, label))
                     product = catalogue_product({**values, 'brand_category': association}, pack_size=draft.pack_size)
                     approved.append((draft, product, label))
 
-                lock_product_codes(codes)
-                conflicts = set(Product.objects.filter(code__in=codes).values_list('code', flat=True))
-                if conflicts:
-                    label = next(label for _, product, label in approved if product.code in conflicts)
-                    raise serializers.ValidationError({'rows': {label: 'This product code is already in use.'}})
+                lock_product_codes(code_rows)
+                conflicts = set(Product.objects.filter(code__in=code_rows).values_list('code', flat=True))
+                for code, entries in code_rows.items():
+                    if code in conflicts or len(entries) > 1:
+                        message = 'Already in catalogue. Change this code or uncheck the draft.' if code in conflicts else (
+                            'Duplicate code in batch. Change this code or select only one occurrence.'
+                        )
+                        for draft_id, label in entries:
+                            row_errors[str(draft_id)] = {'draft': label, 'product_code': message}
+                if row_errors:
+                    raise serializers.ValidationError({'row_errors': row_errors})
                 Product.objects.bulk_create([product for _, product, _ in approved])
                 images = {}
                 for draft, product, label in approved:
@@ -383,11 +404,11 @@ class CommitDrafts(StaffExtraction):
             with draft.image.open('rb') as image:
                 upload = SimpleUploadedFile(PurePath(draft.image.name).name, image.read(), 'image/png')
         except FileNotFoundError as error:
-            raise serializers.ValidationError({'rows': {label: 'The draft image is missing.'}}) from error
+            raise serializers.ValidationError({'row_errors': {str(draft.pk): {'draft': label, 'image': 'The draft image is missing.'}}}) from error
         try:
             validate_file(upload, ProductMedia.Kind.IMAGE)
         except serializers.ValidationError as error:
-            raise serializers.ValidationError({'rows': {label: error.detail}}) from error
+            raise serializers.ValidationError({'row_errors': {str(draft.pk): {'draft': label, 'image': error.detail}}}) from error
         media = ProductMedia(product=product, kind=ProductMedia.Kind.IMAGE, key=uuid4(), filename=upload.name,
                              content_type=upload.content_type, size=upload.size)
         name = files.save(media.storage_name, upload)

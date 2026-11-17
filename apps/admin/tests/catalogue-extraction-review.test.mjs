@@ -11,7 +11,11 @@ const compiled = ts.transpileModule(source, {compilerOptions: {
   module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
 }}).outputText;
 
-function review(categories = [{id: 7, category__name: 'Switches', brand__company__legal_name: 'Example'}], requestApi, suppliedRows, onCommit) {
+class TestApiError extends Error {
+  constructor(status, message, fieldErrors) {super(message); Object.assign(this, {status, fieldErrors});}
+}
+
+function review(categories = [{id: 7, category__name: 'Switches', brand__company__legal_name: 'Example'}], requestApi, suppliedRows, onCommit, options = {}) {
   const rows = (suppliedRows ?? [
     {id: 1, product_code: 'one', association: '7', status: 'DRAFT'},
     {id: 2, product_code: 'two', association: '7', status: 'DRAFT'},
@@ -20,12 +24,15 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
     {id: 5, product_code: 'reviewed', association: '7', status: 'APPROVED'},
   ]).map(row => ({...row, approved: false, image_url: null}));
   const state = [rows, categories, false, '', {}, 0, '', false, true];
+  if (options.summary) state[16] = options.summary;
+  if (options.existingCodes) state[17] = options.existingCodes;
+  const effects = [];
   let hook = 0;
   let refHook = 0;
   const refs = [];
   const imports = {
     react: {
-      useEffect() {},
+      useEffect(effect) {effects.push(effect);},
       useRef(value) { return refs[refHook++] ?? (refs[refHook - 1] = {current: value}); },
       useState(value) {
         const index = hook++;
@@ -36,24 +43,26 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
       },
     },
     'react/jsx-runtime': jsx,
-    './api': {requestApi, ApiError: Error},
+    './api': {requestApi, ApiError: TestApiError},
   };
   const module = {exports: {}};
   new Function('require', 'module', 'exports', compiled)(name => imports[name], module, module.exports);
   const get = label => {
+    effects.length = 0;
     hook = 0;
     refHook = 0;
     const tree = module.exports.default({baseUrl: '/api/v1', token: 'test', documentKey: 'test', title: 'Example', onCommit});
+    if (options.dialog) refs[0].current = options.dialog;
     function find(node) {
       if (Array.isArray(node)) return node.map(find).find(Boolean);
-      if (node?.props?.['aria-label'] === label || node?.props?.placeholder === label ||
+      if (node?.props?.['aria-label'] === label || node?.props?.placeholder === label || node?.props?.children === label ||
           (node?.type === 'button' && node.props.children === label) ||
           (label === 'append' && node?.type === 'input' && node.props.type === 'checkbox' && !node.props['aria-label'])) return node.props;
       if (node?.props?.children) return find(node.props.children);
     }
     return find(tree);
   };
-  return Object.assign(get, {payload: module.exports.extractionPayload});
+  return Object.assign(get, {runLastEffect: () => effects.at(-1)(), payload: module.exports.extractionPayload});
 }
 
 test('page range parses blank, single pages and inclusive ranges', () => {
@@ -208,4 +217,50 @@ test('publishing 331 approvals submits once and keeps progress and errors beside
   assert.deepEqual(published, [[331, 0]]);
   assert.match(get('Publish status by actions').children, /331 catalogue items published/);
   assert.equal(get('Commit & Publish (331)'), undefined);
+});
+
+
+test('review shows pending and published counts, skips catalogue codes and selects one of each duplicate', () => {
+  const rows = ['SAME', 'SAME', 'LIVE'].map((product_code, i) => ({
+    id: i + 1, product_code, status: 'DRAFT', association: '7',
+  }));
+  const get = review(undefined, undefined, rows, undefined, {
+    summary: {pending: 3, published_from_document: 2, published_for_brand: 17}, existingCodes: ['LIVE'],
+  });
+  const cards = get('Catalogue publish summary').children;
+  assert.deepEqual(cards.map(card => card.props.children[1].props.children), [3, 2, 17]);
+  assert.ok(get('Duplicate code in batch'));
+  assert.ok(get('Already in catalogue'));
+  assert.equal(get('Approve LIVE').disabled, true);
+  get('Select all eligible rows').onChange();
+  assert.equal(get('Approve SAME').checked, true);
+  assert.equal(get('Commit & Publish (1)').disabled, false);
+  // The second occurrence can be selected manually, then reduced to one in a click.
+  const second = get('Draft 2').children[0].props.children.props;
+  assert.equal(second.checked, false);
+  second.onChange({target: {checked: true}});
+  assert.equal(get('Commit & Publish (2)').disabled, true);
+  get('Uncheck duplicates (1)').onClick();
+  assert.equal(get('Commit & Publish (1)').disabled, false);
+});
+
+test('structured API errors highlight and scroll to the exact draft IDs', async () => {
+  const calls = [];
+  const dialog = {querySelector(selector) {
+    calls.push(selector);
+    return {scrollIntoView: () => calls.push('scroll'), focus: () => calls.push('focus')};
+  }};
+  const rows = [3829, 3911].map(id => ({id, association: '7', status: 'DRAFT', product_code: String(id)}));
+  const get = review(undefined, async () => {
+    throw new TestApiError(400, 'Invalid batch', {row_errors: {
+      3829: {product_code: 'Already in catalogue.'}, 3911: {hsn_sac_code: ['Enter a valid HSN.']},
+    }});
+  }, rows, undefined, {dialog});
+  get('Select all eligible rows').onChange();
+  await get('Publish catalogue items').onSubmit({preventDefault() {}});
+  assert.match(get('Error for draft 3829').children, /Already in catalogue/);
+  assert.match(get('Error for draft 3911').children, /valid HSN/);
+  assert.equal(get('Draft 3829').className, 'catalogue-review-row-error');
+  get.runLastEffect();
+  assert.deepEqual(calls, ['[data-draft-id="3829"]', 'scroll', 'focus']);
 });

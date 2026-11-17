@@ -320,3 +320,7 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .catalogue-review-picker input:focus-visible + span { outline: 2px solid #246657; outline-offset: 2px; }
 .catalogue-review-picker input:disabled + span { opacity: .6; }
 .catalogue-item-placeholder { display: grid; place-items: center; color: #526759; background: #edf2ef; }
+
+.catalogue-review-table .catalogue-review-row-error > td { background: #fff1f2; }
+.catalogue-review-table .catalogue-review-row-error:focus { outline: 2px solid #be123c; outline-offset: -2px; }
+.catalogue-review-code-badge { margin-top: 4px; max-width: 100%; white-space: normal; }

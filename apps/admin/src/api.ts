@@ -1,6 +1,11 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  readonly fieldErrors?: Record<string, unknown>;
+  constructor(status: number, message: string, fieldErrors?: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.fieldErrors = fieldErrors;
+  }
 }
 const expiredListeners = new Set<(token: string) => void>();
 export function onSessionExpired(listener: (token: string) => void) {
@@ -33,7 +38,7 @@ export async function apiResponse(base: string, path: string, token?: string, in
   if (!response.ok) {
     if (response.status === 401 && token) expiredListeners.forEach(listener => listener(token));
     const data = await response.json().catch(() => null);
-    throw new ApiError(response.status, errorMessage(data, response.status));
+    throw new ApiError(response.status, errorMessage(data, response.status), data?.field_errors);
   }
   return response;
 }

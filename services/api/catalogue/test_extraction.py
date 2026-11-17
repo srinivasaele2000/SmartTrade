@@ -624,3 +624,47 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(CatalogueAudit.objects.count(), 0)
         self.assertEqual(self.document.draft_items.filter(status='DRAFT').count(), 2)
         self.assertEqual({path for path in self.root.rglob('*') if path.is_file()}, files_before)
+
+
+    def test_review_reports_publication_counts_and_all_conflicting_draft_ids(self):
+        products = [
+            Product.objects.create(brand_category=self.association, code=code, name=code, unit='each', state=state)
+            for code, state in [('LIVE', 'PUBLISHED'), ('OTHER', 'PUBLISHED'), ('ARCHIVED', 'ARCHIVED')]
+        ]
+        DraftCatalogueItem.objects.create(
+            source_document=self.document, page=1, name='Previously published', product_code='LIVE',
+            status='APPROVED', product=products[0],
+        )
+        drafts = DraftCatalogueItem.objects.bulk_create([
+            DraftCatalogueItem(source_document=self.document, page=2, name=code, product_code=code)
+            for code in ['SAME', 'SAME', 'LIVE', 'ARCHIVED', 'FRESH']
+        ])
+        review = self.client.get(self.base + 'extract/')
+        self.assertEqual(review.status_code, 200, review.data)
+        self.assertEqual(review.data['summary'], {
+            'pending': 5, 'published_from_document': 1, 'published_for_brand': 2,
+        })
+        self.assertEqual(review.data['existing_codes'], ['ARCHIVED', 'LIVE'])
+        rows = [
+            {'id': draft.pk, 'approved': True, 'name': draft.name, 'product_code': draft.product_code,
+             'hsn_sac_code': '8536', 'price_per_unit': '10.00', 'brand_category': self.association.pk}
+            for draft in drafts
+        ]
+        rejected = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
+        self.assertEqual(rejected.status_code, 400, rejected.data)
+        errors = rejected.data['field_errors']['row_errors']
+        self.assertEqual(set(errors), {str(draft.pk) for draft in drafts[:4]})
+        for draft in drafts[:2]:
+            self.assertIn('Duplicate code in batch', errors[str(draft.pk)]['product_code'])
+        self.assertIn('Already in catalogue', errors[str(drafts[2].pk)]['product_code'])
+        self.assertEqual(self.document.draft_items.filter(status='DRAFT').count(), 5)
+        self.assertFalse(Product.objects.filter(code='FRESH').exists())
+
+        for index in (1, 2, 3):
+            rows[index] = {'id': drafts[index].pk, 'approved': False}
+        published = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
+        self.assertEqual(published.status_code, 201, published.data)
+        self.assertEqual(len(published.data['items']), 2)
+        self.assertEqual(self.client.get(self.base + 'extract/').data['summary'], {
+            'pending': 0, 'published_from_document': 3, 'published_for_brand': 4,
+        })

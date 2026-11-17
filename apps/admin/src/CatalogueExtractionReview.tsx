@@ -11,7 +11,8 @@ type Category = {id: number; category__name: string; brand__company__legal_name:
 type Row = Draft & {approved: boolean; association: string};
 type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
   items_extracted?: number; skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
-type Review = {rows: Draft[]; categories: Category[];
+type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
+type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[];
   diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
@@ -56,6 +57,32 @@ async function requestExtraction(baseUrl: string, path: string, token: string, b
   } finally {
     clearTimeout(timer);
   }
+}
+
+function duplicateSelections(rows: Row[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<number>();
+  for (const row of rows) {
+    const code = row.product_code.trim();
+    if (!code) continue;
+    if (seen.has(code)) duplicates.add(row.id);
+    seen.add(code);
+  }
+  return duplicates;
+}
+
+function publishRowErrors(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+  function details(error: unknown): string {
+    if (typeof error === 'string') return error;
+    if (!error || typeof error !== 'object') return '';
+    if (Array.isArray(error)) return error.map(details).join(' ');
+    return Object.entries(error).filter(([field]) => field !== 'draft')
+      .map(([field, message]) => `${field.replaceAll('_', ' ')}: ${details(message)}`).join(' ');
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([id]) => /^\d+$/.test(id))
+    .map(([id, error]) => [id, details(error)]));
 }
 
 function Thumbnail({baseUrl, token, path}: {baseUrl: string; token: string; path: string}) {
@@ -116,11 +143,18 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [cancelPending, setCancelPending] = useState(false);
   const [pageProgress, setPageProgress] = useState<{done: number; total: number}>();
   const [publishFeedback, setPublishFeedback] = useState<{kind: 'pending' | 'success' | 'error'; message: string}>();
+  const [summary, setSummary] = useState<ReviewSummary>();
+  const [existingCodes, setExistingCodes] = useState<string[]>([]);
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const errorToFocus = useRef<string | undefined>(undefined);
   const publishing = useRef(false);
   const extraction = useRef<{cancelled: boolean} | null>(null);
 
   function applyReview(result: Review, preserveEdits: boolean) {
     setCategories(result.categories);
+    setSummary(result.summary);
+    setExistingCodes(result.existing_codes ?? []);
+    setRowErrors({});
     setDiagnostics(result.diagnostics);
     setRows(current => {
       const edits = preserveEdits ? new Map(current.map(row => [row.id, row])) : new Map<number, Row>();
@@ -243,19 +277,46 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   const pending = rows.filter(row => row.status === 'DRAFT');
   const categoryIds = new Set(categories.map(option => String(option.id)));
-  const isEligible = (row: Row) => row.status === 'DRAFT' && categoryIds.has(row.association);
+  const liveCodes = new Set(existingCodes);
+  const codeCounts = new Map<string, number>();
+  for (const row of pending) {
+    const code = row.product_code.trim();
+    if (code) codeCounts.set(code, (codeCounts.get(code) ?? 0) + 1);
+  }
+  const isEligible = (row: Row) => row.status === 'DRAFT' && categoryIds.has(row.association) && !liveCodes.has(row.product_code.trim());
   const eligible = pending.filter(isEligible);
   const eligibleCount = eligible.length;
-  const approvedCount = eligible.filter(row => row.approved).length;
-  const allSelected = eligibleCount > 0 && approvedCount === eligibleCount;
+  const selected = eligible.filter(row => row.approved);
+  const approvedCount = selected.length;
+  const redundant = duplicateSelections(selected);
+  const selectableCount = eligibleCount - duplicateSelections(eligible).size;
+  const allSelected = selectableCount > 0 && approvedCount === selectableCount && !redundant.size;
   const partiallySelected = approvedCount > 0 && !allSelected;
   const photosBusy = Object.values(photoRequests).some(photo => photo.busy);
+
+  useEffect(() => {
+    const first = errorToFocus.current;
+    errorToFocus.current = undefined;
+    if (!first) return;
+    const row = dialog.current?.querySelector<HTMLTableRowElement>(`[data-draft-id="${first}"]`);
+    row?.scrollIntoView({block: 'nearest'});
+    row?.focus({preventScroll: true});
+  }, [rowErrors]);
+
   function toggleAll() {
-    setRows(current => current.map(row => allSelected ? {...row, approved: false}
-      : isEligible(row) ? {...row, approved: true} : row));
+    const duplicates = duplicateSelections([...selected, ...eligible.filter(row => !row.approved)]);
+    setRows(current => current.map(row => ({
+      ...row, approved: !allSelected && isEligible(row) && !duplicates.has(row.id),
+    })));
   }
   function update(id: number, fields: Partial<Row>) {
     setRows(current => current.map(row => row.id === id ? {...row, ...fields} : row));
+    setRowErrors(current => {
+      if (!current[id]) return current;
+      const next = {...current};
+      delete next[id];
+      return next;
+    });
   }
 
   async function changePhoto(id: number, file: File | null) {
@@ -277,8 +338,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function commit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (publishing.current || busy || photosBusy || !approvedCount) return;
+    if (publishing.current || busy || photosBusy || !approvedCount || redundant.size) return;
     publishing.current = true;
+    setRowErrors({});
     setBusy(true);
     setError('');
     setPublishFeedback({kind: 'pending', message: `Publishing ${approvedCount} catalogue items…`});
@@ -300,12 +362,22 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       setRows(current => current.map(row => committed.has(row.id) ? {
         ...row, approved: false, status: committed.get(row.id) ? 'APPROVED' : 'DISCARDED',
       } : row));
+      const addedCodes = batch.flatMap(row => row.approved && row.product_code ? [row.product_code.trim()] : []);
+      setExistingCodes(current => [...current, ...addedCodes]);
+      setSummary(current => current && {
+        pending: Math.max(0, current.pending - batch.length),
+        published_from_document: current.published_from_document + result.items.length,
+        published_for_brand: current.published_for_brand + result.items.length,
+      });
       setPublishFeedback({kind: 'success', message: `${result.items.length} catalogue items published. ${result.discarded} drafts discarded.`});
       onCommit(result.items.length, result.discarded);
     } catch (failure) {
       const unconfirmed = controller.signal.aborted || (failure instanceof ApiError &&
         (failure.status === 0 || failure.status === 408 || failure.status >= 500));
-      const message = failure instanceof Error ? failure.message : 'Could not commit the selected items.';
+      const errors = failure instanceof ApiError ? publishRowErrors(failure.fieldErrors?.row_errors) : {};
+      errorToFocus.current = Object.keys(errors)[0];
+      setRowErrors(errors);
+      const message = Object.keys(errors).length ? 'Review the highlighted drafts and try again.' : failure instanceof Error ? failure.message : 'Could not commit the selected items.';
       setPublishFeedback({kind: 'error', message: unconfirmed
         ? `${controller.signal.aborted ? 'The publish request timed out.' : message} Reopen the review to check the draft status before retrying.`
         : message});
@@ -345,7 +417,11 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {error && <p role="alert">{error}</p>}
     {publishBanner('Publish status at top')}
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
-    {loaded && <p aria-live="polite">Showing {pending.length} extracted draft items</p>}
+    {loaded && <dl className="extraction-metrics" aria-label="Catalogue publish summary" aria-live="polite">
+      <div><dt>Pending drafts in this document</dt><dd>{pending.length}</dd></div>
+      <div><dt>Published from this document</dt><dd>{summary?.published_from_document ?? '—'}</dd></div>
+      <div><dt>Published for this brand</dt><dd>{summary?.published_for_brand ?? '—'}</dd></div>
+    </dl>}
     {batchStatus && <p role="status">{batchStatus}</p>}
     {extracting && pageProgress && <div className="extraction-progress">
       <progress aria-label="Pages processed in this extraction" value={pageProgress.done} max={pageProgress.total} />
@@ -382,9 +458,12 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           const photo = photoRequests[row.id];
           const imagePath = path + 'drafts/' + row.id + '/image/';
           const previewPath = row.image_url ? imagePath + new URL(row.image_url, window.location.origin).search : '';
-          return <tr key={row.id}>
+          const duplicate = row.status === 'DRAFT' && (codeCounts.get(row.product_code.trim()) ?? 0) > 1;
+          const alreadyExists = row.status === 'DRAFT' && liveCodes.has(row.product_code.trim());
+          return <tr key={row.id} data-draft-id={row.id} tabIndex={-1}
+            aria-label={`Draft ${row.id}`} className={rowErrors[row.id] ? 'catalogue-review-row-error' : undefined}>
             <td>{row.status === 'DRAFT' ? <input type="checkbox" aria-label={'Approve ' + row.product_code}
-              checked={row.approved} disabled={!editable || !isEligible(row)} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
+              checked={row.approved && !alreadyExists} disabled={!editable || !isEligible(row)} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
             <td>{row.page}</td>
             <td><div className="catalogue-review-photo">
               {previewPath && <Thumbnail key={previewPath} baseUrl={baseUrl} token={token} path={previewPath} />}
@@ -408,11 +487,16 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
             </div></td>
             <td><textarea rows={2} aria-label={'Name for row ' + row.id} value={row.name} maxLength={200} required={row.approved}
               disabled={!editable} onChange={event => update(row.id, {name: event.target.value})} />
+              {rowErrors[row.id] && <p className="action-message error" aria-label={`Error for draft ${row.id}`}>{rowErrors[row.id]}</p>}
               {row.pack_size?.standard && <div>Standard pack {row.pack_size.standard}</div>}
               {row.pack_size?.box_quantity && <div>Box quantity {row.pack_size.box_quantity}</div>}
             </td>
             <td><input aria-label={'Code for row ' + row.id} value={row.product_code} maxLength={100} required={row.approved}
-              disabled={!editable} onChange={event => update(row.id, {product_code: event.target.value})} /></td>
+              disabled={!editable} onChange={event => update(row.id, {product_code: event.target.value,
+                ...(liveCodes.has(event.target.value.trim()) ? {approved: false} : {})})} />
+              {duplicate && <span className="status-pill catalogue-review-code-badge" data-status="PENDING">Duplicate code in batch</span>}
+              {alreadyExists && <span className="status-pill catalogue-review-code-badge" data-status="PENDING">Already in catalogue</span>}
+            </td>
             <td><input aria-label={'HSN for row ' + row.id} value={row.hsn_sac_code} maxLength={8} required={row.approved}
               pattern={row.approved ? '[0-9]{4,8}' : undefined} disabled={!editable} onChange={event => update(row.id, {hsn_sac_code: event.target.value})} /></td>
             <td><input aria-label={'Price for row ' + row.id} type="text" inputMode="decimal" value={row.price_per_unit ?? ''}
@@ -432,12 +516,17 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           </tr>;
         })}</tbody>
       </table></div>
+      {!!pending.length && <p>Existing catalogue codes are skipped. Change the code to publish as a new item. Unselected drafts are discarded on publish.</p>}
       {!!pending.length && <div className="catalogue-review-selection">
-        <span aria-live="polite">{approvedCount} of {eligibleCount} items selected for approval</span>
+        <span aria-live="polite">{approvedCount} of {selectableCount} items selected for approval</span>
         <button type="button" className="button button-quiet" disabled={busy || !eligibleCount} onClick={toggleAll}>
-          {allSelected ? 'Clear selection' : `Select all (${eligibleCount})`}
+          {allSelected ? 'Clear selection' : `Select all (${selectableCount})`}
         </button>
-        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount}>
+        {!!redundant.size && <button type="button" className="btn-warning" disabled={busy}
+          onClick={() => setRows(current => current.map(row => redundant.has(row.id) ? {...row, approved: false} : row))}>
+          {`Uncheck duplicates (${redundant.size})`}
+        </button>}
+        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount || !!redundant.size}>
           {publishFeedback?.kind === 'pending' ? 'Committing & Publishing…' : `Commit & Publish (${approvedCount})`}
         </button>
       </div>}
