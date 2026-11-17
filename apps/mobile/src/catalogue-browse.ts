@@ -1,16 +1,7 @@
-import type {ApiClient, Product} from './api.ts';
+import type {ApiClient} from './api.ts';
 
 export type BrowseFilter = 'all' | 'stock' | 'pdf' | 'authorized';
 export type Availability = {authorized: boolean; inStock: boolean | null};
-
-export function matchesBrowseFilter(product: Product, filter: BrowseFilter, availability?: Availability) {
-  switch (filter) {
-    case 'pdf': return Boolean(product.catalogue_pdf_url);
-    case 'stock': return availability?.inStock === true;
-    case 'authorized': return availability?.authorized === true;
-    default: return true;
-  }
-}
 
 export async function loadBrowseAvailability(api: Pick<ApiClient, 'dealers'>, ids: number[], token: string, signal: AbortSignal) {
   const byProduct = new Map<number, Availability>();

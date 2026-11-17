@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from accounts.models import AccountType, BusinessProfile
 from accounts.permissions import IsActiveAccount
 from catalogue.models import Brand
+from catalogue.search import product_terms
 from catalogue.views import Pages, eligible_products
 from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
@@ -66,9 +67,12 @@ def filter_listings(request, qs, staff=False):
             if value not in values:
                 raise serializers.ValidationError({key: 'Invalid listing filter.'})
             qs = qs.filter(**{key: value})
-    search = request.query_params.get('search', '').strip()
-    if search:
-        qs = qs.filter(Q(product__name__icontains=search) | Q(product__code__icontains=search) | Q(variant__sku__icontains=search) | Q(location__branch_name__icontains=search) | Q(location__business__legal_name__icontains=search) | Q(product__brand_category__brand__name__icontains=search) | Q(product__brand_category__brand__company__legal_name__icontains=search))
+    for term in request.query_params.get('search', '').split():
+        qs = qs.filter(
+            product_terms(term, 'product__') | Q(variant__sku__icontains=term)
+            | Q(location__branch_name__icontains=term) | Q(location__business__legal_name__icontains=term)
+            | Q(product__brand_category__brand__company__legal_name__icontains=term)
+        )
     return qs
 
 
@@ -433,9 +437,11 @@ def authorization_filters(request, qs, staff=False):
         if active not in ['true', 'false']:
             raise serializers.ValidationError({'active': 'Use true or false.'})
         qs = qs.filter(active=active == 'true')
-    search = request.query_params.get('search', '').strip()
-    if search:
-        qs = qs.filter(Q(business__legal_name__icontains=search) | Q(brand__name__icontains=search) | Q(company__legal_name__icontains=search))
+    for term in request.query_params.get('search', '').split():
+        qs = qs.filter(
+            Q(business__legal_name__icontains=term) | Q(brand__name__icontains=term)
+            | Q(company__legal_name__icontains=term)
+        )
     return qs
 
 

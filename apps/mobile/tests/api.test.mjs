@@ -128,3 +128,19 @@ test('API base cannot smuggle query credentials into endpoint requests', async (
 test('selected SKU is sent to discovery before server pagination',async()=>{
  let requested;const api=new ApiClient('http://example.test/api/v1',async url=>{requested=url;return response({...page([listing]),match_level:'UNFILTERED'});});const value=await api.dealers(10,{variant:'7'},2,'token');assert.match(requested,/variant=7/);assert.match(requested,/page=2/);assert.equal(value.results[0].variant,7);
 });
+
+test('browse composes availability, brand, category and search on the server request', async () => {
+  const calls = [];
+  const api = new ApiClient('http://example.test/api/v1', async (url, init) => {
+    calls.push({params: new URL(url).searchParams, auth: init.headers.Authorization});
+    return response(page([]));
+  });
+  await api.products({search: ' Ashirvad 3917 ', brand: '4', category: '2', availability: 'stock'}, 1, undefined, 'fixture');
+  assert.deepEqual(Object.fromEntries(calls[0].params), {
+    page: '1', search: 'Ashirvad 3917', brand: '4', category: '2', availability: 'stock',
+  });
+  assert.equal(calls[0].auth, 'Bearer fixture');
+  await api.products({brand: '4', search: ''}, 1);
+  assert.deepEqual(Object.fromEntries(calls[1].params), {page: '1', brand: '4'});
+  assert.equal(calls[1].auth, undefined);
+});

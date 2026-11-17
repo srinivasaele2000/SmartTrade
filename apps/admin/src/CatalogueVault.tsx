@@ -22,7 +22,9 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
   const [subCategory, setSubCategory] = useState('');
   const [filterBusiness, setFilterBusiness] = useState('');
   const [filterSubCategory, setFilterSubCategory] = useState('');
+  const [search, setSearch] = useState('');
   const filters = new URLSearchParams();
+  if (search.trim()) filters.set('search', search.trim());
   if (filterBusiness) filters.set('business_type', filterBusiness);
   if (filterSubCategory) filters.set('sub_category', filterSubCategory);
   const page = useAdminPage<Document>(baseUrl, token, allowed ? path : '', filters.toString());
@@ -123,7 +125,10 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     {notice && <p role="status">{notice}</p>}
     {error && !edit && !remove && <p className="action-message error" role="alert">{error}</p>}
     <div className="decision-buttons" aria-label="Catalogue filters">
-      <label>Filter by business type <select value={filterBusiness} onChange={event => {
+      <label>Search catalogue documents <input type="search" placeholder="Title, brand or filename" value={search}
+        onChange={event => {setSearch(event.target.value); page.setNumber(1);}} /></label>
+      {search && <button type="button" className="btn-ghost" onClick={() => {setSearch(''); page.setNumber(1);}}>Clear document search</button>}
+      <label>Filter by business type <select aria-label="Filter by business type" value={filterBusiness} onChange={event => {
         setFilterBusiness(event.target.value); setFilterSubCategory(''); page.setNumber(1);
       }}>
         <option value="">All business types</option>
@@ -137,7 +142,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     </div>
     {page.error ? <><p role="alert">{page.error}</p><button onClick={page.reload}>Retry</button></>
       : !page.data ? <p role="status">Loading catalogue documents…</p>
-      : !page.data.results.length ? <p className="empty-state">{filterBusiness ? 'No catalogue documents match these filters.' : 'No catalogue documents have been uploaded.'}</p>
+      : !page.data.results.length ? <p className="empty-state">{filterBusiness || search.trim() ? 'No catalogue documents match these filters.' : 'No catalogue documents have been uploaded.'}</p>
       : <div className="onboarding-table"><table>
         <caption>Catalogue documents</caption>
         <thead><tr>{['Title', 'Brand', 'Business type', 'Sub-Business', 'File', 'Uploaded', 'Status', 'Actions'].map(value => <th key={value} scope="col">{value}</th>)}</tr></thead>

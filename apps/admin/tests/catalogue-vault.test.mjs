@@ -12,6 +12,8 @@ function fixture(requestApi = async () => {}) {
   const state = [];
   const calls = [];
   let hook = 0;
+  let filters;
+  let pageNumber;
   const imports = {
     react: {
       useEffect() {}, useRef: () => ({current: null}),
@@ -27,11 +29,11 @@ function fixture(requestApi = async () => {}) {
     './BusinessType': {catalogueBusinessTypes: {OTHER: 'Other'}, SUB_BUSINESS_TAXONOMY: {}},
     './india': {indianNumber: String, istDateTime: String},
     './CatalogueExtractionReview': {},
-    './useAdminPage': {useAdminPage: () => ({
+    './useAdminPage': {useAdminPage: (_base, _token, _path, query) => {filters = query; return {
       data: {results: [{key: 'pdf-id', title: 'Electrical price list', filename: 'prices.pdf',
         business_type: 'OTHER', content_type: 'application/pdf', is_active: true}]},
-      number: 1, reload() {calls.push('reload');},
-    })},
+      number: 1, setNumber(value) {pageNumber = value;}, reload() {calls.push('reload');},
+    };}},
   };
   const module = {exports: {}};
   new Function('require', 'module', 'exports', compiled)(name => imports[name], module, module.exports);
@@ -43,9 +45,9 @@ function fixture(requestApi = async () => {}) {
       else if (node?.props) {all.push(node); visit(node.props.children);}
     }
     visit(module.exports.default({baseUrl: '/api/v1', token: 'fixture', allowed: true}));
-    return (type, label) => all.find(node => node.type === type && node.props.children === label)?.props;
+    return (type, label) => all.find(node => node.type === type && (node.props.children === label || node.props.placeholder === label || node.props['aria-label'] === label))?.props;
   }
-  return {render, calls, validate: module.exports.validateVaultFileSize};
+  return {render, calls, filters: () => Object.fromEntries(new URLSearchParams(filters)), pageNumber: () => pageNumber, validate: module.exports.validateVaultFileSize};
 }
 
 test('Vault accepts 100 MB PDFs and keeps the 2 MB image limit', () => {
@@ -82,4 +84,16 @@ test('preview links have visible action classes and a separate close control', a
   assert.equal(render()('a', 'Open PDF in a new tab').className, 'action-link-btn');
   assert.equal(render()('button', 'Close preview').className, 'btn-ghost');
   URL.revokeObjectURL(render()('a', 'Download file').href);
+});
+
+test('Vault search combines with business type and clears without clearing the business type', () => {
+  const {render, filters, pageNumber} = fixture();
+  render()('select', 'Filter by business type').onChange({target: {value: 'OTHER'}});
+  render()('input', 'Title, brand or filename').onChange({target: {value: '  Ashirvad PDF  '}});
+  render();
+  assert.deepEqual(filters(), {search: 'Ashirvad PDF', business_type: 'OTHER'});
+  assert.equal(pageNumber(), 1);
+  render()('button', 'Clear document search').onClick();
+  render();
+  assert.deepEqual(filters(), {business_type: 'OTHER'});
 });

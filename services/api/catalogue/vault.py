@@ -82,6 +82,8 @@ def documents(request, *, staff=False):
         if sub_category not in allowed:
             raise serializers.ValidationError({'sub_category': 'Choose a supported sub-business for this filter.'})
         query = query.filter(sub_category=sub_category)
+    for term in request.query_params.get('search', '').split():
+        query = query.filter(Q(title__icontains=term) | Q(brand_name__icontains=term) | Q(filename__icontains=term))
     paginator = Pages()
     return paginator.get_paginated_response(DocumentMetadata(
         paginator.paginate_queryset(query, request), many=True, context={'staff': staff},

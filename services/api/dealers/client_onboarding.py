@@ -140,11 +140,15 @@ class DealerDirectory(StaffView):
             if business_type not in BusinessType.values:
                 raise serializers.ValidationError({'business_type': 'Choose a supported dealer business type.'})
             dealers = dealers.filter(business_type=business_type)
-        search = request.query_params.get('search', '').strip()
-        if search:
-            mobile = ''.join(search.split()).replace('-', '')
-            dealers = dealers.filter(Q(legal_name__icontains=search) | Q(gstin__icontains=search) |
-                                     Q(account__mobile_e164__icontains=mobile or search))
+        for term in request.query_params.get('search', '').split():
+            mobile = term.translate(str.maketrans('', '', '()-'))
+            match = (
+                Q(legal_name__icontains=term) | Q(gstin__icontains=term) | Q(owner_name__icontains=term)
+                | Q(registered_locality__icontains=term) | Q(registered_district__icontains=term)
+            )
+            if mobile:
+                match |= Q(account__mobile_e164__icontains=mobile)
+            dealers = dealers.filter(match)
         return page(request, dealers, DirectoryItem)
 
 

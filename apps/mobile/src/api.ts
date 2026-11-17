@@ -17,7 +17,7 @@ export type Listing = {
 };
 export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 export type Discovery = Page<Listing> & { match_level: string };
-export type CatalogueFilters = { search?: string; category?: string; brand?: string };
+export type CatalogueFilters = { search?: string; category?: string; brand?: string; availability?: 'stock' | 'authorized' | 'pdf' };
 export type BrandFilters = { search?: string; category?: string };
 export type DealerFilters = { variant?: string; pin_code?: string; locality?: string; district?: string; stock_status?: string; location?: string };
 
@@ -130,9 +130,9 @@ export class ApiClient {
   async post(path: string, data: unknown, token?: string) {
     return this.get(path, undefined, token, { method: 'POST', body: JSON.stringify(data) });
   }
-  async products(filters: CatalogueFilters, page: number, signal?: AbortSignal) {
+  async products(filters: CatalogueFilters, page: number, signal?: AbortSignal, token?: string) {
     if (filters.brand && !/^\d+$/.test(filters.brand.trim())) throw new ApiError('Brand ID must contain digits only.');
-    return mapPage(await this.get(`/catalogue/products?${query(filters, page)}`, signal), mapProduct);
+    return mapPage(await this.get(`/catalogue/products?${query(filters, page)}`, signal, token), mapProduct);
   }
   async product(id: number, signal?: AbortSignal) { return mapProduct(await this.get(`/catalogue/products/${id}`, signal)); }
   async categories(page: number, signal?: AbortSignal) {

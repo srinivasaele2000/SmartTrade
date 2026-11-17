@@ -2,7 +2,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Case, Q, When
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.parsers import JSONParser, MultiPartParser
@@ -12,6 +11,7 @@ from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
 from .media import attachment, media_url, storage, validate_file
+from .search import search_products
 from .models import BrandCategory, Product, ProductMedia
 from .views import Pages, audit, eligible_products, products
 
@@ -109,27 +109,7 @@ class CatalogueItems(APIView):
                 if not value.isdecimal():
                     raise serializers.ValidationError({parameter: 'Expected a numeric ID.'})
                 query = query.filter(**{field: value})
-        terms = request.query_params.get('search', '').split()
-        if terms:
-            phrase = ' '.join(terms)
-            code_match = Q(code__icontains=phrase)
-            name_match = Q()
-            secondary_match = Q()
-            for term in terms:
-                name_match &= Q(name__icontains=term)
-                secondary_match &= (
-                    Q(name__icontains=term) | Q(code__icontains=term) | Q(specifications__HSN__icontains=term)
-                    | Q(brand_category__brand__name__icontains=term)
-                    | Q(brand_category__category__name__icontains=term)
-                )
-            query = query.filter(code_match | name_match | secondary_match).alias(search_rank=Case(
-                When(code__iexact=phrase, then=0),
-                When(code__istartswith=phrase, then=1),
-                When(code_match, then=2),
-                When(name_match & Q(name__istartswith=terms[0]), then=3),
-                When(name_match, then=4),
-                default=5,
-            )).order_by('search_rank', 'pk')
+        query = search_products(query, request.query_params.get('search', ''), ranked=True)
         paginator = Pages()
         items = paginator.paginate_queryset(query, request)
         return paginator.get_paginated_response(ItemOutput(items, many=True, context={'request': request}).data)

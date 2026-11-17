@@ -24,7 +24,7 @@ import {PersonalProfile} from './src/Onboarding';
 import {RoleIdentity} from './src/RoleIdentity';
 import {CatalogueImage, CataloguePdf} from './src/CatalogueMedia';
 import {CategoryTile, ProductBrowseCard} from './src/CatalogueBrowseCards';
-import {loadBrowseAvailability, matchesBrowseFilter, type Availability, type BrowseFilter} from './src/catalogue-browse';
+import {loadBrowseAvailability, type Availability, type BrowseFilter} from './src/catalogue-browse';
 import EnquiryWorkspace from './src/EnquiryWorkspace';
 import OrderWorkspace from './src/OrderWorkspace';
 import OfflineDocumentsScreen from './src/OfflineDocumentsScreen';
@@ -76,7 +76,12 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
   const [filters, setFilters] = useState<CatalogueFilters>({});
   const [quickFilter, setQuickFilter] = useState<BrowseFilter>('all');
   const [page, setPage] = useState(1), [categoryPage, setCategoryPage] = useState(1), [brandPage, setBrandPage] = useState(1);
-  const products = useResource(useCallback(signal => api.products(filters, page, signal), [filters, page]));
+  const checksDealerAvailability = quickFilter === 'stock' || quickFilter === 'authorized';
+  const availabilityFilter = quickFilter === 'all' || (checksDealerAvailability && !token) ? undefined : quickFilter;
+  const availabilityToken = checksDealerAvailability ? token ?? undefined : undefined;
+  const products = useResource(useCallback(signal =>
+    api.products({...filters, availability: availabilityFilter}, page, signal, availabilityToken),
+  [filters, page, availabilityFilter, availabilityToken]));
   const categories = useResource(useCallback(signal => api.categories(categoryPage, signal), [categoryPage]));
   const brands = useResource(useCallback(signal => api.brands({category: filters.category}, brandPage, signal), [filters.category, brandPage]));
   const bannerFeed = useResource(useCallback(async signal => {
@@ -89,11 +94,11 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
     const subscription = AppState.addEventListener('change', state => {if (state === 'active') refreshBanners();});
     return () => subscription.remove();
   }, [dealerToken, refreshBanners]);
-  const productPage = products.state.status === 'ready' ? products.state.data : null;
+  const productPage = products.state.status === 'ready' && (!checksDealerAvailability || token)
+    ? products.state.data : null;
   const [availability, setAvailability] = useState<{
     page: typeof productPage; token: string; items: Map<number, Availability>;
   }>();
-  const [attempt, retryAvailability] = useState(0);
   useEffect(() => {
     if (!active || !token || !productPage?.results.length) return;
     const controller = new AbortController();
@@ -102,14 +107,9 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
       if (!controller.signal.aborted) setAvailability({page: productPage, token, items});
     });
     return () => controller.abort();
-  }, [active, productPage, token, attempt]);
+  }, [active, productPage, token]);
 
   const facts = availability && availability.page === productPage && availability.token === token ? availability.items : undefined;
-  const checksDealerAvailability = quickFilter === 'stock' || quickFilter === 'authorized';
-  const waitingForAvailability = Boolean(checksDealerAvailability && token && productPage?.results.length && !facts);
-  const visibleProducts = productPage?.results.filter(product => matchesBrowseFilter(product, quickFilter, facts?.get(product.id))) ?? [];
-  const incompleteAvailability = checksDealerAvailability && facts && productPage?.results.some(product =>
-    !facts.has(product.id) || (quickFilter === 'stock' && facts.get(product.id)?.inStock === null));
   const selectCategory = (category?: string) => {
     setFilters(current => ({...current, category, brand: undefined}));
     setPage(1); setBrandPage(1);
@@ -144,7 +144,13 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
     <View style={s.browseHeader}>
       <View style={s.searchRow}>
         <TextInput accessibilityLabel="Search products, codes or SKUs" placeholder="Name, code, HSN or brand"
-          value={search} onChangeText={setSearch} onSubmitEditing={submitSearch}
+          value={search} onChangeText={value => {
+            setSearch(value);
+            if (!value.trim() && filters.search) {
+              setFilters(current => ({...current, search: undefined}));
+              setPage(1);
+            }
+          }} onSubmitEditing={submitSearch}
           autoCorrect={false} returnKeyType="search" style={[s.input, s.searchInput]} />
         {!!search && <Button variant="tertiary" compact title="×" accessibilityLabel="Clear search" onPress={() => {
           setSearch(''); setFilters(current => ({...current, search: undefined})); setPage(1);
@@ -168,7 +174,7 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
             onPress={() => {setFilters(current => ({...current, brand: String(brand.id)})); setPage(1);}} />)}
         </>}
         {quickFilters.map(([value, label]) => <Pressable key={value} accessibilityRole="button"
-          accessibilityState={{selected: quickFilter === value}} hitSlop={{top: 6, bottom: 6}} onPress={() => setQuickFilter(value)}
+          accessibilityState={{selected: quickFilter === value}} hitSlop={{top: 6, bottom: 6}} onPress={() => {setQuickFilter(value); setPage(1);}}
           style={[s.chip, quickFilter === value && s.chipSelected]}>
           <Text style={[s.chipLabel, quickFilter === value && s.chipLabelSelected]}>{label}</Text>
         </Pressable>)}
@@ -188,28 +194,21 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
       </>}
       <View style={s.row}>
         <Text accessibilityRole="header" style={s.heading}>{productPage
-          ? quickFilter === 'all' ? `${productPage.count} matching products` : `${visibleProducts.length} matches on this page`
+          ? `${productPage.count} matching products`
           : 'Products'}</Text>
-        {(search || filters.category || filters.brand || quickFilter !== 'all') &&
+        {(search || filters.search || filters.category || filters.brand || quickFilter !== 'all') &&
           <Button variant="tertiary" title="Clear filters" onPress={clearFilters} />}
       </View>
       {nearby && <Button variant="secondary" title="Find nearby verified dealers" onPress={() => nearby(filters)} />}
       <Feedback {...products} />
       {checksDealerAvailability && !token && <Text style={s.body}>Sign in to check stock and find listings from authorized dealers.</Text>}
-      {waitingForAvailability && <View style={s.row}><ActivityIndicator /><Text>Checking dealer availability…</Text></View>}
-      {incompleteAvailability && <View style={s.panel}><Text>Some dealer listings couldn’t be checked.</Text>
-        <Button variant="tertiary" title="Retry availability" onPress={() => {setAvailability(undefined); retryAvailability(n => n + 1);}} />
-      </View>}
       {productPage && <>
-        {(!checksDealerAvailability || token) && !waitingForAvailability && <>
-          {visibleProducts.length === 0 && !incompleteAvailability && <View style={s.panel}><Text>{
-            quickFilter !== 'all' ? 'No products on this page match this quick filter. Try another filter or check the next page.'
-              : filters.search ? `No products found for “${filters.search}”. Check the spelling or browse categories.`
-              : 'No products match these filters. Clear filters or browse another category.'
-          }</Text></View>}
-          <View style={s.productList}>{visibleProducts.map(product => <ProductBrowseCard key={product.id} product={product} apiBase={api.base}
-            availability={facts?.get(product.id)} onOpen={() => open(product.id)} />)}</View>
-        </>}
+        {productPage.count === 0 && <View style={s.panel}><Text>{
+          filters.search ? `No products found for “${filters.search}”. Check the spelling or adjust your filters.`
+            : 'No products match these filters. Clear filters or browse another category.'
+        }</Text></View>}
+        <View style={s.productList}>{productPage.results.map(product => <ProductBrowseCard key={product.id} product={product} apiBase={api.base}
+          availability={facts?.get(product.id)} onOpen={() => open(product.id)} />)}</View>
         <Pager page={page} {...productPage} onPage={setPage} />
       </>}
     </View>

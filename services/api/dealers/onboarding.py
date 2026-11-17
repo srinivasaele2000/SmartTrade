@@ -126,9 +126,8 @@ class DeclarationBrands(DealerView):
         if set(categories) - CATEGORIES.keys():
             raise serializers.ValidationError({'category': 'Choose a supported dealer category.'})
         options = brand_options(categories)
-        search = request.query_params.get('search', '').strip()
-        if search:
-            options = options.filter(Q(name__icontains=search) | Q(company__legal_name__icontains=search))
+        for term in request.query_params.get('search', '').split():
+            options = options.filter(Q(name__icontains=term) | Q(company__legal_name__icontains=term))
         return page(request, options, BrandOption)
 
 

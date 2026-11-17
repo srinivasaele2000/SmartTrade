@@ -32,6 +32,27 @@ class CatalogueVaultTests(TestCase):
         return self.client.post(self.staff, {'file': file, 'business_type': business_type,
                                              'brand_name': 'Disposable brand', 'title': 'Catalogue sheet', **fields})
 
+    def test_document_search_composes_with_taxonomy_before_pagination(self):
+        for name, brand, business_type, sub_category, is_active in (
+            ('General.pdf', 'Skipper', 'ELECTRICAL', 'LIGHTING', True),
+            ('Q2-Prices.pdf', 'Ashirvad', 'ELECTRICAL', 'LIGHTING', True),
+            ('Q2-Prices.pdf', 'Ashirvad', 'NETWORKING', '', True),
+            ('Old-Prices.pdf', 'Ashirvad', 'ELECTRICAL', 'LIGHTING', False),
+        ):
+            CatalogueDocument.objects.create(
+                business_type=business_type, sub_category=sub_category, brand_name=brand, title='Master catalogue',
+                filename=name, content_type='application/pdf', file_size_bytes=1, is_active=is_active,
+            )
+        filters = {'search': ' ASHIRVAD  prices ', 'business_type': 'ELECTRICAL',
+                   'sub_category': 'LIGHTING', 'page_size': 1}
+        result = self.client.get(self.public, filters)
+        self.assertEqual(result.data['count'], 1)
+        self.assertEqual(result.data['results'][0]['filename'], 'Q2-Prices.pdf')
+        grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])
+        self.client.force_authenticate(self.moderator)
+        self.assertEqual(self.client.get(self.staff, filters).data['count'], 2)
+        self.assertEqual(self.client.get(self.public, filters | {'search': ' '}).data['count'], 2)
+
     def test_pdf_filter_download_and_soft_delete(self):
         buffer = BytesIO()
         pdf = Canvas(buffer)

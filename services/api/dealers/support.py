@@ -169,12 +169,15 @@ class AdminInbox(AdminSupport):
         threads = AdminSupportThread.objects.filter(last_message_at__isnull=False)
         unread = threads.aggregate(total=Sum('admin_unread_count'))['total'] or 0
         query = request.query_params.get('q', '').strip()[:120]
-        if query:
-            threads = threads.filter(
-                Q(dealer__legal_name__icontains=query) | Q(dealer__owner_name__icontains=query)
-                | Q(dealer__account__mobile_e164__icontains=query.replace(' ', '').replace('-', ''))
-                | Q(dealer__registered_district__icontains=query) | Q(dealer__registered_locality__icontains=query)
+        for term in query.split():
+            phone = term.translate(str.maketrans('', '', '()-'))
+            match = (
+                Q(dealer__legal_name__icontains=term) | Q(dealer__owner_name__icontains=term)
+                | Q(dealer__registered_district__icontains=term) | Q(dealer__registered_locality__icontains=term)
             )
+            if phone:
+                match |= Q(dealer__account__mobile_e164__icontains=phone)
+            threads = threads.filter(match)
         paginator = Pages()
         page = paginator.paginate_queryset(threads.select_related('dealer__account').order_by('-last_message_at', '-pk'), request)
         response = paginator.get_paginated_response([thread_data(thread) for thread in page])

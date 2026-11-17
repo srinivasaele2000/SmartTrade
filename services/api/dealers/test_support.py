@@ -61,7 +61,7 @@ class SupportTests(TestCase):
                 posted = client.post(path + 'messages/', content, format='multipart')
                 self.assertEqual(posted.status_code, 201, posted.data)
                 self.assertEqual(posted.data['sender_role'], role)
-        for term in ('Northside', '9800000071'):
+        for term in ('Northside', '9800000071', ' ELECTRICALS   northside ', '(+91) 98000-00071'):
             inbox = self.admin.get(self.admin_path, {'q': term}).data
             self.assertEqual(inbox['count'], 1)
             self.assertEqual(inbox['total_unread'], 3)

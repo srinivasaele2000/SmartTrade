@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {loadBrowseAvailability, matchesBrowseFilter} from '../src/catalogue-browse.ts';
-
-test('catalogue quick filters use PDF metadata and confirmed dealer results', () => {
-  const product = {catalogue_pdf_url: '/media/catalogue/fixture'};
-  assert.equal(matchesBrowseFilter(product, 'pdf'), true);
-  assert.equal(matchesBrowseFilter({}, 'pdf'), false);
-  assert.equal(matchesBrowseFilter(product, 'stock'), false);
-  assert.equal(matchesBrowseFilter(product, 'stock', {authorized: true, inStock: null}), false);
-  assert.equal(matchesBrowseFilter(product, 'stock', {authorized: true, inStock: true}), true);
-  assert.equal(matchesBrowseFilter(product, 'authorized', {authorized: true, inStock: false}), true);
-});
+import {loadBrowseAvailability} from '../src/catalogue-browse.ts';
 
 test('availability checks later stock pages and preserves unknowns on request failure', async () => {
   const calls = [];

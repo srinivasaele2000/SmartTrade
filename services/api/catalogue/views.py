@@ -1,5 +1,5 @@
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers
 from rest_framework.exceptions import PermissionDenied
@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
 from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductVariant
+from .search import search_products
 from .serializers import BrandSerializer, BrandCategorySerializer, CategorySerializer, ProductSerializer, PublicBrandSerializer, VariantSerializer
 
 
@@ -68,18 +69,28 @@ class PublicProducts(generics.ListAPIView):
                 if not value.isdecimal():
                     raise serializers.ValidationError({param: 'Expected a numeric ID.'})
                 qs = qs.filter(**{field: value})
-        search = self.request.query_params.get('search', '').strip()
-        for term in search.split():
-            qs = qs.filter(
-                Q(name__icontains=term)
-                | Q(code__icontains=term)
-                | Q(specifications__HSN__icontains=term)
-                | Q(description__icontains=term)
-                | Q(brand_category__brand__name__icontains=term)
-                | Q(brand_category__category__name__icontains=term)
-                | (Q(variants__active=True) & (Q(variants__sku__icontains=term) | Q(variants__name__icontains=term)))
-            )
-        return qs.distinct()
+        availability = self.request.query_params.get('availability', '').strip().lower()
+        if availability == 'pdf':
+            qs = qs.filter(official_media__kind='catalogue-pdf')
+        elif availability in ('stock', 'authorized'):
+            from accounts.permissions import IsActiveAccount
+            from dealers.views import eligible_listings
+
+            if not IsActiveAccount().has_permission(self.request, self):
+                raise PermissionDenied('Sign in to check dealer availability.')
+            listings = eligible_listings().filter(product_id=OuterRef('pk'))
+            if availability == 'stock':
+                listings = listings.filter(stock_status='IN_STOCK')
+            qs = qs.filter(Exists(listings))
+        elif availability:
+            raise serializers.ValidationError({'availability': 'Choose a supported availability filter.'})
+        return search_products(qs, self.request.query_params.get('search', ''))
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        if request.query_params.get('availability', '').strip().lower() in ('stock', 'authorized'):
+            response['Cache-Control'] = 'private, no-store'
+        return response
 
 
 class PublicBrands(generics.ListAPIView):
@@ -104,9 +115,8 @@ class PublicBrands(generics.ListAPIView):
                 category_links__category_id=category,
                 category_links__products__in=eligible_products(),
             )
-        search = self.request.query_params.get('search', '').strip()
-        if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(company__legal_name__icontains=search))
+        for term in self.request.query_params.get('search', '').split():
+            qs = qs.filter(Q(name__icontains=term) | Q(company__legal_name__icontains=term))
         return qs.distinct().order_by('name', 'pk')
 
 
@@ -154,8 +164,7 @@ class OwnerCatalogue(APIView):
         qs, serializer = options[resource]
         if resource == 'products':
             search = request.query_params.get('search', '').strip()
-            if search:
-                qs = qs.filter(name__icontains=search)
+            qs = search_products(qs, search)
             state = request.query_params.get('state')
             if state:
                 if state not in ['DRAFT', 'PUBLISHED', 'ARCHIVED']:
@@ -254,7 +263,7 @@ class StaffProducts(generics.ListAPIView):
     def get_queryset(self):
         qs = products()
         search = self.request.query_params.get('search', '').strip()
-        return qs.filter(name__icontains=search) if search else qs
+        return search_products(qs, search)
 
 
 class ModerateProduct(APIView):

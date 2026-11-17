@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import { inr, istDateTime } from './india';
 
@@ -11,8 +11,20 @@ type Page={count:number;next:string|null;previous:string|null;results:Enquiry[]}
 export default function Enquiries({baseUrl,token,permissions}:{baseUrl:string;token:string;permissions:string[]}){
  const allowed=permissions.includes('READ_REPORTS');
  const[page,setPage]=useState(1),[state,setState]=useState(''),[applied,setApplied]=useState(''),[data,setData]=useState<Page>({count:0,next:null,previous:null,results:[]}),[selected,setSelected]=useState<Enquiry|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[version,setVersion]=useState(0);
- const load=useCallback(async()=>{if(!allowed)return;setLoading(true);setError('');try{const suffix=applied?`&state=${encodeURIComponent(applied)}`:'';const value=await requestApi<Page>(baseUrl,`/staff/enquiries?page=${page}${suffix}`,token);ensureList(value,true);setData(value);}catch(failure){setError(failure instanceof Error?failure.message:'Enquiries unavailable.');}finally{setLoading(false)}},[allowed,applied,baseUrl,page,token,version]);
- useEffect(()=>{void load()},[load]);
+ useEffect(() => {
+   if (!allowed) return;
+   const controller = new AbortController();
+   setLoading(true); setError('');
+   const params = new URLSearchParams({page: String(page)});
+   if (applied) params.set('state', applied);
+   void requestApi<Page>(baseUrl, `/staff/enquiries?${params}`, token, {signal: controller.signal})
+     .then(value => {ensureList(value, true); if (!controller.signal.aborted) setData(value);})
+     .catch(failure => {
+       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Enquiries unavailable.');
+     })
+     .finally(() => {if (!controller.signal.aborted) setLoading(false);});
+   return () => controller.abort();
+ }, [allowed, applied, baseUrl, page, token, version]);
  async function inspect(id:number){setError('');try{setSelected(await requestApi<Enquiry>(baseUrl,`/staff/enquiries/${id}`,token));}catch(failure){setError(failure instanceof Error?failure.message:'Enquiry detail unavailable.')}}
  function filter(event:FormEvent){event.preventDefault();setApplied(state);setPage(1)}
  if(!allowed)return <section className="state-panel"><h2>Enquiries and quotations</h2><p>READ_REPORTS permission is required to inspect buyer and dealer quotation activity.</p></section>;

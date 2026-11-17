@@ -115,7 +115,11 @@ class StaffOrders(APIView):
         qs=records(); query=request.query_params.get('q','').strip(); state=request.query_params.get('state','').strip().upper(); kind=request.query_params.get('invoice_kind','').strip().upper()
         if state and state not in Order.State.values: raise ValidationError({'state':'Choose a valid order state.'})
         if kind and kind not in Invoice.Kind.values: raise ValidationError({'invoice_kind':'Choose a valid invoice kind.'})
-        if query: qs=qs.filter(Q(order_number__icontains=query)|Q(business__legal_name__icontains=query)|Q(branch__branch_name__icontains=query)|Q(invoice__invoice_number__icontains=query))
+        for term in query.split():
+            qs = qs.filter(
+                Q(order_number__icontains=term) | Q(business__legal_name__icontains=term)
+                | Q(branch__branch_name__icontains=term) | Q(invoice__invoice_number__icontains=term)
+            )
         if state: qs=qs.filter(state=state)
         if kind: qs=qs.filter(invoice__kind=kind)
         return page(request,qs)

@@ -148,7 +148,7 @@ class ClientOnboardingTests(TestCase):
         reviewer = make_account('+919800000073', 'STAFF')
         grant_staff_permissions(reviewer, ['REVIEW_BUSINESS'])
         self.client.force_authenticate(reviewer)
-        for search in ('directory electric', '+91 98000 00071', '36aabcv5678b1zv'):
+        for search in ('directory electric', '+91 98000 00071', '36aabcv5678b1zv', 'ranigunj  ELECTRIC fixture'):
             listing = self.client.get(self.directory, {'search': search, 'business_type': 'ELECTRICAL'})
             self.assertEqual(listing.data['count'], 1)
             self.assertNotIn('worker_contacts', listing.data['results'][0])

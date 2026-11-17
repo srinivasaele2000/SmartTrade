@@ -50,6 +50,23 @@ class DealerTests(TestCase):
     def discover(self, **filters):
         return self.client.get('/api/v1/dealers/listings', filters)
 
+    def test_catalogue_availability_requires_auth_and_filters_before_pagination(self):
+        other = Product.objects.create(brand_category=self.link, name='Heavy hammer', code='H2',
+                                       unit='piece', state='PUBLISHED')
+        self.create_listing(product=other.pk)
+        self.create_listing(stock_status='OUT_OF_STOCK', quantity='0')
+        route = '/api/v1/catalogue/products'
+        query = {'availability': 'stock', 'search': 'supplier hammer', 'brand': self.brand.pk, 'page_size': 1}
+        self.assertIn(APIClient().get(route, query).status_code, (401, 403))
+        stock = self.client.get(route, query)
+        self.assertEqual(stock.status_code, 200, stock.data)
+        self.assertEqual(stock.data['count'], 1)
+        self.assertEqual(stock.data['results'][0]['id'], other.pk)
+        self.assertEqual(stock['Cache-Control'], 'private, no-store')
+        self.assertEqual(self.client.get(route, query | {'availability': 'authorized'}).data['count'], 2)
+        self.grant(active=False)
+        self.assertEqual(self.client.get(route, query).data['count'], 0)
+
     def test_nearby_discovery_radius_manual_filters_and_visibility(self):
         url = '/api/v1/dealers/discover/'
         client = APIClient()
@@ -79,6 +96,10 @@ class DealerTests(TestCase):
         self.assertIsNone(mixed[-1]['distance_km'])
         self.assertEqual(mixed[0]['matched_items_count'], 1)
         self.assertNotIn('contact_email', mixed[0])
+        self.assertEqual(client.get(url, {'city': 'Bengaluru', 'q': 'furthest H1'}).data['count'], 0)
+        self.assertEqual([row['id'] for row in client.get(
+            url, {'city': 'Bengaluru', 'q': '  nearest   HARDWARE  h1 ', 'category_id': self.category.pk},
+        ).data['results']], [nearest])
         for params in ({'area': 'market'}, {'pincode': '560001'}, {'city': 'Bengaluru', 'category_id': self.category.pk}):
             self.assertEqual(client.get(url, params).data['count'], 3)
         self.assertEqual(client.get(url, {'city': 'Bengaluru', 'brand_id': self.brand.pk + 999}).data['count'], 0)
@@ -474,7 +495,7 @@ class DealerTests(TestCase):
 
     def test_listing_search_filters_scope_and_readonly_metadata(self):
         pk = self.create_listing(variant=self.variant.pk)
-        self.assertEqual(self.client.get(self.base, {'search': self.variant.sku, 'state': 'PUBLISHED', 'stock_status': 'IN_STOCK'}).data['count'], 1)
+        self.assertEqual(self.client.get(self.base, {'search': 'supplier  hammer red HARDWARE', 'state': 'PUBLISHED', 'stock_status': 'IN_STOCK'}).data['count'], 1)
         self.assertEqual(self.client.get(self.base, {'search': 'missing'}).data['count'], 0)
         for values in [{'state': 'DRAFT'}, {'stock_status': 'INVALID'}, {'location': 'bad'}]:
             self.assertEqual(self.client.get(self.base, values).status_code, 400)

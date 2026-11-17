@@ -36,8 +36,14 @@ export default function NearbyDealersScreen({api, token, item, brand, category, 
   const [radius, setRadius] = useState('25');
   const [page, setPage] = useState(1);
   const [changing, setChanging] = useState(!location.location);
-  const brands = useResource(useCallback(signal => api.get('/catalogue/brands?page_size=100', signal, token ?? undefined) as Promise<Page<{id: number; name: string}>>, [api, token]));
-  const categories = useResource(useCallback(signal => api.get('/catalogue/categories?page_size=100', signal, token ?? undefined) as Promise<Page<{id: number; name: string}>>, [api, token]));
+  const [brandPage, setBrandPage] = useState(1);
+  const [categoryPage, setCategoryPage] = useState(1);
+  const brands = useResource(useCallback(signal => api.brands({}, brandPage, signal), [api, brandPage]));
+  const categories = useResource(useCallback(signal => api.categories(categoryPage, signal), [api, categoryPage]));
+  const submitSearch = () => {
+    setFilters(current => ({...current, q: search.trim() || undefined}));
+    setPage(1);
+  };
   const selected = location.location;
   const results = useResource(useCallback(async signal => {
     if (!selected) return null;
@@ -91,13 +97,18 @@ export default function NearbyDealersScreen({api, token, item, brand, category, 
         <Button key={value} variant="navigation" title={`${value} km`} selected={radius === value} onPress={() => {setRadius(value); setPage(1);}} />)}</ScrollView>}
       {!item && <>
         <TextInput style={styles.input} accessibilityLabel="Search nearby dealers" placeholder="Search dealers, brands or items" maxLength={120}
-          value={search} onChangeText={setSearch} onSubmitEditing={() => {setFilters(current => ({...current, q: search.trim() || undefined})); setPage(1);}} />
-        <Button variant="secondary" title="Search nearby dealers" onPress={() => {setFilters(current => ({...current, q: search.trim() || undefined})); setPage(1);}} />
-        {([[brands, 'brand_id', 'All brands'], [categories, 'category_id', 'All categories']] as const).map(([resource, key, label]) =>
+          value={search} onChangeText={setSearch} onSubmitEditing={submitSearch} />
+        <Button variant="secondary" title="Search nearby dealers" onPress={submitSearch} />
+        {!!(search || filters.q || filters.brand_id || filters.category_id) && <Button variant="tertiary"
+          title="Clear dealer filters" onPress={() => {setSearch(''); setFilters({}); setPage(1);}} />}
+        {([[brands, 'brand_id', 'All brands', setBrandPage], [categories, 'category_id', 'All categories', setCategoryPage]] as const).map(([resource, key, label, changePage]) =>
           <ScrollView key={key} horizontal contentContainerStyle={styles.pills}>
             <Button variant="navigation" title={label} selected={!filters[key]} onPress={() => {setFilters(current => ({...current, [key]: undefined})); setPage(1);}} />
             {resource.state.data?.results.map(option => <Button key={option.id} variant="navigation" title={option.name} selected={filters[key] === String(option.id)}
               onPress={() => {setFilters(current => ({...current, [key]: String(option.id)})); setPage(1);}} />)}
+            {resource.state.data?.previous && <Button variant="tertiary" title={key === 'brand_id' ? 'Previous brands' : 'Previous categories'} onPress={() => changePage(value => value - 1)} />}
+            {resource.state.data?.next && <Button variant="tertiary" title={key === 'brand_id' ? 'More brands' : 'More categories'} onPress={() => changePage(value => value + 1)} />}
+            {resource.state.status === 'error' && <Button variant="tertiary" title={key === 'brand_id' ? 'Retry brands' : 'Retry categories'} onPress={resource.retry} />}
           </ScrollView>)}
       </>}
       {selected && results.state.status === 'loading' && <ActivityIndicator accessibilityLabel="Finding nearby dealers" />}

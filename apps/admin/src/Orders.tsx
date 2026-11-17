@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import { inr, istDateTime } from './india';
 
@@ -18,20 +18,24 @@ export default function Orders({ baseUrl, token, permissions }: { baseUrl: strin
   const [query, setQuery] = useState('');
   const [state, setState] = useState('');
   const [kind, setKind] = useState('');
+  const [page, setPage] = useState(1);
+  const loadId = useRef(0);
   const load = useCallback(async () => {
     if (!allowed) return;
+    const id = ++loadId.current;
     setLoading(true); setError('');
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({page: String(page)});
       if (query.trim()) params.set('q', query.trim());
       if (state) params.set('state', state);
       if (kind) params.set('invoice_kind', kind);
       const response = await requestApi<Page>(baseUrl, `/staff/orders${params.size ? `?${params}` : ''}`, token);
-      ensureList(response, true); setData(response);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Orders unavailable.'); }
-    finally { setLoading(false); }
-  }, [allowed, baseUrl, token, version, query, state, kind]);
-  useEffect(() => { void load(); }, [load]);
+      ensureList(response, true);
+      if (id === loadId.current) setData(response);
+    } catch (caught) { if (id === loadId.current) setError(caught instanceof Error ? caught.message : 'Orders unavailable.'); }
+    finally { if (id === loadId.current) setLoading(false); }
+  }, [allowed, baseUrl, token, version, query, state, kind, page]);
+  useEffect(() => { void load(); return () => { loadId.current++; }; }, [load]);
   async function inspect(id: number) {
     try { setSelected(await requestApi<Order>(baseUrl, `/staff/orders/${id}`, token)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Order unavailable.'); }
@@ -41,12 +45,18 @@ export default function Orders({ baseUrl, token, permissions }: { baseUrl: strin
     <h2>Orders and invoices</h2>
     <p>Read-only inspection of immutable commercial records. Staff cannot alter order or invoice state here.</p>
     <div className="filter-grid">
-      <label>Search<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Order, invoice, dealer or branch" /></label>
-      <label>Order state<select value={state} onChange={event => setState(event.target.value)}><option value="">All states</option>{['PENDING', 'CONFIRMED', 'REJECTED', 'PROCESSING', 'READY', 'COMPLETED', 'CANCELLED'].map(value => <option key={value}>{value}</option>)}</select></label>
-      <label>Invoice type<select value={kind} onChange={event => setKind(event.target.value)}><option value="">All invoices</option><option value="TAX_INVOICE">Tax invoice</option><option value="BILL_OF_SUPPLY">Bill of supply</option></select></label>
+      <label>Search<input value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} placeholder="Order, invoice, dealer or branch" /></label>
+      <label>Order state<select value={state} onChange={event => { setState(event.target.value); setPage(1); }}><option value="">All states</option>{['PENDING', 'CONFIRMED', 'REJECTED', 'PROCESSING', 'READY', 'COMPLETED', 'CANCELLED'].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Invoice type<select value={kind} onChange={event => { setKind(event.target.value); setPage(1); }}><option value="">All invoices</option><option value="TAX_INVOICE">Tax invoice</option><option value="BILL_OF_SUPPLY">Bill of supply</option></select></label>
     </div>
     <button className="button button-quiet" onClick={() => setVersion(value => value + 1)}>Refresh</button>
-    {loading ? <p>Loading orders…</p> : error ? <p role="alert">{error}</p> : <>{data.results.length === 0 && <p className="empty-state">No orders found.</p>}{data.results.map(order => <article className="detail-card" key={order.id}><div className="record-heading"><h3>{order.order_number}</h3><span className="status-pill" data-status={order.state}>{order.state}</span></div><p>Buyer {order.buyer_id} · {order.dealer_business_name} / {order.branch_name} · {istDateTime(order.created_at)}</p><p>Accepted quotation snapshot total {inr(order.total)}</p><button className="btn-secondary" onClick={() => void inspect(order.id)}>Inspect order</button></article>)}</>}
+    {loading ? <p>Loading orders…</p> : error ? <p role="alert">{error}</p> : <>{data.results.length === 0 && <p className="empty-state">No orders found.</p>}{data.results.map(order => <article className="detail-card" key={order.id}><div className="record-heading"><h3>{order.order_number}</h3><span className="status-pill" data-status={order.state}>{order.state}</span></div><p>Buyer {order.buyer_id} · {order.dealer_business_name} / {order.branch_name} · {istDateTime(order.created_at)}</p><p>Accepted quotation snapshot total {inr(order.total)}</p><button className="btn-secondary" onClick={() => void inspect(order.id)}>Inspect order</button></article>)}
+      <div className="decision-buttons">
+        <button className="button button-quiet" disabled={!data.previous} onClick={() => setPage(page - 1)}>Previous</button>
+        <span>Page {page} · {data.count} orders</span>
+        <button className="button button-quiet" disabled={!data.next} onClick={() => setPage(page + 1)}>Next</button>
+      </div>
+    </>}
     {selected && <article className="detail-card"><h3>{selected.order_number} history</h3>{selected.items.map(item => <p key={item.id}>{item.product_name} · {item.variant_sku || 'product-level'} · {item.quantity} × {inr(item.unit_price)} = {inr(item.line_total)}</p>)}<h4>Order status history</h4>{selected.audit?.map(event => <p key={event.id}>{event.action} · {istDateTime(event.occurred_at)}{event.reason ? ` · ${event.reason}` : ''}</p>)}{selected.invoice ? <><h4>{selected.invoice.kind.replaceAll('_', ' ')} {selected.invoice.invoice_number}</h4><p>Issued {istDateTime(selected.invoice.issued_at)} · Grand total {inr(selected.invoice.grand_total)}</p><p>CGST {inr(selected.invoice.cgst_total)} · SGST {inr(selected.invoice.sgst_total)} · IGST {inr(selected.invoice.igst_total)}</p>{selected.invoice_audit?.map(event => <p key={event.id}>{event.action} · {istDateTime(event.occurred_at)}</p>)}</> : <p>No invoice issued.</p>}</article>}
   </section>;
 }

@@ -113,7 +113,8 @@ class NearbyDealers(APIView):
                 continue
             nearby.append((distance, branch))
         prefetch_related_objects([branch for _, branch in nearby], Prefetch(
-            'listings', queryset=listings.select_related('product__brand_category__category'),
+            'listings', queryset=listings.select_related('product__brand_category__category',
+                                                      'product__draftcatalogueitem__source_document'),
             to_attr='discovery_listings',
         ))
         matches = []
@@ -122,8 +123,15 @@ class NearbyDealers(APIView):
             def matches_search(offer):
                 product = offer.product
                 association = product.brand_category
-                haystack = ' '.join((branch.business.legal_name, product.name, product.code,
-                                     association.brand.name, association.category.name)).casefold()
+                draft = getattr(product, 'draftcatalogueitem', None)
+                sub_category = draft.source_document.sub_category if draft else ''
+                variant = offer.variant
+                haystack = ' '.join((
+                    branch.business.legal_name, branch.branch_name, product.name, product.code, product.description,
+                    str(product.specifications), association.brand.name, association.category.name, sub_category,
+                    variant.sku if variant else '', variant.name if variant else '',
+                    str(variant.attributes) if variant else '',
+                )).casefold()
                 return all(term in haystack for term in terms)
             matching = [offer for offer in offers if matches_search(offer)]
             if not matching and (item_id is not None or 'brand_id' in values or 'category_id' in values

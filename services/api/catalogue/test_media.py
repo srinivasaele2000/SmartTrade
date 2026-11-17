@@ -13,7 +13,7 @@ from accounts.models import AccountType
 from companies.models import CompanyProfile
 from companies.tests import grant_staff_permissions, make_account
 from dealers.models import AuthorizedDealerGrant, DealerLocation, DealerProductListing
-from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductMedia
+from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductMedia, ProductVariant
 
 
 def png(color='red'):
@@ -83,6 +83,40 @@ class ProductMediaTests(TestCase):
         self.assertEqual(codes(search='1 way switch')[:2], ['68002', '68001'])
         self.assertEqual(codes(search='ziva 6a'), ['68001'])
         self.assertEqual(codes(search='  '), ['BRAND-ONLY', 'PREFIX-68001', '68001B', '68002', '68001'])
+
+    def test_search_matches_brand_hsn_size_and_active_variant_sku_with_filters(self):
+        self.brand.name = 'Ashirvad'
+        self.brand.save(update_fields=['name'])
+        self.product.catalogue_price = '39'
+        self.product.currency = 'INR'
+        self.product.specifications = {'HSN': '3917', 'Size': '25 mm'}
+        self.product.save()
+        ProductVariant.objects.create(product=self.product, name='Standard', sku='CPVC-25')
+        ProductVariant.objects.create(product=self.product, name='Retired', sku='RETIRED', active=False)
+        for route in ('/api/v1/catalogue/items/', '/api/v1/catalogue/products'):
+            filters = {'search': ' ASHIRVAD   3917  25 mm cpvc-25 ', 'brand': self.brand.pk,
+                       'category': self.category.pk, 'page_size': 1}
+            found = self.public.get(route, filters)
+            self.assertEqual(found.status_code, 200, found.data)
+            self.assertEqual(found.data['count'], 1)
+            self.assertEqual(found.data['results'][0]['id'], self.product.pk)
+            self.assertEqual(self.public.get(route, filters | {'search': 'Retired'}).data['count'], 0)
+            self.assertEqual(self.public.get(route, filters | {'category': self.category.pk + 1}).data['count'], 0)
+        self.assertEqual(self.client.get('/api/v1/staff/catalogue/products',
+                                        {'search': 'ASHIRVAD CPVC-25'}).data['count'], 1)
+
+    def test_pdf_filter_counts_matches_before_pagination(self):
+        Product.objects.create(brand_category=self.product.brand_category, name='Fixture price list',
+                               code='PDF', unit='each', state='PUBLISHED')
+        pdf_product = Product.objects.get(code='PDF')
+        ProductMedia.objects.create(product=pdf_product, kind=ProductMedia.Kind.PDF,
+                                    filename='fixture.pdf', content_type='application/pdf', size=12,
+                                    key='78840df0-c407-43bc-85cd-6efdc2c11ea5')
+        result = self.public.get('/api/v1/catalogue/products',
+                                 {'availability': 'pdf', 'search': 'fixture', 'page_size': 1})
+        self.assertEqual(result.data['count'], 1)
+        self.assertEqual(result.data['results'][0]['id'], pdf_product.pk)
+        self.assertIsNone(result.data['next'])
 
     def test_item_edit_replaces_image_and_archive_removes_discovery(self):
         self.product.catalogue_price = '10.00'

@@ -132,5 +132,7 @@ class OrderInvoiceTests(TestCase):
     def test_staff_search_filters_and_history(self):
         order=self.create_order();confirmed=self.confirm(order);self.dealer_client.post(f"/api/v1/businesses/me/orders/{order['id']}/invoice",self.bill(confirmed.data),format='json');staff=make_account('+919811111197',AccountType.STAFF);grant_staff_permissions(staff,('READ_REPORTS',));client=APIClient();client.force_authenticate(staff)
         found=client.get('/api/v1/staff/orders',{'q':order['order_number'][-8:],'state':'CONFIRMED','invoice_kind':'BILL_OF_SUPPLY'});self.assertEqual(found.status_code,200);self.assertEqual(found.data['count'],1)
+        combined = client.get('/api/v1/staff/orders', {'q': f" {order['order_number']}  {found.data['results'][0]['branch_name'].upper()} ", 'state': 'CONFIRMED', 'page_size': 1})
+        self.assertEqual(combined.data['count'], 1)
         detail=client.get(f"/api/v1/staff/orders/{order['id']}");self.assertEqual(detail.status_code,200);self.assertTrue(detail.data['audit']);self.assertTrue(detail.data['invoice_audit'])
         self.assertEqual(client.get('/api/v1/staff/orders',{'state':'NOT_REAL'}).status_code,400)

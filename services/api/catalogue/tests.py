@@ -285,6 +285,7 @@ class CatalogueTests(TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.data['count'], 1)
         self.assertEqual(result.data['results'][0]['code'], 'SECOND')
+        self.assertEqual(self.client.get(self.base, {'search': ' second  OTHER ', 'state': 'PUBLISHED'}).data['count'], 1)
         self.assertEqual(self.client.get(self.base, {'state': 'INVALID'}).status_code, 400)
 
     def test_variant_edit_duplicate_sku_and_immutable_product(self):
