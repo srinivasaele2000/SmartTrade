@@ -82,8 +82,8 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
   const products = useResource(useCallback(signal =>
     api.products({...filters, availability: availabilityFilter}, page, signal, availabilityToken),
   [filters, page, availabilityFilter, availabilityToken]));
-  const categories = useResource(useCallback(signal => api.categories(categoryPage, signal), [categoryPage]));
-  const brands = useResource(useCallback(signal => api.brands({category: filters.category}, brandPage, signal), [filters.category, brandPage]));
+  const categories = useResource(useCallback(signal => api.categories(categoryPage, signal, 'public'), [categoryPage]));
+  const brands = useResource(useCallback(signal => api.brands({}, brandPage, signal), [brandPage]));
   const bannerFeed = useResource(useCallback(async signal => {
     if (!dealerToken) return {banners: [] as DealerBanner[]};
     return api.get('/banners/dealer/', signal, dealerToken) as Promise<{banners: DealerBanner[]}>;
@@ -111,8 +111,8 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
 
   const facts = availability && availability.page === productPage && availability.token === token ? availability.items : undefined;
   const selectCategory = (category?: string) => {
-    setFilters(current => ({...current, category, brand: undefined}));
-    setPage(1); setBrandPage(1);
+    setFilters(current => ({...current, category}));
+    setPage(1);
   };
   const submitSearch = () => {
     setFilters(current => ({...current, search: search.trim()}));
@@ -162,6 +162,7 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
         <Text style={s.chipLabel}>Shop by category</Text>
         {categories.state.status === 'ready' && <>
           <CategoryTile name="All categories" all selected={!filters.category} onPress={() => selectCategory()} />
+          {categories.state.data.has_uncategorized && <CategoryTile name="Uncategorized" selected={filters.category === 'uncategorized'} onPress={() => selectCategory('uncategorized')} />}
           {categories.state.data.results.filter(category => category.active).map(category =>
             <CategoryTile key={category.id} name={category.name} selected={filters.category === String(category.id)}
               onPress={() => selectCategory(String(category.id))} />)}
@@ -189,7 +190,7 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
       </>}
       <Feedback {...brands} />
       {brands.state.status === 'ready' && <>
-        {brands.state.data.count === 0 && <Text>No published brands are available for this category.</Text>}
+        {brands.state.data.count === 0 && <Text>No published brands are available.</Text>}
         {(brands.state.data.next || brands.state.data.previous) && <Pager page={brandPage} {...brands.state.data} onPage={setBrandPage} />}
       </>}
       <View style={s.row}>

@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from companies.permissions import HasStaffPermission
 from .media import attachment, media_url, storage, validate_file
 from .search import search_products
+from .tagging import category_filter, is_legacy_category
 from .models import BrandCategory, Product, ProductMedia
 from .views import Pages, audit, eligible_products, products
 
@@ -122,8 +123,10 @@ class CatalogueItems(APIView):
     def get(self, request):
         query = products().filter(pk__in=eligible_products().values('pk'), catalogue_price__isnull=False)
         for parameter, field in [('category', 'brand_category__category_id'), ('brand', 'brand_category__brand_id')]:
-            value = request.query_params.get(parameter)
-            if value:
+            value = request.query_params.get(parameter, '').strip()
+            if parameter == 'category' and value.lower() == 'uncategorized':
+                query = category_filter(query, 'uncategorized')
+            elif value:
                 if not value.isdecimal():
                     raise serializers.ValidationError({parameter: 'Expected a numeric ID.'})
                 query = query.filter(**{field: value})
@@ -214,4 +217,45 @@ class ItemOptions(APIView):
 
     def get(self, request):
         links = eligible_associations().values('id', 'brand_id', 'brand__name', 'category__name').order_by('brand__name', 'category__name', 'pk')
+        if request.query_params.get('canonical') == '1':
+            links = [link for link in links if not is_legacy_category(link['category__name'], link['brand__name'])]
         return Response(list(links))
+
+
+class BulkTagInput(serializers.Serializer):
+    products = serializers.ListField(child=serializers.IntegerField(min_value=1), min_length=1, max_length=500)
+    brand_category = serializers.IntegerField(min_value=1)
+
+
+class BulkTagItems(ItemOptions):
+    @transaction.atomic
+    def post(self, request):
+        payload = BulkTagInput(data=request.data)
+        payload.is_valid(raise_exception=True)
+        target = get_object_or_404(eligible_associations().select_related('brand', 'category'),
+                                   pk=payload.validated_data['brand_category'])
+        if is_legacy_category(target.category.name, target.brand.name):
+            raise serializers.ValidationError({'brand_category': 'Choose a canonical category.'})
+        ids = set(payload.validated_data['products'])
+        selected = list(Product.objects.filter(pk__in=ids).select_related('brand_category')
+                        .select_for_update(of=('self',)).order_by('pk'))
+        if len(selected) != len(ids):
+            raise serializers.ValidationError({'products': 'Some selected products no longer exist.'})
+        if any(item.brand_category.brand_id != target.brand_id for item in selected):
+            raise serializers.ValidationError({'products': 'Select products from the chosen brand. Product brand ownership cannot change.'})
+        changed = [item for item in selected if item.brand_category_id != target.pk]
+        codes = [item.code for item in selected]
+        if len(set(codes)) != len(codes) or Product.objects.filter(
+            brand_category=target, code__in=codes,
+        ).exclude(pk__in=ids).exists():
+            raise serializers.ValidationError({'products': 'A product code conflicts in the target category.'})
+        try:
+            with transaction.atomic():
+                for item in changed:
+                    previous = item.brand_category_id
+                    item.brand_category = target
+                    item.save(update_fields=['brand_category', 'updated_at'])
+                    audit(request, 'PRODUCT_CATEGORY_ASSIGNED', item, {'from': previous, 'to': target.pk})
+        except IntegrityError as error:
+            raise serializers.ValidationError({'products': 'The catalogue changed. Reload and check the target category.'}) from error
+        return Response({'updated': len(changed)})

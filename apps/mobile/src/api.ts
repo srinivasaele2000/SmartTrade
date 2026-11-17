@@ -15,10 +15,10 @@ export type Listing = {
   active_product_count?: number;
   primary_image_url?: string | null; catalogue_pdf_url?: string | null;
 };
-export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
+export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[]; has_uncategorized?: boolean };
 export type Discovery = Page<Listing> & { match_level: string };
 export type CatalogueFilters = { search?: string; category?: string; brand?: string; availability?: 'stock' | 'authorized' | 'pdf' };
-export type BrandFilters = { search?: string; category?: string };
+export type BrandFilters = { search?: string; category?: string; scope?: 'priced' };
 export type DealerFilters = { variant?: string; pin_code?: string; locality?: string; district?: string; stock_status?: string; location?: string };
 
 export class ApiError extends Error {
@@ -135,11 +135,13 @@ export class ApiClient {
     return mapPage(await this.get(`/catalogue/products?${query(filters, page)}`, signal, token), mapProduct);
   }
   async product(id: number, signal?: AbortSignal) { return mapProduct(await this.get(`/catalogue/products/${id}`, signal)); }
-  async categories(page: number, signal?: AbortSignal) {
-    return mapPage(await this.get(`/catalogue/categories?page=${page}`, signal), value => { const c = object(value); return { id: number(c.id), name: text(c.name), active: c.active === true }; });
+  async categories(page: number, signal?: AbortSignal, scope?: 'public' | 'priced') {
+    const value = await this.get(`/catalogue/categories?${query({scope}, page)}`, signal);
+    const categories = mapPage(value, value => { const c = object(value); return { id: number(c.id), name: text(c.name), active: c.active === true }; });
+    return {...categories, has_uncategorized: object(value).has_uncategorized === true};
   }
   async brands(filters: BrandFilters, page: number, signal?: AbortSignal) {
-    if (filters.category && !/^\d+$/.test(filters.category.trim())) throw new ApiError('Category ID must contain digits only.');
+    if (filters.category && !/^(?:\d+|uncategorized)$/i.test(filters.category.trim())) throw new ApiError('Category ID must contain digits only.');
     return mapPage(await this.get(`/catalogue/brands?${query(filters, page)}`, signal), mapBrand);
   }
   async dealers(product: number | null, filters: DealerFilters, page: number, token: string | null, signal?: AbortSignal): Promise<Discovery> {

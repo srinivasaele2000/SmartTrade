@@ -21,6 +21,7 @@ from companies.permissions import HasStaffPermission
 from .items import ItemFields, ItemOutput, catalogue_product, eligible_associations, lock_product_codes
 from .media import storage, validate_file, validate_image
 from .views import eligible_products
+from .tagging import category_hint, is_legacy_category, normalized_name
 from .models import CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
@@ -193,6 +194,11 @@ class StaffExtraction(APIView):
                         transaction.on_commit(partial(image_storage.delete, image), robust=True)
                     drafts.delete()
                     replaced = True
+                categories = {
+                    normalized_name(link.category.name): link.category.name
+                    for link in document_associations(document).select_related('category', 'brand')
+                    if not is_legacy_category(link.category.name, link.brand.name)
+                }
                 for candidate, clean_name, banner in rows_to_save:
                     pair = (candidate.product_code, clean_name)
                     if append and pair in existing:
@@ -201,9 +207,11 @@ class StaffExtraction(APIView):
                         raise serializers.ValidationError({'file': f'This catalogue can hold up to {MAX_ROWS} pending drafts. Publish or discard drafts before adding another batch.'})
                     existing.add(pair)
                     draft_count += 1
+                    hint = category_hint(document=document, hsn=candidate.hsn_sac_code, name=clean_name)
+                    category = categories.get(normalized_name(candidate.category or banner or '')) or hint or ''
                     item = DraftCatalogueItem(source_document=document, page=candidate.page,
                         name=clean_name, product_code=candidate.product_code, hsn_sac_code=candidate.hsn_sac_code,
-                        price_per_unit=candidate.price_per_unit, category=candidate.category or banner or '',
+                        price_per_unit=candidate.price_per_unit, category=category,
                         pack_size=candidate.pack_size)
                     if candidate.image:
                         item.image.save('thumbnail.png', ContentFile(candidate.image), save=False)
@@ -228,13 +236,17 @@ class StaffExtraction(APIView):
 
     def review(self, document, rows, batch=None):
         associations = document_associations(document)
-        options = associations.values('id', 'category__name', 'brand__company__legal_name').order_by('category__name', 'id')
+        options = [
+            {key: value for key, value in row.items() if key != 'brand__name'}
+            for row in associations.values('id', 'category__name', 'brand__name', 'brand__company__legal_name').order_by('category__name', 'id')
+            if not is_legacy_category(row['category__name'], row['brand__name'])
+        ]
         pending = [row for row in rows if row['status'] == DraftCatalogueItem.Status.DRAFT]
         existing_codes = Product.objects.filter(
             code__in={row['product_code'].strip() for row in pending},
         ).order_by('code').values_list('code', flat=True).distinct()
         published = eligible_products()
-        return Response({'rows': rows, 'categories': list(options), 'diagnostics': document.last_extraction,
+        return Response({'rows': rows, 'categories': options, 'diagnostics': document.last_extraction,
                          'summary': {
                              'pending': len(pending),
                              'published_from_document': published.filter(draftcatalogueitem__source_document=document).count(),
@@ -343,7 +355,7 @@ class CommitDrafts(StaffExtraction):
                         row_errors[str(draft.pk)] = {'draft': label, **item.errors}
                         continue
                     association = associations.get(row.get('brand_category'))
-                    if association is None:
+                    if association is None or is_legacy_category(association.category.name, association.brand.name):
                         row_errors[str(draft.pk)] = {'draft': label, 'brand_category': 'Choose a category for the PDF brand.'}
                         continue
                     values = item.validated_data

@@ -11,6 +11,7 @@ from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
 from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductVariant
 from .search import search_products
+from .tagging import category_filter, untagged_products
 from .serializers import BrandSerializer, BrandCategorySerializer, CategorySerializer, ProductSerializer, PublicBrandSerializer, VariantSerializer
 
 
@@ -64,8 +65,10 @@ class PublicProducts(generics.ListAPIView):
     def get_queryset(self):
         qs = products().filter(pk__in=eligible_products().values('pk'))
         for param, field in [('brand', 'brand_category__brand_id'), ('category', 'brand_category__category_id'), ('company', 'brand_category__brand__company_id')]:
-            value = self.request.query_params.get(param)
-            if value:
+            value = self.request.query_params.get(param, '').strip()
+            if param == 'category' and value.lower() == 'uncategorized':
+                qs = category_filter(qs, 'uncategorized')
+            elif value:
                 if not value.isdecimal():
                     raise serializers.ValidationError({param: 'Expected a numeric ID.'})
                 qs = qs.filter(**{field: value})
@@ -99,21 +102,26 @@ class PublicBrands(generics.ListAPIView):
     pagination_class = Pages
 
     def get_queryset(self):
+        eligible = eligible_products()
+        if self.request.query_params.get('scope') == 'priced':
+            eligible = eligible.filter(catalogue_price__isnull=False)
         public_links = BrandCategory.objects.filter(
-            products__in=eligible_products(), category__active=True
+            products__in=eligible, category__active=True
         ).select_related('category').distinct()
         qs = Brand.objects.filter(
-            category_links__products__in=eligible_products()
+            category_links__products__in=eligible
         ).select_related('company').prefetch_related(
             Prefetch('category_links', queryset=public_links, to_attr='public_category_links')
         )
-        category = self.request.query_params.get('category')
-        if category:
+        category = self.request.query_params.get('category', '').strip()
+        if category.lower() == 'uncategorized':
+            qs = qs.filter(pk__in=eligible.filter(untagged_products()).values('brand_category__brand_id'))
+        elif category:
             if not category.isdecimal():
                 raise serializers.ValidationError({'category': 'Expected a numeric ID.'})
             qs = qs.filter(
                 category_links__category_id=category,
-                category_links__products__in=eligible_products(),
+                category_links__products__in=eligible,
             )
         for term in self.request.query_params.get('search', '').split():
             qs = qs.filter(Q(name__icontains=term) | Q(company__legal_name__icontains=term))
@@ -136,6 +144,24 @@ class Categories(generics.ListAPIView):
     queryset = Category.objects.filter(active=True).order_by('name')
     serializer_class = CategorySerializer
     pagination_class = Pages
+
+    def get_queryset(self):
+        scope = self.request.query_params.get('scope')
+        if scope not in ('public', 'priced'):
+            return super().get_queryset()
+        eligible = eligible_products()
+        if scope == 'priced':
+            eligible = eligible.filter(catalogue_price__isnull=False)
+        self.has_uncategorized = eligible.filter(untagged_products()).exists()
+        return super().get_queryset().filter(
+            pk__in=eligible.exclude(untagged_products()).values('brand_category__category_id'),
+        )
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        if hasattr(self, 'has_uncategorized'):
+            response.data['has_uncategorized'] = self.has_uncategorized
+        return response
 
 
 class StaffCategories(generics.ListCreateAPIView):
@@ -263,6 +289,8 @@ class StaffProducts(generics.ListAPIView):
     def get_queryset(self):
         qs = products()
         search = self.request.query_params.get('search', '').strip()
+        if self.request.query_params.get('category', '').strip().lower() == 'uncategorized':
+            qs = qs.filter(untagged_products())
         return search_products(qs, search)
 
 

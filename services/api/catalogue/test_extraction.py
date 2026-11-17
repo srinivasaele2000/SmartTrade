@@ -3,6 +3,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.management import call_command
+from io import StringIO
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import FileSystemStorage
@@ -429,7 +431,7 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(result.status_code, 200, result.data)
         fresh = self.document.draft_items.get(product_code='68001')
         self.assertEqual((fresh.name, fresh.category, fresh.status),
-                         ('ZIVA 6A, 1 Way Switch', 'SWITCHES', DraftCatalogueItem.Status.DRAFT))
+                         ('ZIVA 6A, 1 Way Switch', 'Modular Switchgear & Distribution', DraftCatalogueItem.Status.DRAFT))
         self.assertNotEqual(fresh.pk, stale.pk)
         self.assertFalse((self.root / stale.image.name).exists())
         self.assertEqual([row['id'] for row in result.data['rows']], [reviewed.pk, fresh.pk])
@@ -461,7 +463,7 @@ class CatalogueExtractionTests(TestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 draft = self.document.draft_items.get(product_code='68001')
                 self.assertEqual(draft.name, expected)
-                self.assertEqual(draft.category, '' if name == expected else 'SWITCHES')
+                self.assertEqual(draft.category, 'Modular Switchgear & Distribution')
 
     def test_upload_filename_controls_extracted_family_prefix(self):
         description = '(ISI) 16AX, 1 Way Switch, 1M\n200W SBL Load'
@@ -668,3 +670,73 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(self.client.get(self.base + 'extract/').data['summary'], {
             'pending': 0, 'published_from_document': 3, 'published_for_brand': 4,
         })
+
+
+    def test_legacy_tagging_preview_apply_and_filter_composition(self):
+        roma = Category.objects.create(name='ROMA')
+        canonical = Category.objects.create(name='Modular Switchgear & Distribution')
+        old = BrandCategory.objects.create(brand=self.association.brand, category=roma)
+        product = Product.objects.create(
+            brand_category=old, name='Roma socket', code='ROMA-1', unit='each',
+            specifications={'HSN': '8536'}, state='PUBLISHED', catalogue_price=12, currency='INR',
+        )
+        orphan = Category.objects.create(name='Untagged')
+        public = APIClient()
+        options = public.get('/api/v1/catalogue/categories', {'scope': 'priced'}).data
+        self.assertTrue(options['has_uncategorized'])
+        self.assertNotIn(roma.pk, [row['id'] for row in options['results']])
+        filters = {'category': ' Uncategorized ', 'brand': f' {old.brand_id} ', 'search': 'roma socket'}
+        for route in ('products', 'items/'):
+            self.assertEqual(public.get(f'/api/v1/catalogue/{route}', filters).data['count'], 1)
+        out = StringIO()
+        call_command('tag_untagged_catalogue_items', '--dry-run', stdout=out)
+        self.assertIn('Would tag', out.getvalue())
+        product.refresh_from_db()
+        self.assertEqual(product.brand_category_id, old.pk)
+        call_command('tag_untagged_catalogue_items', '--apply', stdout=StringIO())
+        product.refresh_from_db()
+        self.assertEqual(product.brand_category.category_id, canonical.pk)
+        self.assertEqual(product.brand_category.brand_id, old.brand_id)
+        self.assertFalse(Category.objects.filter(pk__in=[roma.pk, orphan.pk]).exists())
+        self.assertFalse(public.get('/api/v1/catalogue/categories', {'scope': 'priced'}).data['has_uncategorized'])
+        self.assertEqual(public.get('/api/v1/catalogue/items/', filters | {'category': str(canonical.pk)}).data['count'], 1)
+        out = StringIO()
+        call_command('tag_untagged_catalogue_items', '--apply', stdout=out)
+        self.assertIn('0 tagged', out.getvalue())
+
+    def test_staff_bulk_tag_keeps_brand_and_audits_moves(self):
+        legacy = BrandCategory.objects.create(
+            brand=self.association.brand, category=Category.objects.create(name='Uncategorized'),
+        )
+        products = [
+            Product.objects.create(brand_category=legacy, name=f'Product {i}', code=f'TAG-{i}', unit='each')
+            for i in range(2)
+        ]
+        endpoint = '/api/v1/staff/catalogue/products/bulk-tag'
+        payload = {'products': [p.pk for p in products], 'brand_category': self.association.pk}
+        self.assertEqual(APIClient().post(endpoint, payload, format='json').status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/staff/catalogue/products', {'category': 'uncategorized'}).data['count'], 2)
+        other = BrandCategory.objects.create(
+            brand=Brand.objects.create(company=self.association.brand.company, name='Other brand'),
+            category=self.association.category,
+        )
+        self.assertEqual(self.client.post(endpoint, payload | {'brand_category': other.pk}, format='json').status_code, 400)
+        self.assertEqual(self.client.post(endpoint, payload, format='json').data, {'updated': 2})
+        self.assertEqual(Product.objects.filter(pk__in=payload['products'], brand_category=self.association).count(), 2)
+        self.assertEqual(CatalogueAudit.objects.filter(action='PRODUCT_CATEGORY_ASSIGNED').count(), 2)
+
+
+    def test_extraction_hints_follow_document_sub_business_instead_of_series(self):
+        self.document.sub_category = 'SWITCHES_SOCKETS'
+        self.document.save(update_fields=['sub_category'])
+        self.association.category.name = 'Other electrical products'
+        self.association.category.save(update_fields=['name'])
+        roma = Category.objects.create(name='ROMA')
+        BrandCategory.objects.create(brand=self.association.brand, category=roma)
+        canonical = Category.objects.create(name='Modular Switchgear & Distribution')
+        BrandCategory.objects.create(brand=self.association.brand, category=canonical)
+        response = self.client.post(self.base + 'extract/')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data['rows'])
+        self.assertNotIn('ROMA', [entry['category__name'] for entry in response.data['categories']])
+        self.assertTrue(all(row['category'] == canonical.name for row in response.data['rows']))

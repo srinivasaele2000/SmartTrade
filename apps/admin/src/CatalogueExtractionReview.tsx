@@ -162,7 +162,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         const previous = edits.get(row.id);
         if (previous?.status === 'DRAFT' && row.status === 'DRAFT') return {...previous, image_url: row.image_url};
         const matching = result.categories.filter(option => row.category.toLowerCase() === option.category__name.toLowerCase());
-        const selected = matching.length === 1 ? matching[0] : result.categories.length === 1 ? result.categories[0] : null;
+        const selected = matching.length === 1 ? matching[0] : !row.category.trim() && result.categories.length === 1 ? result.categories[0] : null;
         return {...row, approved: false, association: selected ? String(selected.id) : ''};
       });
     });

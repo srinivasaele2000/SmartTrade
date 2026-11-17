@@ -144,3 +144,20 @@ test('browse composes availability, brand, category and search on the server req
   assert.deepEqual(Object.fromEntries(calls[1].params), {page: '1', brand: '4'});
   assert.equal(calls[1].auth, undefined);
 });
+
+
+test('priced discovery reads untagged availability and sends ID filters with the search text', async () => {
+  const paths = [];
+  const api = new ApiClient('http://example.test/api/v1', async url => {
+    paths.push(new URL(url).searchParams);
+    return response({...page([]), has_uncategorized: true});
+  });
+  assert.equal((await api.categories(1, undefined, 'priced')).has_uncategorized, true);
+  await api.brands({scope: 'priced', category: 'uncategorized'}, 1);
+  await api.products({category: ' 14 ', brand: '7', search: ' roma switch ', availability: 'pdf'}, 1);
+  assert.deepEqual(Object.fromEntries(paths[0]), {page: '1', scope: 'priced'});
+  assert.equal(paths[1].get('category'), 'uncategorized');
+  assert.deepEqual(Object.fromEntries(paths[2]), {
+    page: '1', category: '14', brand: '7', search: 'roma switch', availability: 'pdf',
+  });
+});

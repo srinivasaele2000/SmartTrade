@@ -6,6 +6,7 @@ import {ProductMediaCard, type Attachment} from './ProductMedia';
 import { inr } from './india';
 
 type Product = { image_attachment?: Attachment | null; pdf_attachment?: Attachment | null; id: number; name: string; code: string; company_name: string; brand_name: string; category_name: string; state: string; moderation_state: string; description: string; unit: string; specifications: Record<string, unknown>; catalogue_price: string | null; currency: string; variants: { id: number; sku: string; name: string; active: boolean; attributes: Record<string, unknown> }[] };
+type TagOption = {id: number; brand__name: string; category__name: string};
 type Page = { count: number; results: Product[] };
 
 export default function Catalogue({ token, baseUrl, permissions = [] }: { token: string; baseUrl: string; permissions?: string[] }) {
@@ -22,6 +23,11 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
   const [saving, setSaving] = useState(false);
   const [category, setCategory] = useState('');
   const [categoryMessage, setCategoryMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [untagged, setUntagged] = useState(false);
+  const [taggedIds, setTaggedIds] = useState<number[]>([]);
+  const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
+  const [tagTarget, setTagTarget] = useState('');
+  const [tagError, setTagError] = useState('');
   const loadId = useRef(0);
 
   const request = useCallback(async <T,>(path: string, body?: object) => {
@@ -34,11 +40,39 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
   const load = useCallback(async () => {
     const id = ++loadId.current;
     setLoading(true); setError('');
-    try { const data = await request<Page>(`/products?page=${page}&search=${encodeURIComponent(query)}`); ensureList(data, true); if (id === loadId.current) setData(data); }
+    try { const data = await request<Page>(`/products?page=${page}&search=${encodeURIComponent(query)}${untagged ? '&category=uncategorized' : ''}`); ensureList(data, true); if (id === loadId.current) setData(data); }
     catch (failure) { if (id === loadId.current) setError(failure instanceof Error ? failure.message : 'Catalogue connection failed.'); }
     finally { if (id === loadId.current) setLoading(false); }
-  }, [request, page, query]);
+  }, [request, page, query, untagged]);
   useEffect(() => { void load(); return () => { loadId.current++; }; }, [load]);
+
+  async function openTagging() {
+    setTagError('');
+    setSaving(true);
+    try {
+      const options = await requestApi<TagOption[]>(baseUrl, '/catalogue/items/options/?canonical=1', token);
+      setTagOptions(options);
+      if (!options.length) setTagError('No eligible brand and category combinations are available.');
+    }
+    catch (failure) {setTagError(failure instanceof Error ? failure.message : 'Could not load brand and category options.');}
+    finally {setSaving(false);}
+  }
+
+  async function assignTags(event: FormEvent) {
+    event.preventDefault();
+    if (saving || !taggedIds.length || !tagTarget) return;
+    setSaving(true); setTagError(''); setNotice('');
+    try {
+      const result = await request<{updated: number}>('/products/bulk-tag', {
+        products: taggedIds, brand_category: Number(tagTarget),
+      });
+      setTaggedIds([]); setTagTarget('');
+      setNotice(`${result.updated} catalogue items tagged.`);
+      setPage(1);
+      if (page === 1) await load();
+    } catch (failure) {setTagError(failure instanceof Error ? failure.message : 'Could not tag the selected items.');}
+    finally {setSaving(false);}
+  }
 
   async function moderate(event: FormEvent) {
     event.preventDefault();
@@ -64,12 +98,37 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
     {permissions.includes('MODERATE_PRODUCTS') && <CreateProductItem baseUrl={baseUrl} token={token} />}
     <div className="section-heading"><h2 id="catalogue-title">Company catalogue moderation</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh catalogue</button></div>
     <p>Company-owned products and catalogue prices. Dealer stock and selling prices are separate.</p>
-    <form onSubmit={event => { event.preventDefault(); setPage(1); setQuery(search.trim()); }} className="decision-buttons">
+    <form onSubmit={event => { event.preventDefault(); setPage(1); setTaggedIds([]); setQuery(search.trim()); }} className="decision-buttons">
       <label htmlFor="catalogue-search">Search product names</label><input id="catalogue-search" disabled={saving} value={search} onChange={event => setSearch(event.target.value)} /><button className="button button-quiet" disabled={saving}>Search</button>
     </form>
+    {permissions.includes('MODERATE_PRODUCTS') && <>
+      <label><input type="checkbox" checked={untagged} disabled={saving} onChange={event => {
+        setUntagged(event.target.checked); setTaggedIds([]); setPage(1);
+      }} /> Show untagged items only</label>
+      <form className="decision-buttons" onSubmit={assignTags} aria-label="Assign Category / Brand">
+        <span>{taggedIds.length} items selected</span>
+        {tagOptions.length === 0 ? <button type="button" disabled={saving || !taggedIds.length}
+          onClick={() => void openTagging()}>Assign Category / Brand</button> : <>
+          <label>Brand / Category <select value={tagTarget} disabled={saving} onChange={event => setTagTarget(event.target.value)}>
+            <option value="">Choose a brand and category</option>
+            {tagOptions.map(option => <option key={option.id} value={option.id}>
+              {option.brand__name} · {option.category__name}
+            </option>)}
+          </select></label>
+          <button type="submit" disabled={saving || !tagTarget || !taggedIds.length}>Apply tags</button>
+        </>}
+        {tagError && <p role="alert" className="action-message error">{tagError}</p>}
+      </form>
+    </>}
     {notice && <p className="action-message success" role="status">{notice}</p>}
     {error && <div className="action-message error" role="alert"><p>{error}</p><button className="button button-quiet" disabled={saving} onClick={() => void load()}>Retry catalogue</button></div>}
     {loading ? <p role="status">Loading catalogue…</p> : !error && data.results.length === 0 ? <div className="state-panel">No products match this catalogue search.</div> : !error && data.results.map(product => <article key={product.id} className="detail-card">
+      {permissions.includes('MODERATE_PRODUCTS') && <label>
+        <input type="checkbox" aria-label={`Select ${product.code} for tagging`} disabled={saving}
+          checked={taggedIds.includes(product.id)} onChange={event => {
+            const checked = event.target.checked;
+            setTaggedIds(previous => checked ? [...previous, product.id] : previous.filter(id => id !== product.id));
+          }} /> Select for tagging</label>}
       <h3>{product.name} · {product.code}</h3><p>{product.company_name} / {product.brand_name} / {product.category_name}</p>
       <p className="record-meta">Publication: <span className="status-pill" data-status={product.state}>{product.state}</span> Moderation: <span className="status-pill" data-status={product.moderation_state}>{product.moderation_state}</span></p>
       <p>{product.catalogue_price === null ? 'Catalogue price not provided' : inr(product.catalogue_price)} · Unit: {product.unit}</p>

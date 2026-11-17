@@ -28,6 +28,7 @@ urlpatterns = [
     path('catalogue/categories', Categories.as_view()),
     path('staff/catalogue/categories', StaffCategories.as_view()),
     path('staff/catalogue/products', StaffProducts.as_view()),
+    path('staff/catalogue/products/bulk-tag', items.BulkTagItems.as_view()),
     path('staff/catalogue/products/<int:pk>/moderation', ModerateProduct.as_view()),
     *[path(f'companies/me/catalogue/{resource}', OwnerCatalogue.as_view(), {'resource': resource}) for resource in ('brands', 'brand-categories', 'products')],
     path('companies/me/catalogue/products/<int:pk>', OwnerProduct.as_view()),

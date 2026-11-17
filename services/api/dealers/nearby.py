@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.dealer_gate import WORKER_CONTACT_TARGET
+from catalogue.tagging import untagged_products
 from catalogue.views import Pages, eligible_products
 from config.india import INDIAN_PIN_PATTERN
 from .models import DealerLocation, TradeWorkerContact
@@ -29,7 +30,12 @@ class NearbyInput(serializers.Serializer):
     pincode = serializers.RegexField(INDIAN_PIN_PATTERN, required=False)
     q = serializers.CharField(max_length=120, required=False)
     brand_id = serializers.IntegerField(min_value=1, required=False)
-    category_id = serializers.IntegerField(min_value=1, required=False)
+    category_id = serializers.CharField(required=False)
+
+    def validate_category_id(self, value):
+        if value.lower() == 'uncategorized':
+            return 'uncategorized'
+        return serializers.IntegerField(min_value=1).run_validation(value)
 
     def validate(self, values):
         if any(not isfinite(values[k]) for k in ('lat', 'lng', 'radius_km') if k in values):
@@ -94,7 +100,9 @@ class NearbyDealers(APIView):
             listings = listings.filter(product_id=item_id)
         for key, field in (('brand_id', 'product__brand_category__brand_id'),
                            ('category_id', 'product__brand_category__category_id')):
-            if key in values:
+            if key == 'category_id' and values.get(key) == 'uncategorized':
+                listings = listings.filter(product_id__in=eligible_products().filter(untagged_products()).values('pk'))
+            elif key in values:
                 listings = listings.filter(**{field: values[key]})
 
         gps = 'lat' in values
