@@ -166,7 +166,7 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
     {action && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="catalogue-item-action-title"
       onCancel={event => {event.preventDefault(); closeAction();}}>
       <h3 id="catalogue-item-action-title">{action.type === 'edit' ? 'Edit catalogue item' : 'Delete catalogue item'}</h3>
-      <form className="detail-card" onSubmit={saveAction}>
+      <form className="detail-card form-grid" onSubmit={saveAction}>
         {action.type === 'edit' ? <>
           <label>Product name <input name="name" required maxLength={200} defaultValue={action.item.name} /></label>
           <label>Product code <input name="product_code" required maxLength={100} defaultValue={action.item.product_code} /></label>

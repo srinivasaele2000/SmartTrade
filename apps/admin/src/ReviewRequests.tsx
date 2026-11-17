@@ -65,7 +65,7 @@ export default function ReviewRequests({ baseUrl, token, canRestore = false }: {
     {error && <div role="alert" className="action-message error"><p>{error}</p><button className="button button-quiet" disabled={saving} onClick={() => void load()}>Retry review requests</button></div>}
     {loading ? <p role="status">Loading review requests…</p> : !error && items.length === 0 ? <div className="state-panel">No open company review requests.</div> : !error && items.map(item => <article className="detail-card" key={item.id}>
       <h3>{item.company_name}</h3>
-      <p>Company {item.company_id} · {item.verification_state} · {item.activity_state}</p>
+      <p className="record-meta">Company {item.company_id} <span className="status-pill" data-status={item.verification_state}>{item.verification_state}</span> <span className="status-pill" data-status={item.activity_state}>{item.activity_state}</span></p>
       <p>Submitted {istDateTime(item.submitted_at)}</p>
       <p className="request-reason">{item.reason}</p>
       {selected === item.id ? <form onSubmit={resolve}>

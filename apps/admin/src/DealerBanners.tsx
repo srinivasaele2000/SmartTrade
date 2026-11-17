@@ -187,12 +187,12 @@ export default function DealerBanners({base, token}: {base: string; token: strin
     <div className="promo-list">
       <h2>Saved banners</h2>
       {!rows && !error && <p>Loading banners…</p>}
-      {rows?.length === 0 && <p>No banners yet.</p>}
+      {rows?.length === 0 && <p className="empty-state">No banners yet.</p>}
       {rows?.map((row, index) => <article key={row.id} className="promo-card">
         <BannerPreview base={base} token={token} card={row} imagePath={row.image_url} />
         <strong>{row.title || 'Image banner'}</strong>
         {row.banner_type === 'text' && <span className="promo-kind">Text Banner</span>}
-        <span>{row.status} · {actions[row.target_type]}{row.target_brand_name || row.target_category_name ? ` · ${row.target_brand_name ?? row.target_category_name}` : ''}</span>
+        <span className="promo-destination"><span className="status-pill" data-status={row.status}>{row.status}</span> {actions[row.target_type]}{row.target_brand_name || row.target_category_name ? ` · ${row.target_brand_name ?? row.target_category_name}` : ''}</span>
         <div className="promo-actions">
           <button disabled={busy || index === 0} onClick={() => move(index, -1)}>Move up</button>
           <button disabled={busy || index === rows.length - 1} onClick={() => move(index, 1)}>Move down</button>
@@ -203,7 +203,7 @@ export default function DealerBanners({base, token}: {base: string; token: strin
             target: String(row.target_brand_id ?? row.target_category_id ?? row.target_item_id ?? ''),
             sort_order: String(row.sort_order), starts_at: asIst(row.starts_at), ends_at: asIst(row.ends_at),
           });}}>Edit</button>
-          <button disabled={busy} onClick={() => setDeleting(row)}>Delete</button>
+          <button className="btn-danger" disabled={busy} onClick={() => setDeleting(row)}>Delete</button>
         </div>
         {deleting?.id === row.id && <div role="alert" className="promo-actions">
           <span>Delete “{row.title}” and its image?</span>

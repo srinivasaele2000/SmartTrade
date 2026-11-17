@@ -130,7 +130,7 @@ export default function SupportInbox({base, token}: {base: string; token: string
       <section aria-label="Dealer conversations" className="support-threads">
         <input aria-label="Search conversations" placeholder="Search by dealer name or mobile…" value={search} onChange={e => {setSearch(e.target.value); setThreadPage(1);}} />
         {!list && !error && <p>Loading conversations…</p>}
-        {list?.results.length === 0 && <p>No conversations found.</p>}
+        {list?.results.length === 0 && <p className="empty-state">No conversations found.</p>}
         {list?.results.map(thread => <button key={thread.id} disabled={busy || loadingOlder} className="support-thread" aria-pressed={thread.id === selected} onClick={() => {
           if (selected === thread.id) return;
           setSelected(thread.id); setConversation(undefined); setOlder([]); setMore(false); setBody(''); setFile(undefined); setError('');
@@ -162,7 +162,7 @@ export default function SupportInbox({base, token}: {base: string; token: string
               setFile(e.target.files?.[0]); e.target.value = '';
             }} /></label>
             {file && <button type="button" disabled={busy} onClick={() => setFile(undefined)}>{file.name} · Remove</button>}
-            <button type="submit" disabled={busy || (!body.trim() && !file)}>{busy ? 'Sending…' : 'Send'}</button>
+            <button className="btn-primary" type="submit" disabled={busy || (!body.trim() && !file)}>{busy ? 'Sending…' : 'Send'}</button>
           </form>
         </>}
       </section>

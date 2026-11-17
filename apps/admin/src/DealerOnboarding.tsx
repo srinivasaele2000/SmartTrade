@@ -66,8 +66,8 @@ export default function DealerOnboarding({id, baseUrl, token, canReviewContacts,
     {loading && <p role="status">Loading dealer onboarding…</p>}
     {details && <>
       <h4>Business identity</h4>
-      <p>{details.profile.legal_name || 'Name not provided'} · {details.profile.verification_state}</p>
-      <dl>{Object.entries({
+      <p className="record-meta">{details.profile.legal_name || 'Name not provided'} <span className="status-pill" data-status={details.profile.verification_state}>{details.profile.verification_state}</span></p>
+      <dl className="identity-grid">{Object.entries({
         owner_name: 'Owner or authorized person', business_email: 'Business email', registration_number: 'Registration reference',
         gstin: 'GSTIN', pan: 'PAN', registered_address: 'Registered address', registered_locality: 'Locality',
         registered_district: 'District', registered_state: 'State', registered_pin_code: 'PIN',
@@ -79,7 +79,7 @@ export default function DealerOnboarding({id, baseUrl, token, canReviewContacts,
       <h4>Other-brand suggestions</h4>
       {details.suggestions.length === 0 && <p>No suggestions.</p>}
       {details.suggestions.map(item => <article key={item.id}>
-        <p><strong>{item.name}</strong> · {item.status}{item.canonical_brand && ' · brand ' + item.canonical_brand}</p>
+        <p className="record-meta"><strong>{item.name}</strong> <span className="status-pill" data-status={item.status}>{item.status}</span>{item.canonical_brand && ' · brand ' + item.canonical_brand}</p>
         {item.context && <p>{item.context}</p>}
         {item.status === 'PENDING' && <div className="decision-buttons">
           {(['APPROVED', 'REJECTED', 'MAPPED'] as const).map(action =>

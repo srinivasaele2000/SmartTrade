@@ -1,15 +1,18 @@
-.promo-admin { display: grid; grid-template-columns: minmax(240px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.promo-admin { display: grid; grid-template-columns: minmax(295px, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 24px; }
 .promo-admin > [role=alert] { grid-column: 1 / -1; }
-.promo-form, .promo-card { background: #fff; border: 1px solid #dce6e0; padding: 14px; border-radius: 12px; }
+.promo-form, .promo-card { background: var(--surface); border: 1px solid var(--border); padding: 16px; border-radius: var(--radius-md); box-shadow: var(--shadow); }
 .promo-form h2, .promo-list h2 { margin: 0 0 12px; }
 .promo-preview { position: relative; aspect-ratio: 16 / 9; background: #eef4f0; border-radius: 12px; overflow: hidden; display: grid; place-items: center; color: #41534b; }
 .promo-preview img { width: 100%; height: 100%; object-fit: cover; }
-.promo-form fieldset { display: grid; gap: 10px; border: 0; padding: 12px 0 0; margin: 0; min-width: 0; }
-.promo-form label { display: block; }
+.promo-form fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; border: 0; padding: 12px 0 0; margin: 0; min-width: 0; }
+.promo-form fieldset > :is(div, small, label:has(input[type=file])) { grid-column: 1 / -1; }
+.promo-form fieldset > label:has(input[type=checkbox]) { align-self: center; }
 .promo-form input:not([type=checkbox]), .promo-form select { display: block; width: 100%; box-sizing: border-box; }
 .promo-card { display: grid; gap: 8px; margin-bottom: 12px; }
-.promo-card .promo-preview { max-width: 380px; }
-.promo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.promo-card .promo-preview { width: 100%; max-width: 440px; }
+.promo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.promo-card .promo-actions button { min-height: 32px; font-size: 12px; }
+.promo-destination { color: var(--secondary); font-size: 12px; }
 .promo-caption { position: absolute; inset: auto 0 0; background: #10241fdb; color: white; padding: 12px; }
 .promo-text { display: flex; box-sizing: border-box; flex-direction: column; align-items: stretch; justify-content: center; padding: 6%; color: white; gap: 9px; isolation: isolate; container-type: inline-size; }
 .promo-text::before, .promo-text::after { content: ''; position: absolute; border-radius: 50%; z-index: -1; pointer-events: none; }
@@ -25,3 +28,4 @@
 .promo-swatches button { color: #fff; }
 .promo-mode [aria-pressed=true], .promo-swatches [aria-pressed=true] { outline: 2px solid #24785b; outline-offset: 2px; }
 @media(max-width: 850px) { .promo-admin { grid-template-columns: 1fr; } }
+@media(max-width: 470px) { .promo-form fieldset { grid-template-columns: 1fr; } }

@@ -77,11 +77,11 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
     finally {setBusy(false);}
   }
 
-  return <section className="detail-card" aria-label={config.title}>
+  return <section className="detail-card media-card" aria-label={config.title}>
     <h4>{config.title}</h4>
     {kind === 'image' && (preview
-      ? <img src={preview} alt="Primary product preview" style={{width: 160, height: 120, objectFit: 'contain'}} onError={() => setPreview('')} />
-      : <p className="state-panel">Product image placeholder</p>)}
+      ? <img className="media-preview" src={preview} alt="Primary product preview" onError={() => setPreview('')} />
+      : <p className="empty-state">Product image placeholder</p>)}
     {attachment
       ? <p>{attachment.filename} · {Math.ceil(attachment.size / 1024)} KB · {istDateTime(attachment.uploaded_at)}</p>
       : <p>No file uploaded.</p>}
@@ -113,7 +113,7 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           })}>Download PDF</button>}
-        <button className="button button-quiet" type="button" disabled={busy} onClick={() => {
+        <button className="button button-danger" type="button" disabled={busy} onClick={() => {
           if (!window.confirm('Remove this catalogue attachment?')) return;
           void run(async () => {
             await requestApi(baseUrl, path, token, {method: 'DELETE'});

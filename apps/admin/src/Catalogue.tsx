@@ -71,7 +71,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
     {error && <div className="action-message error" role="alert"><p>{error}</p><button className="button button-quiet" disabled={saving} onClick={() => void load()}>Retry catalogue</button></div>}
     {loading ? <p role="status">Loading catalogue…</p> : !error && data.results.length === 0 ? <div className="state-panel">No products match this catalogue search.</div> : !error && data.results.map(product => <article key={product.id} className="detail-card">
       <h3>{product.name} · {product.code}</h3><p>{product.company_name} / {product.brand_name} / {product.category_name}</p>
-      <p>Publication: {product.state} · Moderation: {product.moderation_state}</p>
+      <p className="record-meta">Publication: <span className="status-pill" data-status={product.state}>{product.state}</span> Moderation: <span className="status-pill" data-status={product.moderation_state}>{product.moderation_state}</span></p>
       <p>{product.catalogue_price === null ? 'Catalogue price not provided' : inr(product.catalogue_price)} · Unit: {product.unit}</p>
       <p className="request-reason">{product.description || 'No description provided.'}</p>
       <details><summary>Product specifications</summary><pre>{JSON.stringify(product.specifications,null,2)}</pre></details><ul>{product.variants.map(variant => <li key={variant.id}>{variant.sku}: {variant.name} ({variant.active ? 'active' : 'inactive'}) · {JSON.stringify(variant.attributes)}</li>)}</ul>

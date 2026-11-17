@@ -1,16 +1,26 @@
-.support-inbox { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); border: 1px solid #dce6e0; border-radius: 12px; background: #fff; overflow: hidden; }
-.support-threads { padding: 12px; border-right: 1px solid #dce6e0; max-height: 74vh; overflow: auto; }
-.support-threads input, .support-composer textarea { box-sizing: border-box; width: 100%; }
-.support-thread { display: grid; gap: 5px; width: 100%; margin-top: 8px; text-align: left; background: #fff; color: #163329; border: 1px solid #dce6e0; padding: 10px; border-radius: 8px; overflow-wrap: anywhere; }
-.support-thread[aria-pressed=true], .support-bubble.admin { background: #e6f4ed; }
-.support-badge { background: #0e513a; color: white; border-radius: 16px; padding: 2px 7px; margin-left: 6px; }
-.support-conversation { display: flex; flex-direction: column; min-height: 450px; height: 74vh; }
-.support-conversation > header, .support-conversation > p, .support-composer { padding: 12px; }
-.support-timeline { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: #f7faf8; }
-.support-bubble { align-self: flex-start; max-width: 85%; background: #fff; border: 1px solid #dce6e0; padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.support-bubble.admin { align-self: flex-end; }
-.support-bubble small { display: block; margin-top: 5px; color: #41534b; }
+.support-inbox { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; box-shadow: var(--shadow); }
+.support-threads { padding: 12px; border-right: 1px solid var(--border); max-height: 74vh; overflow: auto; }
+.support-threads > input { margin-bottom: 8px; }
+.support-thread { display: grid; justify-content: stretch; gap: 4px; width: 100%; margin-bottom: 8px; padding: 10px 12px; border-color: var(--border); text-align: left; overflow-wrap: anywhere; }
+.support-thread > span, .support-thread small, .support-conversation header > div { color: var(--secondary); font-size: 12px; }
+.support-thread small { font-weight: 450; }
+.support-badge { display: inline-flex; min-width: 20px; justify-content: center; background: var(--brand); color: white; border-radius: 999px; padding: 2px 6px; margin-left: 6px; font-size: 11px; }
+.support-conversation { display: flex; flex-direction: column; height: 74vh; min-height: 460px; min-width: 0; }
+.support-conversation > header, .support-conversation > p, .support-composer { padding: 12px 16px; }
+.support-conversation > header { border-bottom: 1px solid var(--border); }
+.support-conversation header strong { font-size: 15px; }
+.support-timeline { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--canvas); }
+.support-timeline > button { align-self: center; }
+.support-bubble { align-self: flex-start; max-width: 84%; background: var(--surface); border: 1px solid var(--border); padding: 10px 12px; border-radius: 4px 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: var(--shadow); }
+.support-bubble.admin { align-self: flex-end; background: var(--mint); border-color: #bbf7d0; border-radius: 12px 4px 12px 12px; }
+.support-bubble small { display: block; margin-top: 5px; color: var(--secondary); font-size: 11px; }
 .support-image { display: block; max-width: min(100%, 260px); max-height: 200px; object-fit: contain; }
 .support-file { display: block; padding: 6px 0; }
-.support-composer { border-top: 1px solid #dce6e0; display: flex; gap: 8px; flex-wrap: wrap; }
-@media(max-width: 760px) { .support-inbox { grid-template-columns: 1fr; } .support-threads { max-height: 30vh; border-right: 0; } }
+.support-composer { border-top: 1px solid var(--border); display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.support-composer textarea { flex-basis: 100%; }
+.support-composer label { flex: 1 1 180px; max-width: 100%; }
+.support-composer button { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 760px) {
+  .support-inbox { grid-template-columns: 1fr; }
+  .support-threads { max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--border); }
+}

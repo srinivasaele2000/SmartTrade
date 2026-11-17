@@ -113,6 +113,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [diagnostics, setDiagnostics] = useState<Diagnostics>();
   const [extracting, setExtracting] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
+  const [pageProgress, setPageProgress] = useState<{done: number; total: number}>();
   const extraction = useRef<{cancelled: boolean} | null>(null);
 
   function applyReview(result: Review, preserveEdits: boolean) {
@@ -171,6 +172,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         payload.end_page - payload.start_page >= CHUNK_PAGES);
       setCancelPending(false);
       setBatchStatus('');
+      setPageProgress(undefined);
       setDiagnostics(undefined);
 
       if (payload.start_page === undefined || payload.end_page === undefined) {
@@ -188,6 +190,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       } else {
         const {start_page: first, end_page: last} = payload;
         const total = Math.ceil((last - first + 1) / CHUNK_PAGES);
+        setPageProgress({done: 0, total: last - first + 1});
         let start = first;
         while (start <= last && !run.cancelled) {
           const chunk = Math.floor((start - first) / CHUNK_PAGES) + 1;
@@ -207,6 +210,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           if (batch.replaced) replacePending = false;
           added += batch.added;
           pagesDone += batch.processed_through - start + 1;
+          setPageProgress({done: pagesDone, total: last - first + 1});
           start = batch.processed_through + 1;
           remaining = start <= last ? `${start}-${last}` : undefined;
           activeAppend = true;
@@ -287,9 +291,11 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   return <dialog ref={dialog} className="contacts-dialog catalogue-review-dialog" aria-labelledby="pdf-review-title"
     onCancel={event => {event.preventDefault(); if (!busy && !photosBusy) close();}}>
-    <h3 id="pdf-review-title">Review extracted catalogue items</h3>
-    <p>{title}</p>
-    <form aria-label="Extract catalogue batch" onSubmit={extractBatch}>
+    <header className="dialog-heading">
+      <h3 id="pdf-review-title">Review extracted catalogue items</h3>
+      <p>{title}</p>
+    </header>
+    <form className="extraction-toolbar" aria-label="Extract catalogue batch" onSubmit={extractBatch}>
       <label>Page range <input value={range} placeholder="All pages (e.g. 6-10)" disabled={busy}
         onChange={event => setRange(event.target.value)} /></label>{' '}
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
@@ -308,11 +314,24 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
     {loaded && <p aria-live="polite">Showing {pending.length} extracted draft items</p>}
     {batchStatus && <p role="status">{batchStatus}</p>}
-    {diagnostics?.status && <div aria-live="polite">
-      {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
-      {diagnostics.pages_scanned !== undefined && <p>Pages examined {diagnostics.pages_scanned} · OCR pages {diagnostics.ocr_pages ?? 0} · Product sections {diagnostics.product_sections ?? 0} · Items extracted {diagnostics.items_extracted ?? 0} · Skipped pages {diagnostics.skipped_pages?.length ?? 0}</p>}
-      {!!diagnostics.warnings?.length && <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+    {extracting && pageProgress && <div className="extraction-progress">
+      <progress aria-label="Pages processed in this extraction" value={pageProgress.done} max={pageProgress.total} />
+      <span>{pageProgress.done} / {pageProgress.total} pages</span>
     </div>}
+    {diagnostics?.status && <section className="extraction-diagnostics" aria-label="Extraction diagnostics" aria-live="polite">
+      {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
+      {diagnostics.pages_scanned !== undefined && <dl className="extraction-metrics">
+        <div><dt>Pages examined</dt><dd>{diagnostics.pages_scanned}</dd></div>
+        <div><dt>OCR pages</dt><dd>{diagnostics.ocr_pages ?? 0}</dd></div>
+        <div><dt>Product sections</dt><dd>{diagnostics.product_sections ?? 0}</dd></div>
+        <div><dt>Items extracted</dt><dd>{diagnostics.items_extracted ?? 0}</dd></div>
+        <div><dt>Skipped pages</dt><dd>{diagnostics.skipped_pages?.length ?? 0}</dd></div>
+      </dl>}
+      {!!diagnostics.warnings?.length && <details>
+        <summary>{diagnostics.warnings.length} extraction {diagnostics.warnings.length === 1 ? 'warning' : 'warnings'}</summary>
+        <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      </details>}
+    </section>}
     {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
     {!!pending.length && !categories.length && <p>Approval requires an active category linked to this PDF’s brand under a verified, active company. Check the vault’s brand name against the catalogue brand.</p>}
     {!!rows.length && <form onSubmit={commit}>
@@ -332,7 +351,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           const previewPath = row.image_url ? imagePath + new URL(row.image_url, window.location.origin).search : '';
           return <tr key={row.id}>
             <td>{row.status === 'DRAFT' ? <input type="checkbox" aria-label={'Approve ' + row.product_code}
-              checked={row.approved} disabled={!editable || !isEligible(row)} onChange={event => update(row.id, {approved: event.target.checked})} /> : row.status}</td>
+              checked={row.approved} disabled={!editable || !isEligible(row)} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
             <td>{row.page}</td>
             <td><div className="catalogue-review-photo">
               {previewPath && <Thumbnail key={previewPath} baseUrl={baseUrl} token={token} path={previewPath} />}

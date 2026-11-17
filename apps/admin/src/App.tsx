@@ -16,6 +16,13 @@ import { developmentAvailable, developmentOtpAvailable, otpAcknowledgementMessag
 import type { StaffAccount as Account, LoginResponse, OtpAcknowledgement } from './auth';
 import { istDateTime } from './india';
 import { apkDownloadUrl, loadApkMetadata } from './apkDownload';
+
+const navigationGroups = [
+  {label: 'Workspace', ids: ['overview']},
+  {label: 'Network', ids: ['verification', 'review-requests', 'dealers', 'dealer-directory']},
+  {label: 'Catalogue', ids: ['catalogue', 'catalogues', 'banners']},
+  {label: 'Operations', ids: ['messages', 'enquiries', 'orders', 'audit']},
+] as const;
 type DocumentItem = {
   id: number;
   document_type: string;
@@ -313,24 +320,33 @@ function App() {
   const apiConfigured = Boolean(API_BASE);
   const canMessage = account?.staff_profile?.permissions?.includes('REVIEW_BUSINESS');
   const supportUnread = useSupportUnread(API_BASE, canMessage ? accessToken : null);
+  const signInView = apiConfigured && !accessToken && page !== 'overview';
 
   return (
-    <div className="shell">
+    <div className={`shell${signInView ? ' shell-sign-in' : ''}`}>
       <aside className="sidebar">
-        <div className="brand-mark">ST</div>
-        <div className="brand-name">SmartTrade</div>
-        <div className="brand-caption">ADMIN CONSOLE</div>
+        <div className="sidebar-brand">
+          <div className="brand-mark" aria-hidden="true">ST</div>
+          <div><div className="brand-name">SmartTrade</div><div className="brand-caption">Admin Console</div></div>
+        </div>
         <nav aria-label="Admin navigation">
-          {pages.filter(item => !['messages', 'banners'].includes(item.id) || canMessage).map(item => <a key={item.id} href={`#${item.id}`} className={page === item.id ? 'active' : undefined} aria-current={page === item.id ? 'page' : undefined}>{item.label}{item.id === 'messages' && supportUnread > 0 && <span className="support-badge">{supportUnread}</span>}</a>)}
+          {navigationGroups.map(group => <div className="nav-group" key={group.label}>
+            <span className="nav-caption">{group.label}</span>
+            {group.ids.map(id => {
+              const item = pages.find(candidate => candidate.id === id)!;
+              if (['messages', 'banners'].includes(id) && !canMessage) return null;
+              return <a key={id} href={`#${id}`} className={page === id ? 'active' : undefined} aria-current={page === id ? 'page' : undefined}>{item.label}{id === 'messages' && supportUnread > 0 && <span className="support-badge">{supportUnread}</span>}</a>;
+            })}
+          </div>)}
         </nav>
         <p className="sidebar-note">Staff permissions are enforced by the API. Private documents are never served from public URLs.</p>
       </aside>
 
       <main className="main-content" id="page-content">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">SMARTTRADE / ADMIN</p>
-            <h1>{currentPage.title}</h1>
+          <div className="topbar-title">
+            <span className="brand-mark" aria-hidden="true">ST</span>
+            <div><p className="eyebrow">SmartTrade Admin</p><h1>{currentPage.title}</h1></div>
           </div>
           <div className="topbar-actions">
             {apkMetadata && <div className="apk-download">
@@ -344,30 +360,38 @@ function App() {
           </div>
         </header>
 
-        <section className="welcome-panel" aria-labelledby="welcome-title">
+        {!signInView && <section className="welcome-panel" aria-labelledby="welcome-title">
           <div>
-            <p className="eyebrow">RELEASE 1</p>
-            <h2 id="welcome-title">{currentPage.label}</h2>
+            <h2 id="welcome-title" className="sr-only">{currentPage.label}</h2>
             <p>{currentPage.description}</p>
           </div>
-          <div className="welcome-symbol" aria-hidden="true">ST</div>
-        </section>
+        </section>}
 
         {sessionMessage && <p className="action-message error" role="status">{sessionMessage}</p>}
-        {page === 'overview' ? <section id="overview" className="queue-section"><h2>Administration workflows</h2><p>The API badge reports process health only. Staff access and permissions are checked separately; it does not indicate OTP configuration or database readiness.</p><div className="cards">{pages.filter(item => item.id !== 'overview').map(item => <a className="queue-card" key={item.id} href={`#${item.id}`}><strong>{item.label}</strong><span>{accessToken ? 'Open workflow · backend permissions apply' : 'Staff sign-in required'}</span></a>)}</div></section> : !apiConfigured ? (
+        {page === 'overview' ? <section id="overview" className="queue-section overview">
+          <div className="overview-metrics" aria-label="Workspace status">
+            <div><span>API connection</span><strong>{apiStatus === 'checking' ? 'Checking…' : apiStatus === 'connected' ? 'Connected' : 'Unavailable'}</strong></div>
+            <div><span>Staff session</span><strong>{accessToken ? 'Signed in' : 'Signed out'}</strong></div>
+            {canMessage && <div><span>Unread support messages</span><strong>{supportUnread}</strong></div>}
+          </div>
+          <h2>Administration workflows</h2>
+          <p>The API badge reports process health only. Staff access and permissions are checked separately; it does not indicate OTP configuration or database readiness.</p>
+          <div className="cards">{pages.filter(item => item.id !== 'overview').map(item => <a className="queue-card" key={item.id} href={`#${item.id}`}><strong>{item.label}</strong><p>{item.description}</p><span>{accessToken ? 'Open workflow · backend permissions apply' : 'Staff sign-in required'}</span></a>)}</div>
+        </section> : !apiConfigured ? (
           <section className="state-panel error-panel" aria-live="polite">
             <h2>API configuration required</h2>
             <p>Set <code>VITE_API_BASE_URL</code> in the admin environment to the API base path, such as the local development API. Restart the Vite server after changing it.</p>
           </section>
         ) : !accessToken ? (
           <section className="auth-panel" aria-labelledby="signin-title">
-            <div>
+            <div className="auth-intro">
+              <span className="brand-mark" aria-hidden="true">ST</span>
               <p className="eyebrow">STAFF ACCESS</p>
               <h2 id="signin-title">Sign in to access {currentPage.label}</h2>
               <p>Use an existing staff account and the configured OTP provider. This screen does not create staff accounts or bypass API permissions.</p>
               {import.meta.env.DEV && devOtpEnabled ? <p role="status">LOCAL DEVELOPMENT OTP: no SMS is sent. Any non-empty code is accepted only for the configured development environment. Admin access still requires the designated active STAFF account and enabled development authentication.</p> : <p>Without a configured provider or explicitly enabled local development OTP mode, requests return AUTH_PROVIDER_UNAVAILABLE.</p>}
             </div>
-            <div>
+            <div className="auth-fields">
             {import.meta.env.DEV && devAuthEnabled && <div className="state-panel"><h3>Local development authentication</h3><p>Uses only the server-designated existing staff account. No phone verification or permissions are granted.</p><button className="button button-quiet" type="button" disabled={loginBusy} onClick={() => void developmentLogin()}>Development Login</button></div>}
             <form className="signin-form" onSubmit={otpRequested ? signIn : requestOtp}>
               <label htmlFor="staff-mobile">Staff mobile number (+91)</label>
@@ -414,7 +438,7 @@ function App() {
               {queueState === "ready" && cases.length > 0 && <div className="case-list">
                 {cases.map((item) => <button className={`case-row${selectedId === item.company_id ? " selected" : ""}`} disabled={claimBusy || decisionBusy} key={item.id} onClick={() => { setSelectedId(item.company_id); setActionMessage(null); setDecision(null); }}>
                   <span className="case-row-main"><strong>{item.legal_name}</strong><span>{item.company_email}</span><small>Submitted {formatDate(item.submitted_at)}</small></span>
-                  <span className="case-row-meta"><span className="status-pill">{item.status}</span><small>{item.documents.length} document{item.documents.length === 1 ? "" : "s"}</small></span>
+                  <span className="case-row-meta"><span className="status-pill" data-status={item.status}>{item.status}</span><small>{item.documents.length} document{item.documents.length === 1 ? "" : "s"}</small></span>
                 </button>)}
               </div>}
             </div>
@@ -423,7 +447,7 @@ function App() {
               {!selectedCase ? <div className="state-panel detail-placeholder"><h3>Select a company review</h3><p>Company registration details and the assigned review actions will appear here.</p></div> : <>
                 <div className="detail-heading">
                   <div><p className="eyebrow">COMPANY {selectedCase.company.id}</p><h2>{selectedCase.company.legal_name}</h2></div>
-                  <span className="status-pill">{selectedCase.company.verification_state}</span>
+                  <span className="status-pill" data-status={selectedCase.company.verification_state}>{selectedCase.company.verification_state}</span>
                 </div>
                 <div className="detail-card">
                   <h3>Registration details</h3>

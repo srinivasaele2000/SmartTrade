@@ -83,7 +83,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
   if (!allowed) return <p>Your staff role cannot manage the catalogue vault.</p>;
   return <section className="queue-section" aria-label="Catalogue vault">
     <h2>Upload brand catalogue</h2>
-    <form onSubmit={upload} className="detail-card">
+    <form onSubmit={upload} className="detail-card form-grid">
       <label>Business type <select name="business_type" required value={business}
         onChange={event => {setBusiness(event.target.value); setSubCategory('');}}>
         <option value="" disabled>Select business type</option>
@@ -117,22 +117,22 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     </div>
     {page.error ? <><p role="alert">{page.error}</p><button onClick={page.reload}>Retry</button></>
       : !page.data ? <p role="status">Loading catalogue documents…</p>
-      : !page.data.results.length ? <p>{filterBusiness ? 'No catalogue documents match these filters.' : 'No catalogue documents have been uploaded.'}</p>
+      : !page.data.results.length ? <p className="empty-state">{filterBusiness ? 'No catalogue documents match these filters.' : 'No catalogue documents have been uploaded.'}</p>
       : <div className="onboarding-table"><table>
         <caption>Catalogue documents</caption>
         <thead><tr>{['Title', 'Brand', 'Business type', 'Sub-Business', 'File', 'Uploaded', 'Status', 'Actions'].map(value => <th key={value} scope="col">{value}</th>)}</tr></thead>
         <tbody>{page.data.results.map(item => <tr key={item.key}>
           <td>{item.title}</td><td>{item.brand_name}</td><td>{catalogueBusinessTypes[item.business_type]}</td>
           <td>{SUB_BUSINESS_TAXONOMY[item.business_type]?.find(option => option.key === item.sub_category)?.label || 'Uncategorized'}</td>
-          <td>{item.filename} · {indianNumber(item.file_size_bytes)} bytes</td><td>{istDateTime(item.created_at)}</td>
-          <td>{item.is_active ? 'Active' : 'Archived'}</td>
-          <td><button disabled={busy} onClick={() => {setError(''); setEdit(item);}}>Edit</button>
+          <td><span className="cell-filename" title={item.filename}>{item.filename}</span> <small className="cell-meta">{indianNumber(item.file_size_bytes)} bytes</small></td><td className="cell-meta">{istDateTime(item.created_at)}</td>
+          <td><span className="status-pill" data-status={item.is_active ? 'active' : 'archived'}>{item.is_active ? 'Active' : 'Archived'}</span></td>
+          <td><div className="table-actions"><button disabled={busy} onClick={() => {setError(''); setEdit(item);}}>Edit</button>
           <button disabled={busy} onClick={() => void run(async () => {
             const response = await apiResponse(baseUrl, path + item.key + '/file/', token);
             setPreview({document: item, url: URL.createObjectURL(await response.blob())});
-          })}>Preview / download</button>{item.is_active && <button disabled={busy} onClick={() => setRemove(item)}>Archive</button>}
+          })}>Preview / download</button>{item.is_active && <button className="btn-danger" disabled={busy} onClick={() => setRemove(item)}>Archive</button>}
           {item.is_active && item.content_type === 'application/pdf' && <button disabled={busy}
-            onClick={() => {setNotice(''); setError(''); setExtraction(item);}}>Extract Items &amp; Images from PDF</button>}</td>
+            onClick={() => {setNotice(''); setError(''); setExtraction(item);}}>Extract Items &amp; Images from PDF</button>}</div></td>
         </tr>)}</tbody>
       </table></div>}
     {page.data && <nav aria-label="Catalogue pages">
@@ -147,7 +147,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     {edit && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="edit-catalogue-title"
       onCancel={event => {event.preventDefault(); if (!busy) setEdit(null);}}>
       <h3 id="edit-catalogue-title">Edit catalogue</h3>
-      <form className="detail-card" onSubmit={saveChanges}>
+      <form className="detail-card form-grid" onSubmit={saveChanges}>
         <label>Catalogue Title <input required maxLength={200} value={edit.title}
           onChange={event => setEdit({...edit, title: event.target.value})} /></label>
         <label>Brand Name <input required maxLength={200} value={edit.brand_name}
