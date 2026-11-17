@@ -33,7 +33,9 @@ class ItemOutput(serializers.ModelSerializer):
         return item_hsn(product)
 
     def get_image_url(self, product):
-        return media_url(self.context['request'], attachment(product, ProductMedia.Kind.IMAGE))
+        images = self.context.get('images')
+        image = images.get(product.pk) if images is not None else attachment(product, ProductMedia.Kind.IMAGE)
+        return media_url(self.context['request'], image)
 
     class Meta:
         model = Product
@@ -46,11 +48,14 @@ def eligible_associations():
         brand__company__activity_state='ACTIVE', brand__company__owner_account__access_state='ACTIVE')
 
 
-class ItemInput(serializers.Serializer):
+class ItemFields(serializers.Serializer):
     name = serializers.CharField(max_length=200)
     product_code = serializers.CharField(max_length=100)
     hsn_sac_code = serializers.RegexField(r'^[0-9]{4,8}$')
     price_per_unit = serializers.DecimalField(max_digits=18, decimal_places=4, min_value=Decimal('0'))
+
+
+class ItemInput(ItemFields):
     brand_category = serializers.PrimaryKeyRelatedField(queryset=BrandCategory.objects.none())
     image = serializers.FileField(required=False)
 
@@ -63,24 +68,37 @@ class ItemInput(serializers.Serializer):
         return upload
 
 
-def require_available_code(code, *, exclude=None):
-    if connection.vendor == 'postgresql':
+def lock_product_codes(codes):
+    if codes and connection.vendor == 'postgresql':
         with connection.cursor() as cursor:
-            cursor.execute('SELECT pg_advisory_xact_lock(46123802, hashtext(%s))', [code])
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(46123802, hashtext(code)) '
+                'FROM unnest(%s::text[]) AS codes(code) ORDER BY code COLLATE "C"',
+                [list(codes)],
+            )
+
+
+def require_available_code(code, *, exclude=None):
+    lock_product_codes([code])
     if Product.objects.filter(code=code).exclude(pk=exclude).exists():
         raise serializers.ValidationError({'product_code': 'This product code is already in use.'})
 
 
-def create_catalogue_item(request, fields, saved_files, *, pack_size=None):
-    require_available_code(fields['product_code'])
+def catalogue_product(fields, *, pack_size=None):
     specifications = {'HSN': fields['hsn_sac_code']}
     if pack_size:
         specifications['Pack size'] = pack_size
-    product = Product.objects.create(
+    return Product(
         brand_category=fields['brand_category'], name=fields['name'], code=fields['product_code'],
         specifications=specifications, unit='Unit',
         catalogue_price=fields['price_per_unit'], currency='INR', state='PUBLISHED',
     )
+
+
+def create_catalogue_item(request, fields, saved_files, *, pack_size=None):
+    require_available_code(fields['product_code'])
+    product = catalogue_product(fields, pack_size=pack_size)
+    product.save(force_insert=True)
     upload = fields.get('image')
     if upload:
         media = ProductMedia.objects.create(product=product, kind=ProductMedia.Kind.IMAGE,

@@ -11,14 +11,14 @@ const compiled = ts.transpileModule(source, {compilerOptions: {
   module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
 }}).outputText;
 
-function review(categories = [{id: 7, category__name: 'Switches', brand__company__legal_name: 'Example'}], requestApi) {
-  const rows = [
+function review(categories = [{id: 7, category__name: 'Switches', brand__company__legal_name: 'Example'}], requestApi, suppliedRows, onCommit) {
+  const rows = (suppliedRows ?? [
     {id: 1, product_code: 'one', association: '7', status: 'DRAFT'},
     {id: 2, product_code: 'two', association: '7', status: 'DRAFT'},
     {id: 3, product_code: 'missing', association: '', status: 'DRAFT'},
     {id: 4, product_code: 'invalid', association: '99', status: 'DRAFT'},
     {id: 5, product_code: 'reviewed', association: '7', status: 'APPROVED'},
-  ].map(row => ({...row, approved: false, image_url: null}));
+  ]).map(row => ({...row, approved: false, image_url: null}));
   const state = [rows, categories, false, '', {}, 0, '', false, true];
   let hook = 0;
   let refHook = 0;
@@ -43,7 +43,7 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
   const get = label => {
     hook = 0;
     refHook = 0;
-    const tree = module.exports.default({baseUrl: '/api/v1', token: 'test', documentKey: 'test', title: 'Example'});
+    const tree = module.exports.default({baseUrl: '/api/v1', token: 'test', documentKey: 'test', title: 'Example', onCommit});
     function find(node) {
       if (Array.isArray(node)) return node.map(find).find(Boolean);
       if (node?.props?.['aria-label'] === label || node?.props?.placeholder === label ||
@@ -163,4 +163,49 @@ test('partial approval sets native indeterminate state and an indeterminate togg
 test('header is disabled when no category association is eligible', () => {
   const get = review([]);
   assert.equal(get('Select all eligible rows').disabled, true);
+});
+
+test('publishing 331 approvals submits once and keeps progress and errors beside the action', async () => {
+  const rows = Array.from({length: 331}, (_, index) => ({
+    id: index + 1, page: 1, status: 'DRAFT', association: '7', name: 'Switch ' + index,
+    product_code: 'SW-' + index, hsn_sac_code: index ? '8536' : '', price_per_unit: '29.50',
+  }));
+  const requests = [];
+  const published = [];
+  let finish;
+  const get = review(undefined, (_base, path, _token, options) => {
+    requests.push({path, options});
+    return new Promise((resolve, reject) => {finish = {resolve, reject};});
+  }, rows, (...args) => published.push(args));
+  get('Select all eligible rows').onChange();
+  assert.equal(get('Commit & Publish (331)').disabled, false);
+  const form = get('Publish catalogue items');
+  assert.equal(form.noValidate, true);
+  const event = {preventDefault() {}};
+  const inFlight = form.onSubmit(event);
+  await form.onSubmit(event);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, '/admin/catalogues/test/drafts/commit/');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(JSON.parse(requests[0].options.body).rows.length, 331);
+  assert.equal(get('Committing & Publishing…').disabled, true);
+  for (const label of ['Publish status at top', 'Publish status by actions']) {
+    assert.match(get(label).children, /Publishing 331/);
+  }
+
+  finish.reject(new Error('Page 1, SW-0: Enter a valid HSN.'));
+  await inFlight;
+  for (const label of ['Publish status at top', 'Publish status by actions']) {
+    assert.equal(get(label).role, 'alert');
+    assert.match(get(label).children, /SW-0.*valid HSN/);
+  }
+  assert.equal(get('Commit & Publish (331)').disabled, false);
+  get('HSN for row 1').onChange({target: {value: '8536'}});
+  const retry = get('Publish catalogue items').onSubmit(event);
+  assert.equal(JSON.parse(requests[1].options.body).rows[0].hsn_sac_code, '8536');
+  finish.resolve({items: Array.from({length: 331}, () => ({})), discarded: 0});
+  await retry;
+  assert.deepEqual(published, [[331, 0]]);
+  assert.match(get('Publish status by actions').children, /331 catalogue items published/);
+  assert.equal(get('Commit & Publish (331)'), undefined);
 });

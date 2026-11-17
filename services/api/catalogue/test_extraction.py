@@ -6,7 +6,9 @@ from unittest.mock import patch
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import FileSystemStorage
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from PIL import Image
 import pymupdf
 from reportlab.lib.utils import ImageReader
@@ -14,7 +16,7 @@ from reportlab.pdfgen import canvas
 from rest_framework.test import APIClient
 
 from catalogue.extraction import normalize_item_name
-from catalogue.models import Brand, BrandCategory, CatalogueDocument, Category, DraftCatalogueItem, ProductMedia
+from catalogue.models import Brand, BrandCategory, CatalogueAudit, CatalogueDocument, Category, DraftCatalogueItem, Product, ProductMedia
 from catalogue.services.pdf_item_extractor import (
     Candidate, clean_extracted_name, extract_items, item_name, matching_image,
     strip_leading_category_banner,
@@ -565,3 +567,60 @@ class CatalogueExtractionTests(TestCase):
         self.assertTrue((self.root / self.document.file.name).is_file())
         self.assertEqual(anon.get('/api/v1/catalogue/items/').data['count'], 1)
         self.assertEqual(self.client.post(self.base + 'drafts/commit/', payload, format='json').status_code, 409)
+
+
+    def test_publish_331_rows_with_thumbnails_using_batched_queries(self):
+        thumbnail = BytesIO()
+        Image.new('RGB', (48, 48), 'green').save(thumbnail, format='PNG')
+        draft_storage = DraftCatalogueItem._meta.get_field('image').storage
+        path = draft_storage.save('test-fixtures/thumbnail.png', ContentFile(thumbnail.getvalue()))
+        drafts = DraftCatalogueItem.objects.bulk_create([
+            DraftCatalogueItem(source_document=self.document, page=index // 25 + 1, name=f'Switch {index}',
+                               product_code=f'BATCH-{index:03}', image=path, pack_size={'standard': '10'})
+            for index in range(332)
+        ])
+        rows = [
+            {'id': draft.pk, 'approved': True, 'name': draft.name, 'product_code': draft.product_code,
+             'hsn_sac_code': '8536', 'price_per_unit': '29.50', 'brand_category': self.association.pk}
+            for draft in drafts[:-1]
+        ] + [{'id': drafts[-1].pk, 'approved': False}]
+
+        rows[165]['hsn_sac_code'] = ''
+        invalid = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
+        self.assertContains(invalid, 'BATCH-165', status_code=400)
+        self.assertContains(invalid, 'hsn_sac_code', status_code=400)
+        self.assertEqual(Product.objects.count(), 0)
+        self.assertEqual(self.document.draft_items.filter(status='DRAFT').count(), 332)
+        rows[165]['hsn_sac_code'] = '8536'
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertLessEqual(len(queries), 20)
+        self.assertEqual(len(response.data['items']), 331)
+        self.assertEqual(response.data['discarded'], 1)
+        self.assertEqual(Product.objects.filter(state='PUBLISHED').count(), 331)
+        self.assertEqual(ProductMedia.objects.count(), 331)
+        self.assertEqual(CatalogueAudit.objects.filter(action='PRODUCT_CREATED').count(), 331)
+        self.assertEqual(self.document.draft_items.filter(status='APPROVED', product__isnull=False).count(), 331)
+        self.assertEqual(Product.objects.get(code='BATCH-165').specifications, {'HSN': '8536', 'Pack size': {'standard': '10'}})
+        self.assertEqual(self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json').status_code, 409)
+
+    def test_publish_rolls_back_database_and_copied_photos_when_a_draft_image_is_missing(self):
+        extracted = self.client.post(self.base + 'extract/').data['rows']
+        drafts = list(self.document.draft_items.order_by('pk'))
+        self.assertTrue(drafts[0].image and drafts[1].image)
+        drafts[1].image.storage.delete(drafts[1].image.name)
+        files_before = {path for path in self.root.rglob('*') if path.is_file()}
+        rows = [
+            {**{field: row[field] for field in ('id', 'name', 'product_code', 'hsn_sac_code', 'price_per_unit')},
+             'brand_category': self.association.pk, 'approved': True}
+            for row in extracted
+        ]
+        failed = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
+        self.assertContains(failed, 'The draft image is missing.', status_code=400)
+        self.assertEqual(Product.objects.count(), 0)
+        self.assertEqual(ProductMedia.objects.count(), 0)
+        self.assertEqual(CatalogueAudit.objects.count(), 0)
+        self.assertEqual(self.document.draft_items.filter(status='DRAFT').count(), 2)
+        self.assertEqual({path for path in self.root.rglob('*') if path.is_file()}, files_before)

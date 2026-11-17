@@ -1,6 +1,7 @@
 from functools import partial
 from io import BytesIO
 from pathlib import PurePath
+from uuid import uuid4
 import re
 
 from PIL import Image, ImageOps
@@ -17,9 +18,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
-from .items import ItemInput, create_catalogue_item, eligible_associations
-from .media import storage, validate_image
-from .models import CatalogueDocument, DraftCatalogueItem
+from .items import ItemFields, ItemOutput, catalogue_product, eligible_associations, lock_product_codes
+from .media import storage, validate_file, validate_image
+from .models import CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
 def document_associations(document):
@@ -302,52 +303,95 @@ class CommitDrafts(StaffExtraction):
         input_data = ReviewInput(data=request.data)
         input_data.is_valid(raise_exception=True)
         rows = input_data.validated_data['rows']
+        files = storage()
         saved = []
-        created = []
         try:
             with transaction.atomic():
                 document = get_object_or_404(CatalogueDocument.objects.select_for_update(), key=key, is_active=True)
-                associations = document_associations(document)
                 drafts = document.draft_items.in_bulk([row['id'] for row in rows])
                 if len(drafts) != len(rows) or any(item.status != DraftCatalogueItem.Status.DRAFT for item in drafts.values()):
-                    return Response({'detail': 'One or more drafts have already been reviewed or belong to another PDF.'}, status=409)
-                # Take code locks in a consistent order across simultaneous imports.
-                for row in sorted(rows, key=lambda row: (row.get('product_code', ''), row['id'])):
+                    return Response({'detail': 'One or more drafts have already been reviewed or belong to another PDF. Reopen the review to see their current status.'}, status=409)
+
+                associations = document_associations(document).select_related('brand', 'category').in_bulk(
+                    {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
+                )
+                approved = []
+                codes = set()
+                for row in rows:
                     draft = drafts[row['id']]
                     if not row['approved']:
                         draft.status = DraftCatalogueItem.Status.DISCARDED
-                        draft.save(update_fields=['status'])
                         continue
-                    fields = {field: row[field] for field in (
-                        'name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'brand_category',
-                    ) if field in row}
-                    if draft.image:
-                        try:
-                            with draft.image.open('rb') as image:
-                                fields['image'] = SimpleUploadedFile(PurePath(draft.image.name).name, image.read(), 'image/png')
-                        except FileNotFoundError:
-                            raise serializers.ValidationError({'rows': f'Page {draft.page}, {draft.product_code}: the draft image is missing.'})
-                    item = ItemInput(data=fields)
+                    label = f'Page {draft.page}, {row.get("product_code") or draft.product_code} (draft {draft.pk})'
+                    item = ItemFields(data=row)
                     if not item.is_valid():
-                        raise serializers.ValidationError({'rows': {str(draft.id): item.errors}})
+                        raise serializers.ValidationError({'rows': {label: item.errors}})
+                    association = associations.get(row.get('brand_category'))
+                    if association is None:
+                        raise serializers.ValidationError({'rows': {label: 'Choose a category for the PDF brand.'}})
                     values = item.validated_data
-                    association = values['brand_category']
-                    if not associations.filter(pk=association.pk).exists():
-                        raise serializers.ValidationError({'rows': f'{draft.product_code}: choose a category for the PDF brand.'})
-                    product, result = create_catalogue_item(request, values, saved, pack_size=draft.pack_size)
+                    code = values['product_code']
+                    if code in codes:
+                        raise serializers.ValidationError({'rows': {label: 'This product code appears more than once in this batch.'}})
+                    codes.add(code)
+                    product = catalogue_product({**values, 'brand_category': association}, pack_size=draft.pack_size)
+                    approved.append((draft, product, label))
+
+                lock_product_codes(codes)
+                conflicts = set(Product.objects.filter(code__in=codes).values_list('code', flat=True))
+                if conflicts:
+                    label = next(label for _, product, label in approved if product.code in conflicts)
+                    raise serializers.ValidationError({'rows': {label: 'This product code is already in use.'}})
+                Product.objects.bulk_create([product for _, product, _ in approved])
+                images = {}
+                for draft, product, label in approved:
+                    if draft.image:
+                        images[product.pk] = self.save_image(draft, product, label, files, saved)
                     draft.name = product.name
                     draft.product_code = product.code
-                    draft.hsn_sac_code = values['hsn_sac_code']
+                    draft.hsn_sac_code = product.specifications['HSN']
                     draft.price_per_unit = product.catalogue_price
-                    draft.category = association.category.name
+                    draft.category = product.brand_category.category.name
                     draft.product = product
                     draft.status = DraftCatalogueItem.Status.APPROVED
-                    draft.save()
-                    created.append(result)
+                ProductMedia.objects.bulk_create(list(images.values()))
+                DraftCatalogueItem.objects.bulk_update(
+                    list(drafts.values()), ['name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category', 'product', 'status'],
+                    batch_size=100,
+                )
+                created = ItemOutput([product for _, product, _ in approved], many=True,
+                                     context={'request': request, 'images': images}).data
+                CatalogueAudit.objects.bulk_create([
+                    CatalogueAudit(actor=request.user, action='PRODUCT_CREATED', product=product,
+                                   brand=product.brand_category.brand, company_id=product.brand_category.brand.company_id,
+                                   snapshot=result)
+                    for (_, product, _), result in zip(approved, created, strict=True)
+                ])
         except Exception as error:
             for name in saved:
-                storage().delete(name)
+                files.delete(name)
             if isinstance(error, IntegrityError):
                 raise serializers.ValidationError({'rows': 'A product code or category conflicts with the active catalogue.'}) from error
+            if isinstance(error, OSError):
+                return Response({'detail': 'The catalogue files could not be saved. No items were published.'}, status=503)
             raise
-        return Response({'items': created, 'discarded': sum(not row['approved'] for row in rows)}, status=201)
+        return Response({'items': created, 'discarded': len(rows) - len(created)}, status=201)
+
+    @staticmethod
+    def save_image(draft, product, label, files, saved):
+        try:
+            with draft.image.open('rb') as image:
+                upload = SimpleUploadedFile(PurePath(draft.image.name).name, image.read(), 'image/png')
+        except FileNotFoundError as error:
+            raise serializers.ValidationError({'rows': {label: 'The draft image is missing.'}}) from error
+        try:
+            validate_file(upload, ProductMedia.Kind.IMAGE)
+        except serializers.ValidationError as error:
+            raise serializers.ValidationError({'rows': {label: error.detail}}) from error
+        media = ProductMedia(product=product, kind=ProductMedia.Kind.IMAGE, key=uuid4(), filename=upload.name,
+                             content_type=upload.content_type, size=upload.size)
+        name = files.save(media.storage_name, upload)
+        saved.append(name)
+        if name != media.storage_name:
+            raise OSError('Could not allocate catalogue image storage.')
+        return media

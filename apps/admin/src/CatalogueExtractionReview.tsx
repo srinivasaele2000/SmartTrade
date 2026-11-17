@@ -16,6 +16,7 @@ type Review = {rows: Draft[]; categories: Category[];
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
 const CHUNK_PAGES = 3;
+const PUBLISH_TIMEOUT_MS = 120_000;
 const previewQueue: Array<() => Promise<void>> = [];
 let activePreviews = 0;
 
@@ -114,6 +115,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [extracting, setExtracting] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [pageProgress, setPageProgress] = useState<{done: number; total: number}>();
+  const [publishFeedback, setPublishFeedback] = useState<{kind: 'pending' | 'success' | 'error'; message: string}>();
+  const publishing = useRef(false);
   const extraction = useRef<{cancelled: boolean} | null>(null);
 
   function applyReview(result: Review, preserveEdits: boolean) {
@@ -157,6 +160,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   async function extractBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!loaded || busy || photosBusy || extraction.current) return;
+    setPublishFeedback(undefined);
     setError('');
     let remaining: string | undefined;
     let activeAppend = append;
@@ -273,20 +277,48 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function commit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || photosBusy || !approvedCount) return;
+    if (publishing.current || busy || photosBusy || !approvedCount) return;
+    publishing.current = true;
     setBusy(true);
     setError('');
+    setPublishFeedback({kind: 'pending', message: `Publishing ${approvedCount} catalogue items…`});
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
     try {
+      const batch = pending.map(row => row.approved && isEligible(row) ? {
+        id: row.id, approved: true, name: row.name, product_code: row.product_code, hsn_sac_code: row.hsn_sac_code,
+        price_per_unit: row.price_per_unit ?? '', brand_category: Number(row.association),
+      } : {id: row.id, approved: false});
       const result = await requestApi<{items: unknown[]; discarded: number}>(baseUrl, path + 'drafts/commit/', token, {
-        method: 'POST',
-        body: JSON.stringify({rows: pending.map(row => row.approved && isEligible(row) ? {
-          id: row.id, approved: true, name: row.name, product_code: row.product_code, hsn_sac_code: row.hsn_sac_code,
-          price_per_unit: row.price_per_unit ?? '', brand_category: Number(row.association),
-        } : {id: row.id, approved: false})}),
+        method: 'POST', body: JSON.stringify({rows: batch}), signal: controller.signal,
       });
+      if (!Array.isArray(result?.items) || result.items.length !== approvedCount ||
+          result.discarded !== batch.length - approvedCount) {
+        throw new Error('The publish response could not be confirmed. Reopen the review before retrying.');
+      }
+      const committed = new Map(batch.map(row => [row.id, row.approved]));
+      setRows(current => current.map(row => committed.has(row.id) ? {
+        ...row, approved: false, status: committed.get(row.id) ? 'APPROVED' : 'DISCARDED',
+      } : row));
+      setPublishFeedback({kind: 'success', message: `${result.items.length} catalogue items published. ${result.discarded} drafts discarded.`});
       onCommit(result.items.length, result.discarded);
-    } catch (failure) {setError(failure instanceof Error ? failure.message : 'Could not commit the selected items.');}
-    finally {setBusy(false);}
+    } catch (failure) {
+      const unconfirmed = controller.signal.aborted || (failure instanceof ApiError &&
+        (failure.status === 0 || failure.status === 408 || failure.status >= 500));
+      const message = failure instanceof Error ? failure.message : 'Could not commit the selected items.';
+      setPublishFeedback({kind: 'error', message: unconfirmed
+        ? `${controller.signal.aborted ? 'The publish request timed out.' : message} Reopen the review to check the draft status before retrying.`
+        : message});
+    } finally {
+      clearTimeout(timer);
+      publishing.current = false;
+      setBusy(false);
+    }
+  }
+
+  function publishBanner(label: string) {
+    return publishFeedback && <p aria-label={label} role={publishFeedback.kind === 'error' ? 'alert' : 'status'}
+      className={`action-message ${publishFeedback.kind}`}>{publishFeedback.message}</p>;
   }
 
   return <dialog ref={dialog} className="contacts-dialog catalogue-review-dialog" aria-labelledby="pdf-review-title"
@@ -308,9 +340,10 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       }}>Cancel after current chunk</button>}
     </form>
     {pending.length > 0 && !append && <p>Extracting this batch will replace all pending drafts for this catalogue.</p>}
-    {busy && !batchStatus && <p role="status">{loaded ? 'Processing catalogue items…' : 'Loading existing drafts…'}</p>}
+    {busy && publishFeedback?.kind !== 'pending' && !batchStatus && <p role="status">{loaded ? 'Processing catalogue items…' : 'Loading existing drafts…'}</p>}
     {cancelPending && <p role="status">Finishing the current request. Completed drafts will be kept.</p>}
     {error && <p role="alert">{error}</p>}
+    {publishBanner('Publish status at top')}
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
     {loaded && <p aria-live="polite">Showing {pending.length} extracted draft items</p>}
     {batchStatus && <p role="status">{batchStatus}</p>}
@@ -334,7 +367,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     </section>}
     {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
     {!!pending.length && !categories.length && <p>Approval requires an active category linked to this PDF’s brand under a verified, active company. Check the vault’s brand name against the catalogue brand.</p>}
-    {!!rows.length && <form onSubmit={commit}>
+    {!!rows.length && <form aria-label="Publish catalogue items" noValidate onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
         <caption>Approve the rows to publish. Unchecked drafts will be discarded when you commit.</caption>
         <colgroup>{['approve', 'page', 'image', 'name', 'code', 'hsn', 'price', 'category'].map(column =>
@@ -404,8 +437,11 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         <button type="button" className="button button-quiet" disabled={busy || !eligibleCount} onClick={toggleAll}>
           {allSelected ? 'Clear selection' : `Select all (${eligibleCount})`}
         </button>
-        <button className="btn-primary" disabled={busy || photosBusy || !approvedCount}>Commit &amp; Publish ({approvedCount})</button>
+        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount}>
+          {publishFeedback?.kind === 'pending' ? 'Committing & Publishing…' : `Commit & Publish (${approvedCount})`}
+        </button>
       </div>}
+      {publishBanner('Publish status by actions')}
     </form>}
     <button className="btn-ghost" disabled={busy || photosBusy} onClick={close}>Close review</button>
   </dialog>;
