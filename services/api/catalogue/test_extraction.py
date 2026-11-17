@@ -332,6 +332,28 @@ class CatalogueExtractionTests(TestCase):
         self.assertTrue(diagnostics['warnings'])
         self.assertEqual([row['id'] for row in result.data['rows']], [draft.pk])
 
+    def test_progressive_range_validates_full_bounds_and_defers_replacement(self):
+        with pymupdf.open() as document, pymupdf.open(stream=self.content, filetype='pdf') as source:
+            for _ in range(3):
+                document.new_page()
+            document.insert_pdf(source)
+            self.document.file.save('chunks.pdf', ContentFile(document.tobytes()))
+        draft = self.document.draft_items.create(page=1, product_code='EXISTING', name='Existing draft')
+        url = self.base + 'extract/'
+        first = {'start_page': 1, 'end_page': 3, 'range_end': 4, 'append': False}
+        invalid = self.client.post(url, {**first, 'range_end': 9}, format='json')
+        self.assertContains(invalid, "exceeds the PDF's 4 pages", status_code=400)
+        blank = self.client.post(url, first, format='json')
+        self.assertEqual(blank.status_code, 200, blank.data)
+        self.assertEqual(blank.data['batch']['processed_through'], 3)
+        self.assertFalse(blank.data['batch']['replaced'])
+        self.assertEqual([row['id'] for row in blank.data['rows']], [draft.pk])
+        priced = self.client.post(url, {'start_page': 4, 'end_page': 4, 'range_end': 4,
+                                        'append': True, 'replace_on_items': True}, format='json')
+        self.assertEqual(priced.status_code, 200, priced.data)
+        self.assertTrue(priced.data['batch']['replaced'])
+        self.assertEqual([row['product_code'] for row in priced.data['rows']], ['SW-001', 'SO-002'])
+
     def test_extracts_image_only_page_with_filename_prefix(self):
         with pymupdf.open(stream=sample_pdf(first_code='SW-001/A', second_photo=False), filetype='pdf') as source, pymupdf.open() as scanned:
             original = source[0]

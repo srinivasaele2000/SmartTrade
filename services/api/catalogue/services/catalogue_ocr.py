@@ -2,10 +2,15 @@
 
 from dataclasses import dataclass
 import csv
-from io import StringIO
+from io import BytesIO, StringIO
+import json
 import shutil
 import subprocess
-from threading import Lock
+import sys
+
+RAPID_OCR_SECONDS = 32
+OCR_PAGE_SECONDS = 44
+MAX_RENDER_SIDE = 2200
 
 
 @dataclass(frozen=True)
@@ -21,29 +26,42 @@ class TextBox:
         return (self.top + self.bottom) / 2
 
 
-_engine = None
-_lock = Lock()
+class OCRPageTimeout(TimeoutError):
+    """A single OCR attempt exceeded its time budget."""
 
 
-def read_page(page):
-    global _engine
-    import numpy as np
+def render_page(page, dpi):
     import pymupdf
+    from PIL import Image, ImageOps
 
-    dpi = min(140, int(72 * 1800 / max(page.rect.width, page.rect.height)))
+    dpi = min(dpi, int(72 * (MAX_RENDER_SIDE - 2) / max(page.rect.width, page.rect.height)))
     if dpi < 1:
-        return []
+        return None, dpi
     pixmap = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
-    pixels = np.frombuffer(pixmap.samples_mv, dtype=np.uint8).reshape(pixmap.height, pixmap.width)
-    if int(pixels.max()) - int(pixels.min()) < 12:
+    image = Image.frombytes('L', (pixmap.width, pixmap.height), pixmap.samples)
+    low, high = image.getextrema()
+    if high - low < 12:
+        return None, dpi
+    if high - low < 160:
+        image = ImageOps.autocontrast(image)
+    output = BytesIO()
+    image.save(output, format='PNG', compress_level=1)
+    return output.getvalue(), dpi
+
+
+def read_page(page, timeout=RAPID_OCR_SECONDS):
+    if timeout <= 0:
+        raise OCRPageTimeout
+    image, dpi = render_page(page, 140)
+    if image is None:
         return []
-    with _lock:
-        if _engine is None:
-            from rapidocr_onnxruntime import RapidOCR
-            _engine = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=1,
-                               det_limit_side_len=960, det_limit_type='max',
-                               rec_rec_img_shape=[3, 48, 96])
-        detections, _ = _engine(pixels, use_cls=False)
+    # A subprocess lets the API terminate stalled ONNX inference and release memory.
+    try:
+        result = subprocess.run([sys.executable, __file__], input=image, capture_output=True,
+                                timeout=timeout, check=True)
+    except subprocess.TimeoutExpired as error:
+        raise OCRPageTimeout from error
+    detections = json.loads(result.stdout)
     scale = 72 / dpi
     boxes = []
     for polygon, text, _ in detections or []:
@@ -57,15 +75,14 @@ def read_page_tesseract(page, timeout):
     executable = shutil.which('tesseract')
     if not executable:
         return [], 'Tesseract is unavailable on this host.'
-    dpi = min(275, int(72 * 4000 / max(page.rect.width, page.rect.height)))
-    if dpi < 1 or timeout <= 0:
+    if timeout <= 0:
         return [], 'Tesseract was skipped because the extraction time budget was reached.'
-    import pymupdf
-
-    pixmap = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
+    image, dpi = render_page(page, 275)
+    if image is None:
+        return [], ''
     try:
         result = subprocess.run([executable, 'stdin', 'stdout', '--psm', '6', 'tsv'],
-                                input=pixmap.tobytes('png'), capture_output=True,
+                                input=image, capture_output=True,
                                 timeout=min(timeout, 25), check=True)
     except subprocess.TimeoutExpired:
         return [], 'Tesseract timed out. Try extracting a smaller range or a clearer scan.'
@@ -78,3 +95,16 @@ def read_page_tesseract(page, timeout):
             x, y, width, height = (int(word[key]) for key in ('left', 'top', 'width', 'height'))
             boxes.append(TextBox(x * scale, y * scale, (x + width) * scale, (y + height) * scale, word['text'].strip()))
     return boxes, ''
+
+
+if __name__ == '__main__':
+    import numpy as np
+    from PIL import Image
+    from rapidocr_onnxruntime import RapidOCR
+
+    with Image.open(BytesIO(sys.stdin.buffer.read())) as image:
+        pixels = np.asarray(image)
+    engine = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=1, det_limit_side_len=960,
+                      det_limit_type='max', rec_rec_img_shape=[3, 48, 96])
+    detections, _ = engine(pixels, use_cls=False)
+    json.dump(detections or [], sys.stdout, default=lambda value: value.tolist())

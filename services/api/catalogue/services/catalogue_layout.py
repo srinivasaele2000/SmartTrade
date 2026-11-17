@@ -25,7 +25,7 @@ SYSTEM = re.compile(
 LENGTH = re.compile(r'\b(\d+(?:[./]\d+)?)\s*(?:mtr(?:s)?|metres?|meters?|m)\b', re.I)
 ALIASES = {
     'name': ('name', 'item name', 'product', 'product name', 'description', 'product description', 'particulars', 'item description'),
-    'code': ('code', 'item code', 'catalogue no', 'catalog no', 'cat no', 'cat number', 'product code', 'part no',
+    'code': ('code', 'item code', 'catalogue no', 'catalog no', 'cat no', 'cat number', 'cat no item code', 'item code cat no', 'product code', 'part no',
              'part number', 'item no', 'sku', 'ref no', 'model', 'material code'),
     'price': ('mrp', 'mrp rs', 'price', 'rate', 'unit price', 'list price', 'price per unit', 'mrp inr'),
     'hsn': ('hsn', 'hsn code', 'hsn sac', 'hsn sac code', 'sac'),
@@ -37,8 +37,10 @@ ALIASES = {
     'box': ('box qty', 'box quantity', 'master pack', 'master carton'),
     'turn': ('turn', 'turns'),
     'knob': ('knob', 'knob type'),
-    'module': ('module', 'modules', 'module size'),
-    'rating': ('rating', 'ampere', 'amperes'),
+    'module': ('mod', 'mods', 'module', 'modules', 'module size'),
+    'rating': ('rating', 'amp', 'amps', 'ampere', 'amperes'),
+    'way': ('way', 'ways', 'no of ways'),
+    'electrical_details': ('mod amp way', 'module amp way'),
     'category': ('category', 'sub category', 'segment'),
     'image': ('image', 'photo', 'picture'),
 }
@@ -275,7 +277,7 @@ def layout_rows(boxes, width, parse_price):
         block = [[box for box in line if left <= (box.x0 + box.x1) / 2 < right] for line in lines]
         rows.extend(parse_band([line for line in block if line], left, right, parse_price))
     advanced = len(bands) > 1 or any(
-        column.key in {'size', 'size_cm', 'size_inch', 'turn', 'knob', 'pack', 'box'} or column.length
+        column.key in {'size', 'size_cm', 'size_inch', 'turn', 'knob', 'pack', 'box', 'way', 'electrical_details'} or column.length
         for header in headers for column in header
     ) or any(HSN.search(line_text(line)) for line in lines)
     return rows, len({(row.bounds[0], row.section) for row in rows}), advanced

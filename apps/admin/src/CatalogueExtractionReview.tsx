@@ -13,8 +13,9 @@ type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number;
   items_extracted?: number; skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type Review = {rows: Draft[]; categories: Category[];
   diagnostics?: Diagnostics;
-  batch?: {start_page: number; end_page: number; processed_through: number; added: number}};
+  batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
+const CHUNK_PAGES = 3;
 const previewQueue: Array<() => Promise<void>> = [];
 let activePreviews = 0;
 
@@ -110,6 +111,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [extracted, setExtracted] = useState(false);
   const [batchStatus, setBatchStatus] = useState('');
   const [diagnostics, setDiagnostics] = useState<Diagnostics>();
+  const [extracting, setExtracting] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const extraction = useRef<{cancelled: boolean} | null>(null);
 
   function applyReview(result: Review, preserveEdits: boolean) {
     setCategories(result.categories);
@@ -128,6 +132,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   }
 
   useEffect(() => {dialog.current?.showModal();}, []);
+  useEffect(() => () => {
+    if (extraction.current) extraction.current.cancelled = true;
+  }, [path]);
   useEffect(() => {
     let active = true;
     setBusy(true);
@@ -148,30 +155,80 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function extractBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!loaded || busy || photosBusy) return;
+    if (!loaded || busy || photosBusy || extraction.current) return;
     setError('');
+    let remaining: string | undefined;
+    let activeAppend = append;
+    let replacePending = !append;
+    let pagesDone = 0;
+    let added = 0;
     try {
-      const body = JSON.stringify(extractionPayload(range, append));
+      const payload = extractionPayload(range, append);
+      const run = {cancelled: false};
+      extraction.current = run;
       setBusy(true);
+      setExtracting(payload.start_page !== undefined && payload.end_page !== undefined &&
+        payload.end_page - payload.start_page >= CHUNK_PAGES);
+      setCancelPending(false);
       setBatchStatus('');
       setDiagnostics(undefined);
-      const result = await requestExtraction(baseUrl, path + 'extract/', token, body);
-      const batch = result.batch;
-      const partial = batch && batch.processed_through < batch.end_page;
-      applyReview(result, append || Boolean(partial));
-      if (batch) {
-        const next = `${batch.processed_through + 1}-${batch.end_page}`;
-        setBatchStatus(`Processed pages ${batch.start_page}–${batch.processed_through}. Added ${batch.added} draft items.`
-          + (partial ? ` Run ${next} next.` : ''));
-        if (partial) {
-          setRange(next);
-          setAppend(true);
+
+      if (payload.start_page === undefined || payload.end_page === undefined) {
+        const result = await requestExtraction(baseUrl, path + 'extract/', token, JSON.stringify(payload));
+        const batch = result.batch;
+        const partial = batch && batch.processed_through < batch.end_page;
+        applyReview(result, append || Boolean(partial) || result.diagnostics?.status === 'no_items');
+        if (batch) {
+          setBatchStatus(`Processed pages ${batch.start_page}–${batch.processed_through}. Added ${batch.added} draft items.`);
+          if (partial) {
+            setRange(`${batch.processed_through + 1}-${batch.end_page}`);
+            setAppend(true);
+          }
+        }
+      } else {
+        const {start_page: first, end_page: last} = payload;
+        const total = Math.ceil((last - first + 1) / CHUNK_PAGES);
+        let start = first;
+        while (start <= last && !run.cancelled) {
+          const chunk = Math.floor((start - first) / CHUNK_PAGES) + 1;
+          const end = Math.min(first + chunk * CHUNK_PAGES - 1, last);
+          remaining = `${start}-${last}`;
+          setBatchStatus(`Extracting pages ${start}–${end} of ${first}–${last} (Chunk ${chunk}/${total})… ${added} drafts added.`);
+          const result = await requestExtraction(baseUrl, path + 'extract/', token, JSON.stringify({
+            start_page: start, end_page: end, range_end: last, append: activeAppend,
+            ...(activeAppend && replacePending ? {replace_on_items: true} : {}),
+          }));
+          const batch = result.batch;
+          if (!batch || !Number.isInteger(batch.processed_through) ||
+              batch.processed_through < start || batch.processed_through > end) {
+            throw new Error('The server did not confirm which pages were saved. Reload the review before retrying.');
+          }
+          applyReview(result, !batch.replaced);
+          if (batch.replaced) replacePending = false;
+          added += batch.added;
+          pagesDone += batch.processed_through - start + 1;
+          start = batch.processed_through + 1;
+          remaining = start <= last ? `${start}-${last}` : undefined;
+          activeAppend = true;
+        }
+        setBatchStatus(`${run.cancelled && remaining ? 'Stopped after' : 'Processed'} ${pagesDone} of ${last - first + 1} pages. Added ${added} draft items.`);
+        if (remaining) {
+          setRange(remaining);
+          setAppend(!replacePending);
         }
       }
       setExtracted(true);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Extraction failed. Please retry.');
+      if (remaining) {
+        setBatchStatus(`Saved progress: ${pagesDone} pages processed, ${added} draft items added.`);
+        setRange(remaining);
+        setAppend(!replacePending);
+      }
     } finally {
+      extraction.current = null;
+      setExtracting(false);
+      setCancelPending(false);
       setBusy(false);
     }
   }
@@ -238,14 +295,20 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
         Append to existing drafts</label>{' '}
       <button className="button" disabled={!loaded || busy || photosBusy}>Extract batch</button>
+      {extracting && <button type="button" className="button button-quiet" disabled={cancelPending} onClick={() => {
+        if (!extraction.current) return;
+        extraction.current.cancelled = true;
+        setCancelPending(true);
+      }}>Cancel after current chunk</button>}
     </form>
     {pending.length > 0 && !append && <p>Extracting this batch will replace all pending drafts for this catalogue.</p>}
-    {busy && <p role="status">{loaded ? 'Processing catalogue items…' : 'Loading existing drafts…'}</p>}
+    {busy && !batchStatus && <p role="status">{loaded ? 'Processing catalogue items…' : 'Loading existing drafts…'}</p>}
+    {cancelPending && <p role="status">Finishing the current request. Completed drafts will be kept.</p>}
     {error && <p role="alert">{error}</p>}
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
     {loaded && <p aria-live="polite">Showing {pending.length} extracted draft items</p>}
     {batchStatus && <p role="status">{batchStatus}</p>}
-    {!busy && diagnostics?.status && <div aria-live="polite">
+    {diagnostics?.status && <div aria-live="polite">
       {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
       {diagnostics.pages_scanned !== undefined && <p>Pages examined {diagnostics.pages_scanned} · OCR pages {diagnostics.ocr_pages ?? 0} · Product sections {diagnostics.product_sections ?? 0} · Items extracted {diagnostics.items_extracted ?? 0} · Skipped pages {diagnostics.skipped_pages?.length ?? 0}</p>}
       {!!diagnostics.warnings?.length && <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}

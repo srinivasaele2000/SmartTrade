@@ -22,6 +22,7 @@ services:
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
+      GUNICORN_TIMEOUT: "180"
       DJANGO_SETTINGS_MODULE: config.settings_prod
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env.prod}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-189.72.155.44}

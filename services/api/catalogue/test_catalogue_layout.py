@@ -1,5 +1,6 @@
 from decimal import Decimal
 from io import BytesIO
+from subprocess import TimeoutExpired
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -8,7 +9,7 @@ import pymupdf
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-from .services.catalogue_ocr import TextBox, read_page_tesseract
+from .services.catalogue_ocr import MAX_RENDER_SIDE, OCRPageTimeout, TextBox, read_page, read_page_tesseract
 from .services.pdf_item_extractor import extract_items
 
 
@@ -127,7 +128,9 @@ class LayoutExtractionTests(SimpleTestCase):
                 engine.return_value.stdout = tsv
                 boxes, warning = read_page_tesseract(page, 10)
                 self.assertEqual(warning, '')
-                self.assertAlmostEqual(boxes[0].top, 20 * 72 / 275)
+                dpi = min(275, int(72 * (MAX_RENDER_SIDE - 2) / max(page.rect.width, page.rect.height)))
+                self.assertAlmostEqual(boxes[0].top, 20 * 72 / dpi)
+                self.assertLessEqual(max(Image.open(BytesIO(engine.call_args.kwargs['input'])).size), MAX_RENDER_SIDE)
                 self.assertEqual(engine.call_args.args[0][-3:], ['--psm', '6', 'tsv'])
         boxes = [TextBox(x, y, x + 30, y + 9, value) for x, y, value in (
             (20, 20, 'Elbow - HSN CODE: 39172390'), (20, 40, 'Size'),
@@ -141,3 +144,32 @@ class LayoutExtractionTests(SimpleTestCase):
         self.assertEqual((row.name, row.product_code, row.price_per_unit),
                          ('Fixture Elbow - 20 mm', 'ELB-1', Decimal(28)))
         self.assertEqual(stats['ocr_pages'], 1)
+
+    def test_electrical_columns_with_selectable_footer_and_outlined_rows(self):
+        with pymupdf.open() as document:
+            page = document.new_page(width=990, height=820)
+            page.insert_text((20, 800), 'WARRANTY APPLICABLE ONLY IF installed correctly')
+            for x in range(10, 100):
+                page.draw_rect((x, 70, x + 1, 73), fill=(0, 0, 0), color=None)
+            content = document.tobytes()
+            with patch('catalogue.services.catalogue_ocr.subprocess.run', side_effect=TimeoutExpired('ocr', 2)) as process:
+                with self.assertRaises(OCRPageTimeout):
+                    read_page(page, timeout=2)
+                self.assertEqual(process.call_args.kwargs['timeout'], 2)
+        boxes = []
+        for offset, sku, description in [(0, 'ES-501', 'Switch'), (480, 'ES-502', 'Socket')]:
+            for x, label, value in zip((20, 90, 198, 240, 283, 327, 400),
+                    ('Cat. No.', 'Description', 'Mod', 'Amp', 'Way', 'Std. Pkg.', 'Rate'),
+                    (sku, description, '1M', '16A', '2', '10', '125.50')):
+                boxes.extend([TextBox(x + offset, 70, x + offset + 32, 79, label),
+                              TextBox(x + offset, 90, x + offset + 32, 99, value)])
+        stats = {}
+        with patch('catalogue.services.pdf_item_extractor.read_page', side_effect=OCRPageTimeout), patch(
+                'catalogue.services.pdf_item_extractor.read_page_tesseract', return_value=(boxes, '')):
+            rows = extract_items(content, diagnostics=stats)
+        self.assertEqual([row.product_code for row in rows], ['ES-501', 'ES-502'])
+        self.assertEqual([row.price_per_unit for row in rows], [Decimal('125.50')] * 2)
+        self.assertEqual(rows[0].name, '16A Switch - 2 Way 1M')
+        self.assertEqual(rows[1].pack_size, {'standard': '10'})
+        self.assertEqual(stats['ocr_pages'], 1)
+        self.assertIn('RapidOCR timed out', stats['warnings'][0])

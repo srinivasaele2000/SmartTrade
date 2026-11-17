@@ -96,6 +96,8 @@ class ExtractionInput(serializers.Serializer):
     start_page = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     end_page = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     append = serializers.BooleanField(default=False)
+    range_end = serializers.IntegerField(min_value=1, required=False)
+    replace_on_items = serializers.BooleanField(default=False)
 
     def to_internal_value(self, data):
         if not isinstance(data, dict):
@@ -111,7 +113,12 @@ class ExtractionInput(serializers.Serializer):
         end = attrs.get('end_page')
         if end is not None and end < start:
             raise serializers.ValidationError({'end_page': 'The end page must be at or after the start page.'})
-        return {'start_page': start, 'end_page': end, 'append': attrs['append']}
+        range_end = attrs.get('range_end')
+        if range_end is not None and (end is None or end > range_end or end - start >= 3):
+            raise serializers.ValidationError({'end_page': 'A progressive request must contain up to three pages within the full range.'})
+        if attrs['replace_on_items'] and (range_end is None or not attrs['append']):
+            raise serializers.ValidationError({'replace_on_items': 'Deferred replacement requires a progressive append request.'})
+        return {**attrs, 'start_page': start, 'end_page': end}
 
 
 class StaffExtraction(APIView):
@@ -132,6 +139,7 @@ class StaffExtraction(APIView):
         serializer = ExtractionInput(data=request.data)
         serializer.is_valid(raise_exception=True)
         batch = serializer.validated_data
+        progressive = 'range_end' in batch
         progress = {}
         diagnostics = {'start_page': batch['start_page'], 'end_page': batch['end_page']}
         try:
@@ -144,7 +152,8 @@ class StaffExtraction(APIView):
                 family_hint = document_family_prefix(document)
                 candidates = extract_items(source.read(MAX_CATALOGUE_PDF_BYTES + 1), family_hint=family_hint,
                                            start_page=batch['start_page'], end_page=batch['end_page'],
-                                           progress=progress, diagnostics=diagnostics)
+                                           progress=progress, diagnostics=diagnostics,
+                                           range_end=batch.get('range_end'))
         except FileNotFoundError:
             self.record_failure(document, diagnostics, 'The source PDF file is missing.')
             return Response({'detail': 'The source PDF file is missing.'}, status=404)
@@ -154,6 +163,7 @@ class StaffExtraction(APIView):
 
         saved = []
         added = 0
+        replaced = False
         try:
             with transaction.atomic():
                 document = get_object_or_404(CatalogueDocument.objects.select_for_update(), pk=document.pk, is_active=True)
@@ -163,8 +173,14 @@ class StaffExtraction(APIView):
                 image_storage = DraftCatalogueItem._meta.get_field('image').storage
                 existing = set()
                 draft_count = 0
-                append = batch['append'] or not candidates or (
-                    progress and progress['processed_through'] < progress['end_page']
+                rows_to_save = []
+                for candidate in candidates:
+                    if (candidate.page, candidate.product_code) not in reviewed:
+                        clean_name, banner = normalize_item_name(candidate.name, family_hint)
+                        if clean_name:
+                            rows_to_save.append((candidate, clean_name, banner))
+                append = (batch['append'] and not batch['replace_on_items']) or not rows_to_save or (
+                    not progressive and progress and progress['processed_through'] < progress['end_page']
                 )
                 if append:
                     pairs = list(drafts.values_list('product_code', 'name'))
@@ -174,12 +190,8 @@ class StaffExtraction(APIView):
                     for image in drafts.exclude(image='').values_list('image', flat=True):
                         transaction.on_commit(partial(image_storage.delete, image), robust=True)
                     drafts.delete()
-                for candidate in candidates:
-                    if (candidate.page, candidate.product_code) in reviewed:
-                        continue
-                    clean_name, banner = normalize_item_name(candidate.name, family_hint)
-                    if not clean_name:
-                        continue
+                    replaced = True
+                for candidate, clean_name, banner in rows_to_save:
                     pair = (candidate.product_code, clean_name)
                     if append and pair in existing:
                         continue
@@ -208,7 +220,9 @@ class StaffExtraction(APIView):
             message = error.detail.get('file') if isinstance(error, serializers.ValidationError) and isinstance(error.detail, dict) else None
             self.record_failure(document, diagnostics, str(message or 'The extraction results could not be saved. Existing drafts were retained.'))
             raise
-        return self.review(document, rows, batch={**progress, 'added': added} if progress else None)
+        return self.review(document, rows, batch={
+            **progress, 'added': added, **({'replaced': replaced} if progressive else {}),
+        } if progress else None)
 
     def review(self, document, rows, batch=None):
         options = document_associations(document).values(

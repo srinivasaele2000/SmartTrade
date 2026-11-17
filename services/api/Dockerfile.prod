@@ -18,4 +18,4 @@ RUN groupadd --gid 10001 smarttrade \
 
 USER 10001:10001
 EXPOSE 8000
-CMD ["sh", "-ec", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && chmod -R a+rX /data/static && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --access-logfile - --error-logfile -"]
+CMD ["sh", "-ec", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && chmod -R a+rX /data/static && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout \"${GUNICORN_TIMEOUT:-120}\" --access-logfile - --error-logfile -"]
