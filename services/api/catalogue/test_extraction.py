@@ -19,6 +19,7 @@ from catalogue.services.pdf_item_extractor import (
     Candidate, clean_extracted_name, extract_items, item_name, matching_image,
     strip_leading_category_banner,
 )
+from catalogue.test_catalogue_layout import parallel_price_list
 from companies.models import CompanyProfile
 from companies.tests import grant_staff_permissions, make_account
 
@@ -295,6 +296,41 @@ class CatalogueExtractionTests(TestCase):
             'start_page': 1, 'end_page': 2, 'processed_through': 1, 'added': 2,
         })
         self.assertTrue(self.document.draft_items.filter(pk=existing.pk).exists())
+
+    def test_multi_column_drafts_keep_pack_metadata_and_last_extraction_details(self):
+        self.document.file.save('parallel.pdf', ContentFile(parallel_price_list(2)))
+        result = self.client.post(self.base + 'extract/')
+        self.assertEqual(result.status_code, 200, result.data)
+        first = result.data['rows'][0]
+        self.assertEqual(first['hsn_sac_code'], '39172390')
+        self.assertEqual(first['pack_size'], {'standard': '10', 'box_quantity': '100'})
+        self.assertEqual(result.data['diagnostics']['product_sections'], 2)
+        self.assertEqual(result.data['diagnostics']['items_extracted'], 4)
+        self.assertEqual(self.client.get(self.base + 'extract/').data['diagnostics'], result.data['diagnostics'])
+        committed = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+            'id': first['id'], 'approved': True, 'name': first['name'], 'product_code': first['product_code'],
+            'hsn_sac_code': first['hsn_sac_code'], 'price_per_unit': first['price_per_unit'],
+            'brand_category': self.association.pk,
+        }]}, format='json')
+        self.assertEqual(committed.status_code, 201, committed.data)
+        draft = DraftCatalogueItem.objects.get(pk=first['id'])
+        self.assertEqual(draft.product.specifications['Pack size'], first['pack_size'])
+
+    def test_empty_batch_records_warning_and_preserves_drafts(self):
+        stream = BytesIO()
+        pdf = canvas.Canvas(stream)
+        pdf.drawString(30, 750, 'Prices: Available on Request')
+        pdf.save()
+        self.document.file.save('unpriced.pdf', ContentFile(stream.getvalue()))
+        draft = self.document.draft_items.create(page=1, product_code='EXISTING', name='Existing draft')
+
+        result = self.client.post(self.base + 'extract/', {'append': False}, format='json')
+        self.assertEqual(result.status_code, 200, result.data)
+        diagnostics = result.data['diagnostics']
+        self.assertEqual(diagnostics['status'], 'no_items')
+        self.assertEqual(diagnostics['skipped_pages'], [{'page': 1, 'reason': 'prices_on_request'}])
+        self.assertTrue(diagnostics['warnings'])
+        self.assertEqual([row['id'] for row in result.data['rows']], [draft.pk])
 
     def test_extracts_image_only_page_with_filename_prefix(self):
         with pymupdf.open(stream=sample_pdf(first_code='SW-001/A', second_photo=False), filetype='pdf') as source, pymupdf.open() as scanned:

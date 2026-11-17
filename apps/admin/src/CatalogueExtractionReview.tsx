@@ -5,10 +5,14 @@ type Draft = {
   id: number; page: number; name: string; product_code: string; hsn_sac_code: string;
   price_per_unit: string | null; category: string; status: 'DRAFT' | 'APPROVED' | 'DISCARDED';
   image_url: string | null;
+  pack_size?: {standard?: string; box_quantity?: string};
 };
 type Category = {id: number; category__name: string; brand__company__legal_name: string};
 type Row = Draft & {approved: boolean; association: string};
+type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
+  items_extracted?: number; skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type Review = {rows: Draft[]; categories: Category[];
+  diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
 const previewQueue: Array<() => Promise<void>> = [];
@@ -105,9 +109,11 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [loaded, setLoaded] = useState(false);
   const [extracted, setExtracted] = useState(false);
   const [batchStatus, setBatchStatus] = useState('');
+  const [diagnostics, setDiagnostics] = useState<Diagnostics>();
 
   function applyReview(result: Review, preserveEdits: boolean) {
     setCategories(result.categories);
+    setDiagnostics(result.diagnostics);
     setRows(current => {
       const edits = preserveEdits ? new Map(current.map(row => [row.id, row])) : new Map<number, Row>();
       return result.rows.map(row => {
@@ -148,6 +154,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       const body = JSON.stringify(extractionPayload(range, append));
       setBusy(true);
       setBatchStatus('');
+      setDiagnostics(undefined);
       const result = await requestExtraction(baseUrl, path + 'extract/', token, body);
       const batch = result.batch;
       const partial = batch && batch.processed_through < batch.end_page;
@@ -238,7 +245,12 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
     {loaded && <p aria-live="polite">Showing {pending.length} extracted draft items</p>}
     {batchStatus && <p role="status">{batchStatus}</p>}
-    {extracted && !busy && !error && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
+    {!busy && diagnostics?.status && <div aria-live="polite">
+      {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
+      {diagnostics.pages_scanned !== undefined && <p>Pages examined {diagnostics.pages_scanned} · OCR pages {diagnostics.ocr_pages ?? 0} · Product sections {diagnostics.product_sections ?? 0} · Items extracted {diagnostics.items_extracted ?? 0} · Skipped pages {diagnostics.skipped_pages?.length ?? 0}</p>}
+      {!!diagnostics.warnings?.length && <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+    </div>}
+    {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
     {!!pending.length && !categories.length && <p>Approval requires an active category linked to this PDF’s brand under a verified, active company. Check the vault’s brand name against the catalogue brand.</p>}
     {!!rows.length && <form onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
@@ -280,7 +292,10 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
               </>}
             </div></td>
             <td><textarea rows={2} aria-label={'Name for row ' + row.id} value={row.name} maxLength={200} required={row.approved}
-              disabled={!editable} onChange={event => update(row.id, {name: event.target.value})} /></td>
+              disabled={!editable} onChange={event => update(row.id, {name: event.target.value})} />
+              {row.pack_size?.standard && <div>Standard pack {row.pack_size.standard}</div>}
+              {row.pack_size?.box_quantity && <div>Box quantity {row.pack_size.box_quantity}</div>}
+            </td>
             <td><input aria-label={'Code for row ' + row.id} value={row.product_code} maxLength={100} required={row.approved}
               disabled={!editable} onChange={event => update(row.id, {product_code: event.target.value})} /></td>
             <td><input aria-label={'HSN for row ' + row.id} value={row.hsn_sac_code} maxLength={8} required={row.approved}

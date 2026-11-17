@@ -1,7 +1,8 @@
 """Extract review candidates from searchable, table-based catalogues."""
 
 from contextlib import ExitStack
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
@@ -13,7 +14,8 @@ from pdfplumber.utils.exceptions import PdfminerException
 from pdfminer.pdftypes import PDFException
 from PIL import Image
 
-from .catalogue_ocr import TextBox, read_page
+from .catalogue_layout import NOISE, layout_rows, native_boxes, skip_reason
+from .catalogue_ocr import TextBox, read_page, read_page_tesseract
 from .scanned_thumbnails import caption_key, crop_photo, crop_photos, matching_caption
 
 
@@ -47,7 +49,7 @@ CATEGORY_PREFIX_REGEX = re.compile(
 MAX_CATALOGUE_PDF_PAGES = 250
 MAX_CATALOGUE_PDF_BYTES = 20 * 1024 * 1024
 MAX_ROWS = 500
-EXTRACTION_BUDGET_SECONDS = 150
+EXTRACTION_BUDGET_SECONDS = 95
 MIN_NATIVE_TEXT = 20
 
 
@@ -64,6 +66,7 @@ class Candidate:
     price_per_unit: Decimal | None
     category: str
     image: bytes | None = None
+    pack_size: dict = field(default_factory=dict)
 
 
 def matching_image(row, images):
@@ -141,6 +144,62 @@ def price(value):
         return Decimal(cleaned)
     except InvalidOperation:
         return None
+
+
+def layout_candidates(document, page, rows, boxes, images, page_number, family_hint, *, scanned=False):
+    candidates = []
+    for row in rows:
+        cells = row.cells
+        description = cells.get('name', '')
+        if row.group and not family_prefix_pattern(row.group).match(description):
+            description = ' '.join(filter(None, (row.group, description)))
+        size = cells.get('size', '')
+        if cm := cells.get('size_cm'):
+            size = cm if cm.lower().endswith('cm') else f'{cm} cm'
+        if inches := cells.get('size_inch'):
+            inches = inches if inches.endswith(('"', '″')) or re.search(r'\bin(?:ch(?:es)?)?\b', inches, re.I) else f'{inches}"'
+            size = f'{size} ({inches})' if size else inches
+        options = ' · '.join(filter(None, (size, row.length, cells.get('turn'), cells.get('knob'))))
+        if options:
+            description = f'{description} - {options}'
+        name, banner = row_name({**cells, 'name': description}, '', family_hint)
+        if not name:
+            continue
+        left, top, right, bottom = row.bounds
+        row_band = (left, top - 10, right, bottom + 10)
+        photo = thumbnail(document, page, matching_image(row_band, images))
+        if photo is None and row.image_bounds and scanned:
+            photo = crop_photo(page, (row.image_bounds[0], top - 13, row.image_bounds[1], bottom + 13), boxes)
+        if photo is None and row.group:
+            # Group illustrations can sit above the variant rows. Only use a
+            # single image that can be attributed to this section alone.
+            peers = [peer for peer in rows if peer.bounds[0] == left]
+            above = max((peer.bounds[3] for peer in peers if peer.section < row.section), default=0)
+            group_rows = [peer for peer in peers if peer.section == row.section]
+            first = min(peer.bounds[1] for peer in group_rows)
+            last = max(peer.bounds[3] for peer in group_rows)
+            section_images = [image for image in images if left <= image['bbox'][0] and image['bbox'][2] <= right
+                              and max(above, first - 108) <= image['bbox'][1] and image['bbox'][3] <= last + 8]
+            if len(section_images) == 1:
+                photo = thumbnail(document, page, section_images[0])
+        candidates.append(Candidate(page_number, name, row.code, row.hsn, row.amount,
+                                    (row.category or banner)[:120], photo, row.pack))
+    return candidates
+
+
+def product_images(page, repeated):
+    images = []
+    for image in page.get_image_info(xrefs=True):
+        original = fitz.Rect(image['bbox'])
+        box = original * page.rotation_matrix
+        if (box.is_empty or box.width * box.height > page.rect.get_area() * .35 or
+                box.width > page.rect.width * .8 or min(box.width, box.height) < 10):
+            continue
+        if repeated[image.get('xref')] > 1 and (
+                box.y0 < page.rect.height * .09 or box.y1 > page.rect.height * .91 or max(box.width, box.height) < 35):
+            continue
+        images.append({**image, 'bbox': tuple(box), 'unrotated_bbox': tuple(original)})
+    return images
 
 
 def clean_extracted_name(value: str | None) -> str:
@@ -230,18 +289,26 @@ def row_name(values, section, family_hint):
     return name, category or embedded_category
 
 
-def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None):
+def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None):
+    stats = diagnostics if diagnostics is not None else {}
+    stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0,
+                 skipped_pages=[], warnings=[])
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
         raise CataloguePDFError('The PDF exceeds the 20 MB extraction limit.')
     try:
-        return _extract_items(content, family_hint, start_page, end_page, progress)
+        result = _extract_items(content, family_hint, start_page, end_page, progress, stats)
+        if not result:
+            stats['warnings'].append('No priced SKU rows were found. Check that the selected pages contain a readable price table.')
+        elif missing_hsn := sum(not row.hsn_sac_code for row in result):
+            stats['warnings'].append(f'{missing_hsn} extracted items need an HSN/SAC code before approval.')
+        return result
     except CataloguePDFError:
         raise
     except (PDFException, PdfminerException, ValueError, RuntimeError, OSError, SyntaxError) as error:
         raise CataloguePDFError('Could not read this PDF file. Please verify the file is a valid PDF.') from error
 
 
-def _extract_items(content, family_hint, start_page, end_page, progress):
+def _extract_items(content, family_hint, start_page, end_page, progress, stats):
     deadline = monotonic() + EXTRACTION_BUDGET_SECONDS
     with ExitStack() as stack:
         document = stack.enter_context(fitz.open(stream=content, filetype='pdf'))
@@ -265,6 +332,8 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
         result = []
         has_text = False
         used_ocr = False
+        repeated = Counter(xref for index in range(start_page - 1, end_page)
+                           for xref in {image[0] for image in document[index].get_images()})
         for page in plumber.pages:
             index = page.page_number - 1
             if monotonic() >= deadline:
@@ -273,28 +342,69 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
                 progress.update(start_page=start_page, end_page=end_page, processed_through=index)
                 return result
             raster_page = document[index]
+            page_number = index + 1
+            stats['pages_scanned'] += 1
             native_text = raster_page.get_text()
             has_text |= any(character.isalnum() for character in native_text)
-            if sum(character.isalnum() for character in native_text) < MIN_NATIVE_TEXT and raster_page.get_contents():
+            boxes = native_boxes(raster_page)
+            if reason := skip_reason(boxes):
+                stats['skipped_pages'].append({'page': page_number, 'reason': reason})
+                page.close()
+                continue
+            images = product_images(raster_page, repeated)
+            if sum(character.isalnum() for character in native_text) < MIN_NATIVE_TEXT and any(
+                    kind != 'fill-text' for kind, _ in raster_page.get_bboxlog()):
                 used_ocr = True
+                stats['ocr_pages'] += 1
                 try:
                     boxes = read_page(raster_page)
-                except ImportError as error:
-                    raise CataloguePDFError('Catalogue OCR is unavailable. Install the API OCR dependencies and try again.') from error
+                except ImportError:
+                    boxes = []
                 has_text |= any(any(character.isalnum() for character in box.text) for box in boxes)
-                result.extend(ocr_rows(document, raster_page, boxes, index + 1, family_hint))
+                if reason := skip_reason(boxes):
+                    stats['skipped_pages'].append({'page': page_number, 'reason': reason})
+                    page.close()
+                    continue
+                rows, sections, advanced = layout_rows(boxes, raster_page.rect.width, price)
+                candidates = (layout_candidates(document, raster_page, rows, boxes, images, page_number,
+                                                family_hint, scanned=True) if advanced else [])
+                if not candidates:
+                    candidates = ocr_rows(document, raster_page, boxes, page_number, family_hint, images=images)
+                if not candidates:
+                    boxes, warning = read_page_tesseract(raster_page, deadline - monotonic())
+                    if warning:
+                        stats['warnings'].append(f'Page {page_number}: {warning}')
+                    has_text |= bool(boxes)
+                    if reason := skip_reason(boxes):
+                        stats['skipped_pages'].append({'page': page_number, 'reason': reason})
+                        page.close()
+                        continue
+                    rows, sections, _ = layout_rows(boxes, raster_page.rect.width, price)
+                    candidates = layout_candidates(document, raster_page, rows, boxes, images, page_number,
+                                                    family_hint, scanned=True)
+                result.extend(candidates)
+                stats['product_sections'] += (sections or 1) if candidates else 0
+                stats['items_extracted'] = len(result)
+                if not candidates:
+                    stats['skipped_pages'].append({'page': page_number, 'reason': 'no_priced_rows'})
                 if len(result) > MAX_ROWS:
                     raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
                 page.close()
                 continue
             if not native_text.strip():
+                stats['skipped_pages'].append({'page': page_number, 'reason': 'blank'})
                 page.close()
                 continue
-            images = raster_page.get_image_info(xrefs=True)
-            # PyMuPDF image boxes are unrotated. pdfplumber rows use displayed coordinates.
-            if raster_page.rotation:
-                images = [{**image, 'unrotated_bbox': image['bbox'],
-                           'bbox': tuple(fitz.Rect(image['bbox']) * raster_page.rotation_matrix)} for image in images]
+            rows, sections, advanced = layout_rows(boxes, raster_page.rect.width, price)
+            if rows and advanced:
+                result.extend(layout_candidates(document, raster_page, rows, boxes, images, page_number, family_hint))
+                stats['product_sections'] += sections
+                stats['items_extracted'] = len(result)
+                if len(result) > MAX_ROWS:
+                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+                page.close()
+                continue
+            page_start = len(result)
             tables = page.find_tables()
             for table in tables:
                 photos = labelled_images(raster_page, table.bbox, images)
@@ -318,7 +428,8 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
                         continue
                     populated = [cell for cell in cells if cell]
                     if len(populated) == 1:
-                        section = populated[0]
+                        if not NOISE.match(populated[0]):
+                            section = populated[0]
                         continue
 
                     def cell(field):
@@ -330,12 +441,13 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
                     if 'name' not in name_cells:
                         continue
                     name, detected_category = row_name(name_cells, section, family_hint)
-                    if not name or not cell('product_code'):
+                    amount = price(cell('price_per_unit'))
+                    if not name or not cell('product_code') or amount is None or NOISE.match(cell('name')):
                         continue
                     if len(result) >= MAX_ROWS:
                         raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
                     result.append(Candidate(index + 1, name, cell('product_code')[:100],
-                        cell('hsn_sac_code')[:8], price(cell('price_per_unit')),
+                        cell('hsn_sac_code')[:8], amount,
                         (cell('category') or detected_category or section)[:120],
                         thumbnail(document, raster_page,
                                   matching_image(row.bbox, images) or photos.get(cell('product_code')))))
@@ -352,6 +464,15 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
                                                    index + 1, document, raster_page, images, photos))
                     if len(result) > MAX_ROWS:
                         raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+                stats['product_sections'] += len(result) > row_count
+            if len(result) == page_start and rows:
+                result.extend(layout_candidates(document, raster_page, rows, boxes, images, page_number, family_hint))
+                stats['product_sections'] += sections
+                if len(result) > MAX_ROWS:
+                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+            if len(result) == page_start:
+                stats['skipped_pages'].append({'page': page_number, 'reason': 'no_priced_rows'})
+            stats['items_extracted'] = len(result)
             page.close()
         if progress is not None:
             progress.update(start_page=start_page, end_page=end_page, processed_through=end_page)
@@ -362,7 +483,7 @@ def _extract_items(content, family_hint, start_page, end_page, progress):
         return result
 
 
-def ocr_rows(document, page, boxes, page_number, family_hint):
+def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
     """Map OCR boxes to header columns and read cells on the same baseline."""
     lines = []
     for box in sorted(boxes, key=lambda box: (box.center, box.x0)):
@@ -380,6 +501,8 @@ def ocr_rows(document, page, boxes, page_number, family_hint):
     table_right = 0
     for index, line in enumerate(lines):
         line.sort(key=lambda box: box.x0)
+        if NOISE.match(' '.join(box.text for box in line)):
+            continue
         header = []
         for box in line:
             key = re.sub(r'[^a-z0-9]+', '', box.text.lower())
@@ -427,10 +550,8 @@ def ocr_rows(document, page, boxes, page_number, family_hint):
 
     if not pending:
         return []
-    images = page.get_image_info(xrefs=True)
-    if page.rotation:
-        images = [{**image, 'unrotated_bbox': image['bbox'],
-                   'bbox': tuple(fitz.Rect(image['bbox']) * page.rotation_matrix)} for image in images]
+    if images is None:
+        images = product_images(page, Counter())
     result = []
     captions = {}
     known_codes = {caption_key(values['product_code']) for values, *_ in pending}

@@ -10,6 +10,7 @@ from django.db import IntegrityError, transaction
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.utils.timezone import now
 from rest_framework import serializers
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -68,7 +69,8 @@ class DraftOutput(serializers.ModelSerializer):
 
     class Meta:
         model = DraftCatalogueItem
-        fields = ['id', 'page', 'name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category', 'status', 'product', 'image_url']
+        fields = ['id', 'page', 'name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category',
+                  'pack_size', 'status', 'product', 'image_url']
 
 
 class ReviewRow(serializers.Serializer):
@@ -131,18 +133,23 @@ class StaffExtraction(APIView):
         serializer.is_valid(raise_exception=True)
         batch = serializer.validated_data
         progress = {}
+        diagnostics = {'start_page': batch['start_page'], 'end_page': batch['end_page']}
         try:
             from .services.pdf_item_extractor import MAX_CATALOGUE_PDF_BYTES, MAX_ROWS, CataloguePDFError, extract_items
         except ImportError:
+            self.record_failure(document, diagnostics, 'PDF extraction dependencies are unavailable.')
             return Response({'detail': 'PDF extraction dependencies are unavailable.'}, status=503)
         try:
             with document.file.open('rb') as source:
                 family_hint = document_family_prefix(document)
                 candidates = extract_items(source.read(MAX_CATALOGUE_PDF_BYTES + 1), family_hint=family_hint,
-                                           start_page=batch['start_page'], end_page=batch['end_page'], progress=progress)
+                                           start_page=batch['start_page'], end_page=batch['end_page'],
+                                           progress=progress, diagnostics=diagnostics)
         except FileNotFoundError:
+            self.record_failure(document, diagnostics, 'The source PDF file is missing.')
             return Response({'detail': 'The source PDF file is missing.'}, status=404)
         except CataloguePDFError as error:
+            self.record_failure(document, diagnostics, str(error))
             raise serializers.ValidationError({'file': str(error)}) from error
 
         saved = []
@@ -156,7 +163,7 @@ class StaffExtraction(APIView):
                 image_storage = DraftCatalogueItem._meta.get_field('image').storage
                 existing = set()
                 draft_count = 0
-                append = batch['append'] or (
+                append = batch['append'] or not candidates or (
                     progress and progress['processed_through'] < progress['end_page']
                 )
                 if append:
@@ -182,23 +189,37 @@ class StaffExtraction(APIView):
                     draft_count += 1
                     item = DraftCatalogueItem(source_document=document, page=candidate.page,
                         name=clean_name, product_code=candidate.product_code, hsn_sac_code=candidate.hsn_sac_code,
-                        price_per_unit=candidate.price_per_unit, category=candidate.category or banner or '')
+                        price_per_unit=candidate.price_per_unit, category=candidate.category or banner or '',
+                        pack_size=candidate.pack_size)
                     if candidate.image:
                         item.image.save('thumbnail.png', ContentFile(candidate.image), save=False)
                         saved.append(item.image)
                     item.save()
                     added += 1
                 rows = DraftOutput(document.draft_items.order_by('id'), many=True).data
-        except Exception:
+                document.last_extraction = {**diagnostics, **progress, 'added': added,
+                                            'status': 'partial' if progress and progress['processed_through'] < progress['end_page']
+                                            else ('complete' if candidates else 'no_items'),
+                                            'finished_at': now().isoformat()}
+                document.save(update_fields=['last_extraction'])
+        except Exception as error:
             for image in saved:
                 image.delete(save=False)
+            message = error.detail.get('file') if isinstance(error, serializers.ValidationError) and isinstance(error.detail, dict) else None
+            self.record_failure(document, diagnostics, str(message or 'The extraction results could not be saved. Existing drafts were retained.'))
             raise
         return self.review(document, rows, batch={**progress, 'added': added} if progress else None)
 
     def review(self, document, rows, batch=None):
         options = document_associations(document).values(
             'id', 'category__name', 'brand__company__legal_name').order_by('category__name', 'id')
-        return Response({'rows': rows, 'categories': list(options), **({'batch': batch} if batch else {})})
+        return Response({'rows': rows, 'categories': list(options), 'diagnostics': document.last_extraction,
+                         **({'batch': batch} if batch else {})})
+
+    @staticmethod
+    def record_failure(document, diagnostics, message):
+        CatalogueDocument.objects.filter(pk=document.pk).update(
+            last_extraction={**diagnostics, 'status': 'failed', 'error': message, 'finished_at': now().isoformat()})
 
 
 class DraftImage(StaffExtraction):
@@ -299,7 +320,7 @@ class CommitDrafts(StaffExtraction):
                     association = values['brand_category']
                     if not associations.filter(pk=association.pk).exists():
                         raise serializers.ValidationError({'rows': f'{draft.product_code}: choose a category for the PDF brand.'})
-                    product, result = create_catalogue_item(request, values, saved)
+                    product, result = create_catalogue_item(request, values, saved, pack_size=draft.pack_size)
                     draft.name = product.name
                     draft.product_code = product.code
                     draft.hsn_sac_code = values['hsn_sac_code']

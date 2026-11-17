@@ -71,11 +71,14 @@ def require_available_code(code, *, exclude=None):
         raise serializers.ValidationError({'product_code': 'This product code is already in use.'})
 
 
-def create_catalogue_item(request, fields, saved_files):
+def create_catalogue_item(request, fields, saved_files, *, pack_size=None):
     require_available_code(fields['product_code'])
+    specifications = {'HSN': fields['hsn_sac_code']}
+    if pack_size:
+        specifications['Pack size'] = pack_size
     product = Product.objects.create(
         brand_category=fields['brand_category'], name=fields['name'], code=fields['product_code'],
-        specifications={'HSN': fields['hsn_sac_code']}, unit='Unit',
+        specifications=specifications, unit='Unit',
         catalogue_price=fields['price_per_unit'], currency='INR', state='PUBLISHED',
     )
     upload = fields.get('image')
