@@ -8,8 +8,14 @@ import CatalogueExtractionReview from './CatalogueExtractionReview';
 type Document = {key: string; business_type: CatalogueBusinessType; sub_category: string; brand_name: string; title: string;
   filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean};
 const path = '/admin/catalogues/';
-const pdfLimitMb = 20;
+const pdfLimitMb = 100;
 const imageLimitMb = 2;
+
+export function validateVaultFileSize(file: Pick<File, 'type' | 'name' | 'size'>) {
+  const isPdf = file.type === 'application/pdf' || (file.type === '' && /\.pdf$/i.test(file.name));
+  const limit = isPdf ? pdfLimitMb : imageLimitMb;
+  if (file.size > limit * 1024 * 1024) throw new Error(`File size exceeds the ${limit} MB limit.`);
+}
 
 export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: string; token: string; allowed: boolean}) {
   const [business, setBusiness] = useState('');
@@ -26,14 +32,14 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [preview, setPreview] = useState<{document: Document; url: string} | null>(null);
-  const [remove, setRemove] = useState<Document | null>(null);
+  const [remove, setRemove] = useState<{item: Document; action: 'archive' | 'delete'} | null>(null);
   const [edit, setEdit] = useState<Document | null>(null);
   const [extraction, setExtraction] = useState<Document | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const editing = edit !== null;
+  const dialogOpen = edit !== null || remove !== null;
   useEffect(() => {
-    if (editing) dialog.current?.showModal();
-  }, [editing]);
+    if (dialogOpen) dialog.current?.showModal();
+  }, [dialogOpen]);
   useEffect(() => () => {if (preview) URL.revokeObjectURL(preview.url);}, [preview]);
 
   async function run(action: () => Promise<void>) {
@@ -51,17 +57,31 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     const body = new FormData(form);
     void run(async () => {
       const file = body.get('file');
-      if (file instanceof File) {
-        const isPdf = file.type === 'application/pdf' || (file.type === '' && /\.pdf$/i.test(file.name));
-        const limit = isPdf ? pdfLimitMb : imageLimitMb;
-        if (file.size > limit * 1024 * 1024) throw new Error(`File size exceeds the ${limit} MB limit.`);
-      }
+      if (file instanceof File) validateVaultFileSize(file);
       await requestApi<Document>(baseUrl, path, token, {method: 'POST', body});
       form.reset();
       setBusiness('');
       setSubCategory('');
       setNotice('Catalogue uploaded.');
       page.setNumber(1);
+      page.reload();
+    });
+  }
+
+  function closeRemoval() {
+    setRemove(null);
+    setError('');
+  }
+
+  async function confirmRemoval() {
+    if (!remove || busy) return;
+    const deleting = remove.action === 'delete';
+    await run(async () => {
+      await requestApi<void>(baseUrl, path + remove.item.key + (deleting ? '/delete/' : '/'), token, {method: 'DELETE'});
+      if (deleting && preview?.document.key === remove.item.key) setPreview(null);
+      setRemove(null);
+      setNotice(deleting ? 'Catalogue PDF permanently deleted.' : 'Catalogue removed from public browsing.');
+      if (deleting && page.data?.results.length === 1 && page.number > 1) page.setNumber(page.number - 1);
       page.reload();
     });
   }
@@ -97,11 +117,11 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       <label>Brand name <input name="brand_name" maxLength={200} required /></label>
       <label>Catalogue title <input name="title" maxLength={200} required /></label>
       <label>Catalogue file <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" required /></label>
-      <p>PDF up to {pdfLimitMb} MB. JPEG, PNG or WebP up to {imageLimitMb} MB and 4096 × 4096 pixels.</p>
-      <button className="button" disabled={busy}>Upload catalogue</button>
+      <p>Max {pdfLimitMb} MB PDF. JPEG, PNG or WebP up to {imageLimitMb} MB and 4096 × 4096 pixels.</p>
+      <button className="btn-primary" disabled={busy}>Upload catalogue</button>
     </form>
     {notice && <p role="status">{notice}</p>}
-    {error && !edit && <p className="action-message error" role="alert">{error}</p>}
+    {error && !edit && !remove && <p className="action-message error" role="alert">{error}</p>}
     <div className="decision-buttons" aria-label="Catalogue filters">
       <label>Filter by business type <select value={filterBusiness} onChange={event => {
         setFilterBusiness(event.target.value); setFilterSubCategory(''); page.setNumber(1);
@@ -130,9 +150,12 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
           <button disabled={busy} onClick={() => void run(async () => {
             const response = await apiResponse(baseUrl, path + item.key + '/file/', token);
             setPreview({document: item, url: URL.createObjectURL(await response.blob())});
-          })}>Preview / download</button>{item.is_active && <button className="btn-danger" disabled={busy} onClick={() => setRemove(item)}>Archive</button>}
+          })}>Preview / download</button>{item.is_active && <button className="btn-warning" disabled={busy}
+            onClick={() => {setError(''); setRemove({item, action: 'archive'});}}>Archive</button>}
           {item.is_active && item.content_type === 'application/pdf' && <button disabled={busy}
-            onClick={() => {setNotice(''); setError(''); setExtraction(item);}}>Extract Items &amp; Images from PDF</button>}</div></td>
+            onClick={() => {setNotice(''); setError(''); setExtraction(item);}}>Extract Items &amp; Images from PDF</button>}
+          {item.content_type === 'application/pdf' && <button className="btn-danger" disabled={busy}
+            onClick={() => {setError(''); setRemove({item, action: 'delete'});}}>Delete</button>}</div></td>
         </tr>)}</tbody>
       </table></div>}
     {page.data && <nav aria-label="Catalogue pages">
@@ -164,8 +187,8 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
         </select></label>
         {error && <p className="action-message error" role="alert">{error}</p>}
         <div className="decision-buttons">
-          <button className="button" disabled={busy}>Save Changes</button>
-          <button type="button" disabled={busy} onClick={() => {setEdit(null); setError('');}}>Cancel</button>
+          <button className="btn-primary" disabled={busy}>Save Changes</button>
+          <button className="btn-ghost" type="button" disabled={busy} onClick={() => {setEdit(null); setError('');}}>Cancel</button>
         </div>
       </form>
     </dialog>}
@@ -174,20 +197,23 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       {preview.document.content_type.startsWith('image/') &&
         <img className="vault-preview" src={preview.url} alt={preview.document.title} />}
       <div className="decision-buttons">
-        <a href={preview.url} download={preview.document.filename}>Download file</a>
-        {preview.document.content_type === 'application/pdf' && <a href={preview.url} target="_blank" rel="noreferrer">Open PDF in a new tab</a>}
-        <button onClick={() => setPreview(null)}>Close preview</button>
+        <a className="action-link-btn" href={preview.url} download={preview.document.filename}>Download file</a>
+        {preview.document.content_type === 'application/pdf' && <a className="action-link-btn" href={preview.url} target="_blank" rel="noreferrer">Open PDF in a new tab</a>}
+        <button className="btn-ghost" onClick={() => setPreview(null)}>Close preview</button>
       </div>
     </section>}
-    {remove && <section className="detail-card" aria-label="Confirm catalogue deletion">
-      <p>Remove “{remove.title}” from the public vault? Staff can still inspect the archived file.</p>
-      <button disabled={busy} onClick={() => void run(async () => {
-        await requestApi<void>(baseUrl, path + remove.key + '/', token, {method: 'DELETE'});
-        setRemove(null);
-        setNotice('Catalogue removed from public browsing.');
-        page.reload();
-      })}>Confirm removal</button>
-      <button disabled={busy} onClick={() => setRemove(null)}>Cancel</button>
-    </section>}
+    {remove && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="remove-catalogue-title"
+      onCancel={event => {event.preventDefault(); if (!busy) closeRemoval();}}>
+      <h3 id="remove-catalogue-title">{remove.action === 'delete' ? 'Permanently delete catalogue PDF?' : 'Archive catalogue?'}</h3>
+      {remove.action === 'delete'
+        ? <p>Delete “{remove.item.title}” and its unapproved extraction drafts and thumbnails? This cannot be undone.</p>
+        : <p>Remove “{remove.item.title}” from the public vault? Staff can still inspect the archived file.</p>}
+      {error && <p className="action-message error" role="alert">{error}</p>}
+      <div className="decision-buttons">
+        <button type="button" className={remove.action === 'delete' ? 'btn-danger' : 'btn-warning'}
+          disabled={busy} onClick={() => void confirmRemoval()}>{remove.action === 'delete' ? 'Delete permanently' : 'Confirm removal'}</button>
+        <button type="button" className="btn-ghost" autoFocus disabled={busy} onClick={closeRemoval}>Cancel</button>
+      </div>
+    </dialog>}
   </section>;
 }

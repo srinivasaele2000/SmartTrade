@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
 import subprocess
+from ..limits import CATALOGUE_PDF_LIMIT_MB, MAX_CATALOGUE_PDF_BYTES
 from time import monotonic
 
 import pymupdf as fitz
@@ -48,7 +49,6 @@ CATEGORY_PREFIX_REGEX = re.compile(
     re.IGNORECASE,
 )
 MAX_CATALOGUE_PDF_PAGES = 250
-MAX_CATALOGUE_PDF_BYTES = 20 * 1024 * 1024
 MAX_ROWS = 500
 EXTRACTION_BUDGET_SECONDS = 140
 MIN_NATIVE_TEXT = 20
@@ -302,7 +302,7 @@ def extract_items(content, *, family_hint='', start_page=1, end_page=None, progr
     stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0,
                  skipped_pages=[], warnings=[])
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
-        raise CataloguePDFError('The PDF exceeds the 20 MB extraction limit.')
+        raise CataloguePDFError(f'The PDF exceeds the {CATALOGUE_PDF_LIMIT_MB} MB extraction limit.')
     try:
         result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end)
         if not result:

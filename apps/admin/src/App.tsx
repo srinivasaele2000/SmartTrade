@@ -350,13 +350,13 @@ function App() {
           </div>
           <div className="topbar-actions">
             {apkMetadata && <div className="apk-download">
-              <a className="button button-quiet" href={apkDownloadUrl} download>Download Android App (.apk)</a>
+              <a className="action-link-btn" href={apkDownloadUrl} download>Download Android App (.apk)</a>
               <small>v{apkMetadata.version} · Updated {istDateTime(apkMetadata.updatedAt)}</small>
             </div>}
             <span className={`connection-badge ${apiStatus}`} role="status">API {apiStatus === "checking" ? "checking…" : apiStatus}</span>
             {apiStatus === 'unavailable' && <button className="button button-quiet" onClick={() => setHealthAttempt(value => value + 1)}>Retry API connection</button>}
             {account && <span className="environment-badge" title={`Roles: ${account.staff_profile?.roles.join(', ') || 'none'}; permissions: ${account.staff_profile?.permissions.join(', ') || 'none'}`}>STAFF ACCOUNT {account.id}</span>}
-            {accessToken && <button className="button button-quiet" onClick={() => void signOut()}>Sign out</button>}
+            {accessToken && <button className="btn-ghost" onClick={() => void signOut()}>Sign out</button>}
           </div>
         </header>
 
@@ -414,7 +414,7 @@ function App() {
                 <label htmlFor="staff-otp">Verification code</label>
                 <input id="staff-otp" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} required />
               </>}
-              <button className="button button-primary" disabled={loginBusy} type="submit">
+              <button className="button button-primary btn-primary" disabled={loginBusy} type="submit">
                 {loginBusy ? "Please wait…" : otpRequested ? "Verify and sign in" : "Send OTP"}
               </button>
               {otpRequested && <button className="text-button" type="button" disabled={loginBusy} onClick={() => { setOtpRequested(false); setOtp(""); setLoginMessage(""); }}>Use a different number</button>}
@@ -461,7 +461,7 @@ function App() {
                     <dt>Company email</dt><dd>{selectedCase.company.company_email}</dd>
                     <dt>Email verified</dt><dd>{selectedCase.company.email_verified_at ? formatDate(selectedCase.company.email_verified_at) : selectedCase.email_verification_mode === "development_simulated" ? "Local simulation only; ownership unverified" : "Not verified"}</dd>
                     <dt>Address</dt><dd>{[selectedCase.company.address_line, selectedCase.company.area, selectedCase.company.district, selectedCase.company.pin_code, selectedCase.company.state_or_region].filter(Boolean).join(", ") || "Not provided"}</dd>
-                    <dt>Website</dt><dd>{selectedCase.company.website ? <a href={selectedCase.company.website} target="_blank" rel="noreferrer">{selectedCase.company.website}</a> : "Not provided"}</dd>
+                    <dt>Website</dt><dd>{selectedCase.company.website ? <a className="action-link-btn" href={selectedCase.company.website} target="_blank" rel="noreferrer">{selectedCase.company.website}</a> : "Not provided"}</dd>
                     <dt>Activity</dt><dd>{selectedCase.company.activity_state}</dd>
                   </dl>
                 </div>

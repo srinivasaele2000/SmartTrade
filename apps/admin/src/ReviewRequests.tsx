@@ -72,7 +72,7 @@ export default function ReviewRequests({ baseUrl, token, canRestore = false }: {
         <label htmlFor={`resolution-${item.id}`}>Resolution reason</label>
         <textarea id={`resolution-${item.id}`} value={reason} rows={3} maxLength={4000} required disabled={saving} onChange={event => setReason(event.target.value)} />
         {canRestore && item.activity_state === 'SUSPENDED' && <p><button type="button" className="button button-quiet" disabled={saving || !reason.trim()} onClick={() => void restore(item.company_id)}>Restore company activity</button> Requires RESTORE_COMPANY permission; does not resolve this request or unblock an account.</p>}
-        <div className="decision-buttons"><button className="button button-primary" disabled={saving || !reason.trim()}>{saving ? 'Saving…' : 'Record resolution'}</button><button className="button button-quiet" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
+        <div className="decision-buttons"><button className="btn-primary" disabled={saving || !reason.trim()}>{saving ? 'Saving…' : 'Record resolution'}</button><button className="btn-ghost" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
       </form> : <button className="button button-quiet" disabled={saving} onClick={() => { setSelected(item.id); setReason(''); setNotice(''); }}>Review request</button>}
     </article>)}
   </section>;

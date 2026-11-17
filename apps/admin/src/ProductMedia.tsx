@@ -8,7 +8,7 @@ export type MediaKind = 'image' | 'catalogue-pdf';
 
 const settings = {
   image: {title: 'Primary image', types: ['image/jpeg', 'image/png', 'image/webp'], limit: 2},
-  'catalogue-pdf': {title: 'Catalogue PDF', types: ['application/pdf'], limit: 10},
+  'catalogue-pdf': {title: 'Catalogue PDF', types: ['application/pdf'], limit: 100},
 };
 
 export function ProductMediaCard({baseUrl, token, productId, kind, attachment, onChange}: {
@@ -93,7 +93,7 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
     {checkingFile && <p role="status">Checking image…</p>}
     {file && <p>Selected {file.name} · {Math.ceil(file.size / 1024)} KB</p>}
     <div className="decision-buttons">
-      <button className="button button-primary" type="button" disabled={busy || checkingFile || !file} onClick={() => void run(async () => {
+      <button className="btn-primary" type="button" disabled={busy || checkingFile || !file} onClick={() => void run(async () => {
         if (!file) return;
         const body = new FormData();
         body.append('file', file);
@@ -103,7 +103,7 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
         setNotice('File uploaded.');
       })}>{attachment ? 'Replace file' : 'Upload file'}</button>
       {attachment && <>
-        {kind === 'catalogue-pdf' && <button className="button button-quiet" type="button" disabled={busy}
+        {kind === 'catalogue-pdf' && <button className="btn-secondary" type="button" disabled={busy}
           onClick={() => void run(async () => {
             const blob = await (await apiResponse(baseUrl, path, token)).blob();
             const url = URL.createObjectURL(blob);

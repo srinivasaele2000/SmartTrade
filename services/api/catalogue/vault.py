@@ -1,6 +1,8 @@
+from functools import partial
 from pathlib import PurePath
 
 from django.db import transaction
+from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -12,9 +14,9 @@ from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
 from .media import IMAGE_TYPES, validate_file
-from .models import CatalogueDocument, ProductMedia
+from .models import CatalogueDocument, DraftCatalogueItem, ProductMedia
 from .taxonomy import ALL_SUB_CATEGORIES, CATALOGUE_BUSINESS_KEYS, SUB_CATEGORIES
-from .views import Pages
+from .views import Pages, audit
 
 
 class DocumentMetadata(serializers.ModelSerializer):
@@ -160,3 +162,31 @@ class StaffCatalogueFile(StaffCatalogueVault):
 
     def get(self, request, key):
         return serve(get_object_or_404(CatalogueDocument, key=key))
+
+
+class DeleteCataloguePDF(StaffCatalogueVault):
+    http_method_names = ['delete', 'options']
+
+    @transaction.atomic
+    def delete(self, request, key):
+        # The commit and extraction paths use this same document lock.
+        document = get_object_or_404(CatalogueDocument.objects.select_for_update(), key=key,
+                                     content_type='application/pdf')
+        drafts = document.draft_items.all()
+        if drafts.filter(Q(status=DraftCatalogueItem.Status.APPROVED) | Q(product__isnull=False)).exists():
+            return Response({'detail': 'This PDF is linked to published catalogue items. Archive it to remove it from public browsing.'},
+                            status=409)
+
+        image_storage = DraftCatalogueItem._meta.get_field('image').storage
+        image_names = list(drafts.exclude(image='').values_list('image', flat=True))
+        document_storage, document_name = document.file.storage, document.file.name
+        count, _ = drafts.delete()
+        audit(request, 'CATALOGUE_PDF_DELETED', document, {
+            'key': str(document.key), 'title': document.title, 'filename': document.filename,
+            'brand_name': document.brand_name, 'is_active': document.is_active, 'deleted_drafts': count,
+        })
+        document.delete()
+        transaction.on_commit(partial(document_storage.delete, document_name), robust=True)
+        for image_name in image_names:
+            transaction.on_commit(partial(image_storage.delete, image_name), robust=True)
+        return Response(status=204)

@@ -180,8 +180,8 @@ export default function DealerBanners({base, token}: {base: string; token: strin
         <label><input type="checkbox" checked={form.is_active} onChange={e => setForm({...form, is_active: e.target.checked})} /> Active</label>
         <label>Starts at (IST) <input type="datetime-local" value={form.starts_at} onChange={e => setForm({...form, starts_at: e.target.value})} /></label>
         <label>Ends at (IST) <input type="datetime-local" value={form.ends_at} onChange={e => setForm({...form, ends_at: e.target.value})} /></label>
-        <div className="promo-actions"><button type="submit">{editing ? 'Save changes' : 'Upload banner'}</button>
-          {editing && <button type="button" onClick={reset}>Cancel</button>}</div>
+        <div className="promo-actions"><button type="submit" className="btn-primary">{editing ? 'Save changes' : 'Upload banner'}</button>
+          {editing && <button type="button" className="btn-ghost" onClick={reset}>Cancel</button>}</div>
       </fieldset>
     </form>
     <div className="promo-list">
@@ -207,12 +207,12 @@ export default function DealerBanners({base, token}: {base: string; token: strin
         </div>
         {deleting?.id === row.id && <div role="alert" className="promo-actions">
           <span>Delete “{row.title}” and its image?</span>
-          <button disabled={busy} onClick={() => void run(async () => {
+          <button className="btn-danger" disabled={busy} onClick={() => void run(async () => {
             await requestApi(base, `${path}${row.id}/`, token, {method: 'DELETE'});
             setRows(current => current?.filter(item => item.id !== row.id)); setDeleting(undefined);
             if (editing?.id === row.id) reset();
           })}>Confirm delete</button>
-          <button disabled={busy} onClick={() => setDeleting(undefined)}>Cancel delete</button>
+          <button className="btn-ghost" disabled={busy} onClick={() => setDeleting(undefined)}>Cancel delete</button>
         </div>}
       </article>)}
     </div>

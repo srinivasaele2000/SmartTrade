@@ -59,7 +59,7 @@ p { line-height: 1.55; }
 .eyebrow { margin: 0 0 4px; color: var(--brand); font-size: 11px; font-weight: 750; letter-spacing: .055em; }
 .topbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .apk-download { display: grid; justify-items: start; gap: 3px; }
-.apk-download .button { min-height: 32px; border-radius: 999px; }
+.apk-download .action-link-btn { min-height: 32px; border-radius: 999px; }
 .apk-download small { color: var(--muted); font-size: 10px; }
 .environment-badge, .connection-badge, .status-pill { display: inline-flex; width: fit-content; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 9px; background: #f1f5f9; color: var(--secondary); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .connection-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -113,17 +113,23 @@ input::file-selector-button { margin-right: 8px; padding: 5px 9px; border: 1px s
 .form-grid > :is(h3, p, .decision-buttons, label:has(input[type=file])), .catalogue-item-create > form > label:has(input[type=file]) { grid-column: 1 / -1; }
 .form-grid > button, .catalogue-item-create > form > button { justify-self: start; }
 
-button, .button, :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger) { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--surface); color: var(--secondary); font-size: 13px; font-weight: 650; line-height: 1.25; cursor: pointer; }
-button:hover:not(:disabled), .button:hover { border-color: #94a3b8; background: var(--canvas); color: var(--ink); }
-:is(.button-primary, .btn-primary), :where(form) > .button:not([type=button]):not(.button-quiet):not(.button-danger), :where(form) > button[type=submit]:not(.button-quiet):not(.button-danger):not(.text-button) { border-color: var(--brand); background: var(--brand); color: white; }
-:is(.button-primary, .btn-primary):hover:not(:disabled), :where(form) > .button:not([type=button]):not(.button-quiet):not(.button-danger):hover:not(:disabled), :where(form) > button[type=submit]:not(.button-quiet):not(.button-danger):not(.text-button):hover:not(:disabled) { border-color: var(--forest); background: var(--forest); color: white; }
-:is(.text-button, .btn-ghost) { border-color: transparent; background: transparent; color: var(--brand); }
+button, .button, .action-link-btn, :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .btn-warning) { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; border: 1px solid #cbd5e1; border-radius: var(--radius-sm); background: #f1f5f9; color: #334155; font-size: 13px; font-weight: 650; line-height: 1.25; cursor: pointer; }
+button:hover:not(:disabled), .button:hover:not(:disabled) { border-color: #94a3b8; background: #e2e8f0; color: var(--ink); }
+:is(.button-quiet, .btn-secondary) { background: #f1f5f9; border-color: #cbd5e1; color: #334155; }
+.action-link-btn { border-color: #86efac; background: #ecfdf5; color: var(--forest); text-decoration: none; }
+.action-link-btn:hover { background: #dcfce7; border-color: #4ade80; color: var(--forest); }
+:is(.button-primary, .btn-primary), :where(form) > .button:not([type=button], .button-quiet, .button-danger, .catalogue-item-delete), :where(form) > button[type=submit]:not([class]) { border-color: #166534; background: #166534; color: white; box-shadow: 0 1px 2px rgb(20 83 45 / .18); font-weight: 700; }
+:is(.button-primary, .btn-primary):hover:not(:disabled), :where(form) > .button:not([type=button], .button-quiet, .button-danger, .catalogue-item-delete):hover:not(:disabled), :where(form) > button[type=submit]:not([class]):hover:not(:disabled) { border-color: #14532d; background: #14532d; color: white; }
+:is(.text-button, .btn-ghost) { border-color: #cbd5e1; background: #fff; color: #334155; }
+:is(.text-button, .btn-ghost):hover:not(:disabled) { border-color: #94a3b8; background: #f1f5f9; }
 .text-button { justify-self: start; }
-:is(.button-danger, .btn-danger, .catalogue-item-delete) { border-color: #fecdd3; background: #fff1f2; color: #9f1239; }
-:is(.button-danger, .btn-danger, .catalogue-item-delete):hover:not(:disabled) { border-color: #fda4af; background: #ffe4e6; color: #881337; }
+:is(.button-danger, .btn-danger, .catalogue-item-delete) { border-color: #fecaca; background: #fef2f2; color: #b91c1c; font-weight: 700; }
+:is(.button-danger, .btn-danger, .catalogue-item-delete):hover:not(:disabled) { border-color: #dc2626; background: #dc2626; color: #fff; }
+.btn-warning { border-color: #fde68a; background: #fffbeb; color: #92400e; font-weight: 700; }
+.btn-warning:hover:not(:disabled) { border-color: #fbbf24; background: #fef3c7; color: #78350f; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .btn-sm, td button, .catalogue-items-actions .button { min-height: 32px; padding: 5px 9px; font-size: 12px; }
-.decision-buttons, nav:not([aria-label="Admin navigation"]) { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.decision-buttons, nav:not([aria-label="Admin navigation"]) { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
 .decision-buttons > label { flex: 0 1 220px; }
 .decision-buttons > input:not([type=checkbox]) { flex: 1 1 230px; width: auto; }
 :is([aria-pressed=true], [aria-current=page]):is(button, .button) { border-color: #86efac; background: var(--mint); color: var(--forest); }
@@ -165,6 +171,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .detail-grid dt { color: var(--muted); }
 .detail-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .detail-grid a { color: var(--brand); text-decoration: underline; }
+.detail-grid a.action-link-btn { max-width: 100%; text-align: left; text-decoration: none; overflow-wrap: anywhere; }
 .compact-heading { justify-content: flex-start; margin-bottom: 12px; }
 .compact-heading h3 { margin-bottom: 4px; }
 .document-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -211,7 +218,7 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .onboarding-table thead th { position: sticky; top: 0; z-index: 1; background: #f1f5f9; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .onboarding-table tbody tr:hover > * { background: var(--canvas); }
 .onboarding-table td > div:not(.table-actions) { margin-top: 4px; color: var(--secondary); }
-.table-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 255px; }
+.table-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 255px; }
 .table-actions > button { white-space: nowrap; min-height: 32px; padding: 5px 9px; font-size: 12px; }
 .cell-filename { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-meta { color: var(--muted); white-space: nowrap; }

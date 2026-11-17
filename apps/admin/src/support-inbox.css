@@ -15,7 +15,9 @@
 .support-bubble.admin { align-self: flex-end; background: var(--mint); border-color: #bbf7d0; border-radius: 12px 4px 12px 12px; }
 .support-bubble small { display: block; margin-top: 5px; color: var(--secondary); font-size: 11px; }
 .support-image { display: block; max-width: min(100%, 260px); max-height: 200px; object-fit: contain; }
-.support-file { display: block; padding: 6px 0; }
+.support-file { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.support-image-link { display: block; width: fit-content; max-width: 100%; border: 1px solid #86efac; border-radius: var(--radius-sm); padding: 4px; background: var(--surface); }
+.support-image-link:hover { background: #dcfce7; }
 .support-composer { border-top: 1px solid var(--border); display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
 .support-composer textarea { flex-basis: 100%; }
 .support-composer label { flex: 1 1 180px; max-width: 100%; }

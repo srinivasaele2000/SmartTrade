@@ -185,10 +185,10 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
         </> : <p>Are you sure you want to delete {action.item.name}? This will remove it from the dealer discovery catalog.</p>}
         {error && <p role="alert">{error}</p>}
         <div className="decision-buttons">
-          <button className={action.type === 'delete' ? 'button button-quiet catalogue-item-delete' : 'button'} disabled={busy}>
+          <button className={action.type === 'delete' ? 'button catalogue-item-delete' : 'btn-primary'} disabled={busy}>
             {action.type === 'edit' ? 'Save Changes' : 'Confirm Delete'}
           </button>
-          <button className="button button-quiet" type="button" disabled={busy} onClick={closeAction}>Cancel</button>
+          <button className="btn-ghost" type="button" disabled={busy} onClick={closeAction}>Cancel</button>
         </div>
       </form>
     </dialog>}

@@ -78,8 +78,8 @@ MEDIA_URL = "/media/"
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or BASE_DIR / "staticfiles")
 CATALOGUE_MEDIA_ROOT = Path(os.environ.get("CATALOGUE_MEDIA_ROOT") or BASE_DIR / "media")
 SMARTTRADE_SERVE_PUBLIC_CATALOGUE_MEDIA = False
-DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
-# Stream larger file uploads to temporary files instead of keeping them in memory.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 110 * 1024 * 1024
+# This is a spill-to-disk threshold, not a file size limit.
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2_621_440
 FILE_UPLOAD_PERMISSIONS = 0o600
 FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o700

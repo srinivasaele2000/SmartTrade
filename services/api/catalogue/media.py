@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
+from .limits import CATALOGUE_PDF_LIMIT_MB
 from .models import Product, ProductMedia
 
 
@@ -94,7 +95,7 @@ def validate_file(upload, kind):
         raise serializers.ValidationError({'file': 'Select a file.'})
     content_type = upload.content_type
     image = kind == ProductMedia.Kind.IMAGE
-    limit = 2 if image else 20
+    limit = 2 if image else CATALOGUE_PDF_LIMIT_MB
     if not upload.size:
         raise serializers.ValidationError({'file': 'The selected file is empty. Choose another file.'})
     if upload.size > limit * 1024 * 1024:

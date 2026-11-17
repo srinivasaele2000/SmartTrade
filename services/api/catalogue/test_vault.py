@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -11,7 +12,8 @@ from reportlab.pdfgen.canvas import Canvas
 from rest_framework.test import APIClient
 
 from companies.tests import grant_staff_permissions, make_account
-from .models import CatalogueDocument
+from .limits import MAX_CATALOGUE_PDF_BYTES
+from .models import CatalogueAudit, CatalogueDocument, DraftCatalogueItem
 
 
 class CatalogueVaultTests(TestCase):
@@ -21,8 +23,9 @@ class CatalogueVaultTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.temp = self.enterContext(TemporaryDirectory())
-        self.enterContext(patch.object(CatalogueDocument._meta.get_field('file'), 'storage',
-                                       FileSystemStorage(location=self.temp)))
+        for model, field in [(CatalogueDocument, 'file'), (DraftCatalogueItem, 'image')]:
+            self.enterContext(patch.object(model._meta.get_field(field), 'storage',
+                                           FileSystemStorage(location=self.temp)))
         self.moderator = make_account('+919800000081', 'STAFF')
 
     def upload(self, file, business_type='NETWORKING', **fields):
@@ -77,18 +80,17 @@ class CatalogueVaultTests(TestCase):
         grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])
         self.client.force_authenticate(self.moderator)
         buffer = BytesIO()
-        pdf = Canvas(buffer, pageCompression=0)
+        pdf = Canvas(buffer)
         pdf.drawString(20, 100, 'Large catalogue fixture')
-        pdf.addLiteral(('%' + 'x' * 1022 + '\n') * (15 * 1024))
         pdf.save()
-        content = buffer.getvalue()
+        prefix = buffer.getvalue().rsplit(b'%%EOF', 1)[0]
+        content = prefix.ljust(MAX_CATALOGUE_PDF_BYTES - 5) + b'%%EOF'
         uploaded = self.upload(SimpleUploadedFile('large.pdf', content, 'application/pdf'))
         self.assertEqual(uploaded.status_code, 201, uploaded.data)
         self.assertEqual(uploaded.data['file_size_bytes'], len(content))
 
-        oversized_pdf = content.replace(b'%%EOF', b' ' * (6 * 1024 * 1024) + b'%%EOF')
         for name, mime, payload, limit in (
-            ('oversized.pdf', 'application/pdf', oversized_pdf, 20),
+            ('oversized.pdf', 'application/pdf', content + b'\n', 100),
             ('oversized.png', 'image/png', b'x' * (2 * 1024 * 1024 + 1), 2),
         ):
             with self.subTest(name=name):
@@ -96,6 +98,37 @@ class CatalogueVaultTests(TestCase):
                 self.assertEqual(rejected.status_code, 400, rejected.data)
                 self.assertContains(rejected, f'File size exceeds the {limit} MB limit.', status_code=400)
         self.assertEqual(CatalogueDocument.objects.count(), 1)
+
+    def test_permanent_pdf_deletion_checks_permissions_and_cleans_drafts_and_files(self):
+        buffer = BytesIO()
+        pdf = Canvas(buffer)
+        pdf.drawString(20, 100, 'Disposable PDF')
+        pdf.save()
+        document = CatalogueDocument.objects.create(business_type='OTHER', title='Disposable PDF',
+            brand_name='Fixture', filename='fixture.pdf', content_type='application/pdf',
+            file_size_bytes=len(buffer.getvalue()), file=ContentFile(buffer.getvalue(), name='fixture.pdf'))
+        paths = [Path(document.file.path)]
+        for status in [DraftCatalogueItem.Status.DRAFT, DraftCatalogueItem.Status.DISCARDED]:
+            draft = document.draft_items.create(page=1, status=status, name='Fixture', product_code=status)
+            draft.image.save('fixture.png', ContentFile(b'image placeholder'))
+            paths.append(Path(draft.image.path))
+        url = f'{self.staff}{document.key}/delete/'
+        self.assertEqual(self.client.delete(url).status_code, 401)
+        self.client.force_authenticate(self.moderator)
+        self.assertEqual(self.client.delete(url).status_code, 403)
+        grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])
+        self.assertTrue(all(file.is_file() for file in paths))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.client.delete(url).status_code, 204)
+            self.assertTrue(all(file.is_file() for file in paths))
+        self.assertTrue(all(not file.exists() for file in paths))
+        self.assertFalse(CatalogueDocument.objects.filter(key=document.key).exists())
+        self.assertFalse(DraftCatalogueItem.objects.exists())
+        event = CatalogueAudit.objects.get(action='CATALOGUE_PDF_DELETED')
+        self.assertEqual(event.actor, self.moderator)
+        self.assertEqual(event.snapshot['key'], str(document.key))
+        self.assertEqual(event.snapshot['deleted_drafts'], 2)
+        self.assertEqual(self.client.delete(url).status_code, 404)
 
     def test_sub_category_upload_validation_and_public_and_staff_filters(self):
         grant_staff_permissions(self.moderator, ['MODERATE_PRODUCTS'])

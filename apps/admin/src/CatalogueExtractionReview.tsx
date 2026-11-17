@@ -300,8 +300,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         onChange={event => setRange(event.target.value)} /></label>{' '}
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
         Append to existing drafts</label>{' '}
-      <button className="button" disabled={!loaded || busy || photosBusy}>Extract batch</button>
-      {extracting && <button type="button" className="button button-quiet" disabled={cancelPending} onClick={() => {
+      <button className="btn-primary" disabled={!loaded || busy || photosBusy}>Extract batch</button>
+      {extracting && <button type="button" className="btn-ghost" disabled={cancelPending} onClick={() => {
         if (!extraction.current) return;
         extraction.current.cancelled = true;
         setCancelPending(true);
@@ -404,9 +404,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         <button type="button" className="button button-quiet" disabled={busy || !eligibleCount} onClick={toggleAll}>
           {allSelected ? 'Clear selection' : `Select all (${eligibleCount})`}
         </button>
-        <button className="button" disabled={busy || photosBusy || !approvedCount}>Commit &amp; Publish ({approvedCount})</button>
+        <button className="btn-primary" disabled={busy || photosBusy || !approvedCount}>Commit &amp; Publish ({approvedCount})</button>
       </div>}
     </form>}
-    <button className="button button-quiet" disabled={busy || photosBusy} onClick={close}>Close review</button>
+    <button className="btn-ghost" disabled={busy || photosBusy} onClick={close}>Close review</button>
   </dialog>;
 }

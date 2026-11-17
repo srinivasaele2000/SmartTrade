@@ -50,8 +50,8 @@ function Attachment({base, path, token, message}: {base: string; path: string; t
   if (error) return <span>Attachment unavailable</span>;
   if (!url) return <span>Loading attachment…</span>;
   return message.attachment_type === 'image'
-    ? <a href={url} target="_blank" rel="noopener noreferrer"><img className="support-image" src={url} alt={message.attachment_name} /></a>
-    : <a className="support-file" href={url} download={message.attachment_name}>PDF · {message.attachment_name} · {size(message.attachment_size)}</a>;
+    ? <a className="support-image-link" href={url} target="_blank" rel="noopener noreferrer"><img className="support-image" src={url} alt={message.attachment_name} /></a>
+    : <a className="support-file action-link-btn" href={url} download={message.attachment_name}>PDF · {message.attachment_name} · {size(message.attachment_size)}</a>;
 }
 
 export default function SupportInbox({base, token}: {base: string; token: string}) {
@@ -161,7 +161,7 @@ export default function SupportInbox({base, token}: {base: string; token: string
             <label>Attach image or PDF <input type="file" disabled={busy} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e => {
               setFile(e.target.files?.[0]); e.target.value = '';
             }} /></label>
-            {file && <button type="button" disabled={busy} onClick={() => setFile(undefined)}>{file.name} · Remove</button>}
+            {file && <button className="btn-ghost" type="button" disabled={busy} onClick={() => setFile(undefined)}>{file.name} · Remove</button>}
             <button className="btn-primary" type="submit" disabled={busy || (!body.trim() && !file)}>{busy ? 'Sending…' : 'Send'}</button>
           </form>
         </>}

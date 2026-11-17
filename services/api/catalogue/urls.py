@@ -14,6 +14,7 @@ urlpatterns = [
     path('admin/catalogues/<uuid:key>/drafts/commit/', extraction.CommitDrafts.as_view()),
     path('admin/catalogues/<uuid:key>/drafts/<int:pk>/image/', extraction.DraftImage.as_view(), name='catalogue-draft-image'),
     path('admin/catalogues/<uuid:key>/', vault.StaffCatalogueDocument.as_view()),
+    path('admin/catalogues/<uuid:key>/delete/', vault.DeleteCataloguePDF.as_view()),
     path('admin/catalogues/<uuid:key>/file/', vault.StaffCatalogueFile.as_view(), name='vault-staff-file'),
     *[path(f'staff/catalogue/products/<int:pk>/{kind}', StaffProductMedia.as_view(), {'kind': kind})
       for kind in ('image', 'catalogue-pdf')],
