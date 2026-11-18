@@ -22,7 +22,7 @@ import {estimateLineKey, estimateNetRate, estimatePage, estimateTotals, generalI
 import GeneralItems from './GeneralItems';
 import {customerPdfHtml} from './customer-estimate-pdf';
 import {trade, tradeType} from './trade-theme';
-import {useDebouncedSearch} from './useDebouncedSearch';
+import DealerCatalogueBrowser from './DealerCatalogueBrowser';
 
 const estimatesPath = '/dealers/estimates/';
 const billsPath = '/dealers/bills/';
@@ -65,18 +65,8 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
   const [pending, setPending] = useState<CatalogueItem>();
   const [quantity, setQuantity] = useState('1');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
-  const search = useDebouncedSearch();
-  const [category, setCategory] = useState(''), [brand, setBrand] = useState('');
-  const itemQuery = new URLSearchParams({search: search.query, category, brand}).toString();
-  const loadCategories = useCallback((page: number, signal: AbortSignal) => api.categories(page, signal, 'priced'), [api]);
-  const loadBrands = useCallback((page: number, signal: AbortSignal) => api.brands({scope: 'priced'}, page, signal), [api]);
-  const categories = useHistoryPage(loadCategories);
-  const brands = useHistoryPage(loadBrands);
-  const loadItems = useCallback((page: number, signal: AbortSignal) => estimatePage<CatalogueItem>(
-    api, '/catalogue/items/?' + itemQuery, page, token, signal), [api, token, itemQuery]);
   const loadBills = useCallback((page: number, signal: AbortSignal) => estimatePage<Bill>(api, billsPath, page, token, signal), [api, token]);
   const loadEstimates = useCallback((page: number, signal: AbortSignal) => estimatePage<Estimate>(api, estimatesPath, page, token, signal), [api, token]);
-  const catalogue = useHistoryPage(loadItems, itemQuery);
   const bills = useHistoryPage(loadBills);
   const estimates = useHistoryPage(loadEstimates);
   const totals = estimateTotals(items, discount, mode, rate);
@@ -215,38 +205,6 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.row}>{(['Items', 'General Items', 'Estimate', 'Bills'] as const).map(value =>
         <Button key={value} variant="navigation" compact selected={tab === value} disabled={busy}
           title={value === 'Items' ? 'Catalog Items' : value === 'Estimate' ? 'Estimate (' + items.length + ' items)' : value === 'Bills' ? 'Invoices' : value} onPress={() => changeTab(value)} />)}</ScrollView>
-      {tab === 'Items' && <>
-        <View style={s.row}>
-          <TextInput style={[s.input, itemStyles.search]} accessibilityLabel="Search catalogue items" placeholder="Name, code, HSN or brand"
-            value={search.text} onChangeText={search.change} returnKeyType="search" onSubmitEditing={search.submit} />
-          {!!(search.text || category || brand) && <Button variant="tertiary" compact title="×" accessibilityLabel="Clear item search"
-            onPress={() => {search.change(''); setCategory(''); setBrand('');}} />}
-          <Button variant="primary" compact title="Search" onPress={search.submit} />
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={itemStyles.filters}>
-          {!search.pending && catalogue.state.status === 'ready' && <Text style={tradeType.meta} accessibilityLiveRegion="polite">
-            {catalogue.state.data.count} items
-          </Text>}
-          <Button variant="navigation" compact title="All categories" selected={!category}
-            onPress={() => setCategory('')} />
-          {categories.state.status === 'ready' && categories.state.data.has_uncategorized &&
-            <Button variant="navigation" compact title="Uncategorized" selected={category === 'uncategorized'}
-              onPress={() => setCategory('uncategorized')} />}
-          {categories.state.status === 'ready' && categories.state.data.results.filter(value => value.active).map(value =>
-            <Button key={value.id} variant="navigation" compact title={value.name} selected={category === String(value.id)}
-              onPress={() => setCategory(String(value.id))} />)}
-          {categories.state.status === 'ready' && categories.state.data.previous && <Button variant="tertiary" compact title="Previous categories" onPress={categories.previous} />}
-          {categories.state.status === 'ready' && categories.state.data.next && <Button variant="tertiary" compact title="More categories" onPress={categories.next} />}
-          {categories.state.status === 'error' && <Button variant="tertiary" compact title="Retry categories" onPress={categories.retry} />}
-          <Button variant="navigation" compact title="All brands" selected={!brand} onPress={() => setBrand('')} />
-          {brands.state.status === 'ready' && brands.state.data.results.map(value =>
-            <Button key={value.id} variant="navigation" compact title={value.name} selected={brand === String(value.id)}
-              onPress={() => setBrand(String(value.id))} />)}
-          {brands.state.status === 'ready' && brands.state.data.previous && <Button variant="tertiary" compact title="Previous brands" onPress={brands.previous} />}
-          {brands.state.status === 'ready' && brands.state.data.next && <Button variant="tertiary" compact title="More brands" onPress={brands.next} />}
-          {brands.state.status === 'error' && <Button variant="tertiary" compact title="Retry brands" onPress={brands.retry} />}
-        </ScrollView>
-      </>}
       </View>
       {error !== '' && <Text style={s.error} accessibilityRole="alert">{error}</Text>}
       {message !== '' && <Text style={s.body} accessibilityLiveRegion="polite">{message}</Text>}
@@ -258,11 +216,8 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
             setItems(current => current.filter(row => row.dealer_custom_item !== id)); setDirty(true);
           }
         }} />}
-      {tab === 'Items' && <>
-        {search.pending || catalogue.state.status === 'loading' ? <ActivityIndicator accessibilityLabel="Loading catalogue items" />
-          : catalogue.state.status === 'error' ? <><Text style={s.error}>{catalogue.state.message}</Text><Button variant="secondary" title="Retry" onPress={catalogue.retry} /></>
-          : !catalogue.state.data.results.length ? <Text>{search.query || category || brand ? 'No catalogue items match these filters.' : 'No priced catalogue items are available.'}</Text>
-          : <View style={itemStyles.list}>{catalogue.state.data.results.map(item => <View key={item.id} style={itemStyles.card}>
+      {tab === 'Items' && <DealerCatalogueBrowser api={api} token={token} renderItems={catalogueItems =>
+        <View style={itemStyles.list}>{catalogueItems.map(item => <View key={item.id} style={itemStyles.card}>
             <CatalogueImage apiBase={api.base} reference={item.image_url} name={item.name} compact />
             <View style={itemStyles.details}>
               <Text style={tradeType.row}>{item.name}</Text>
@@ -274,9 +229,7 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
                 setPending(item); setQuantity(items.find(row => row.product === item.id)?.quantity ?? '1');
               }} />
             </View>
-          </View>)}</View>}
-        <HistoryPager {...catalogue} disabled={search.pending} />
-      </>}
+          </View>)}</View>} />}
       {tab === 'Estimate' && <>
         {!estimateListOnly && <>
         <View style={itemStyles.actions}>
@@ -496,12 +449,10 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
 
 const itemStyles = StyleSheet.create({
   header: {backgroundColor: trade.screen, gap: 6, paddingBottom: 6},
-  filters: {alignItems: 'center', gap: 6, paddingVertical: 4},
   list: {marginHorizontal: -trade.gutter},
   card: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: trade.gutter, paddingVertical: 9,
     backgroundColor: trade.surface, borderBottomWidth: 1, borderColor: trade.border},
   details: {flex: 1, minWidth: 0, gap: 3},
-  search: {flex: 1, minWidth: 0},
   priceColumn: {minWidth: 84, maxWidth: '34%', alignItems: 'flex-end', gap: 5},
   quantityCell: {width: '100%', alignItems: 'center'},
   quantity: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center'},
