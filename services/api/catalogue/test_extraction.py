@@ -915,3 +915,85 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(product.brand_category.brand_id, self.association.brand_id)
         self.assertEqual(product.brand_category.category_id, pipe.pk)
         self.assertEqual(product.specifications['HSN'], '')
+
+    def test_review_and_publish_resolve_brand_prefixes_and_one_edit_typos(self):
+        brand = Brand.objects.create(company=self.association.brand.company, name='Ashirvad Pipes')
+        url = self.base + 'extract/'
+        for index, label in enumerate(('ASHIRVAD', 'ASHIRVAD CPVC', 'ASHIRVAHD', 'ashirvad pipes', 'ASHIR')):
+            with self.subTest(label=label):
+                self.document.brand_name = label
+                self.document.save(update_fields=['brand_name'])
+                review = self.client.get(url).data
+                self.assertEqual(review['resolved_brand']['id'], brand.pk)
+                self.assertIn(brand.pk, [option['id'] for option in review['available_brands']])
+                draft = self.document.draft_items.create(page=1, name='Pipe', product_code=f'PIPE-{index}')
+                response = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+                    'id': draft.pk, 'approved': True, 'name': draft.name, 'product_code': draft.product_code,
+                    'price_per_unit': '10', 'category_id': self.association.category_id,
+                }]}, format='json')
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(Product.objects.get(code=draft.product_code).brand_category.brand_id, brand.pk)
+
+        Brand.objects.create(company=brand.company, name='Ashirvad Valves')
+        self.document.brand_name = 'ASHIRVAD'
+        self.document.save(update_fields=['brand_name'])
+        self.assertIsNone(self.client.get(url).data['resolved_brand'])
+        self.document.brand_name = 'ASHIRVAD PIPES CPVC'
+        self.document.save(update_fields=['brand_name'])
+        self.assertEqual(self.client.get(url).data['resolved_brand']['id'], brand.pk)
+
+    def test_explicit_brand_override_rechecks_eligibility_and_persists_ambiguous_identity(self):
+        company = self.association.brand.company
+        first = Brand.objects.create(company=company, name='Ashirvad Pipes')
+        owner = make_account('+919800000084', 'COMPANY')
+        other = CompanyProfile.objects.create(owner_account=owner, legal_name='Alternative',
+            company_email='alternative@example.test', verification_state='VERIFIED')
+        duplicate = Brand.objects.create(company=other, name=first.name)
+        inactive_owner = make_account('+919800000085', 'COMPANY')
+        inactive = CompanyProfile.objects.create(owner_account=inactive_owner, legal_name='Suspended',
+            company_email='suspended@example.test', verification_state='VERIFIED')
+        excluded = Brand.objects.create(company=inactive, name=first.name)
+        inactive.activity_state = 'SUSPENDED'
+        inactive.save(update_fields=['activity_state'])
+        self.document.brand_name = 'ASHIRVAD'
+        self.document.save(update_fields=['brand_name'])
+        review = self.client.get(self.base + 'extract/').data
+        self.assertFalse(review['brand_resolved'])
+        self.assertNotIn(excluded.pk, [option['id'] for option in review['available_brands']])
+
+        draft = self.document.draft_items.create(page=1, name='Pipe', product_code='OVERRIDE')
+        rows = [{'id': draft.pk, 'approved': True, 'name': draft.name, 'product_code': draft.product_code,
+                 'price_per_unit': '10', 'category_id': self.association.category_id}]
+        endpoint = self.base + 'drafts/commit/'
+        for selection in ({}, {'brand_id': excluded.pk}, {'brand_id': duplicate.pk, 'company_id': company.pk}):
+            result = self.client.post(endpoint, {'rows': rows, **selection}, format='json')
+            self.assertEqual(result.status_code, 400, result.data)
+        self.document.refresh_from_db()
+        self.assertIsNone(self.document.resolved_brand_id)
+        self.assertFalse(Product.objects.filter(code='OVERRIDE').exists())
+
+        # The selected identity must be retained even when two eligible brands have the same name.
+        result = self.client.post(endpoint, {'rows': rows, 'brand_id': duplicate.pk}, format='json')
+        self.assertEqual(result.status_code, 201, result.data)
+        self.assertEqual(result.data['resolved_brand']['id'], duplicate.pk)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.brand_name, duplicate.name)
+        self.assertEqual(self.document.resolved_brand_id, duplicate.pk)
+        self.assertEqual(self.client.get(self.base + 'extract/').data['resolved_brand']['id'], duplicate.pk)
+        self.assertEqual(Product.objects.get(code='OVERRIDE').brand_category.brand_id, duplicate.pk)
+
+        # A company-only override can resolve a unique matching brand within that company.
+        another = self.document.draft_items.create(page=1, name='Pipe adapter', product_code='COMPANY-OVERRIDE')
+        result = self.client.post(endpoint, {'company_id': company.pk, 'rows': [{
+            **rows[0], 'id': another.pk, 'name': another.name, 'product_code': another.product_code,
+        }]}, format='json')
+        self.assertEqual(result.status_code, 201, result.data)
+        self.assertEqual(result.data['resolved_brand']['id'], first.pk)
+        self.assertEqual(Product.objects.get(code=another.product_code).brand_category.brand_id, first.pk)
+
+        # Editing the PDF's declared brand in the Vault clears the saved identity.
+        result = self.client.patch(self.base, {'brand_name': 'Fixture'}, format='json')
+        self.assertEqual(result.status_code, 200, result.data)
+        self.document.refresh_from_db()
+        self.assertIsNone(self.document.resolved_brand_id)
+        self.assertEqual(self.client.get(self.base + 'extract/').data['resolved_brand']['id'], self.association.brand_id)

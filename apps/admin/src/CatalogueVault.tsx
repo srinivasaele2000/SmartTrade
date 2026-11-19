@@ -170,6 +170,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     {extraction && <CatalogueExtractionReview baseUrl={baseUrl} token={token} documentKey={extraction.key}
       title={extraction.title} close={() => setExtraction(null)} onCommit={(count, discarded) => {
         setNotice(`${count} catalogue items published. ${discarded} drafts discarded.`);
+        page.reload();
       }} />}
     {edit && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="edit-catalogue-title"
       onCancel={event => {event.preventDefault(); if (!busy) setEdit(null);}}>

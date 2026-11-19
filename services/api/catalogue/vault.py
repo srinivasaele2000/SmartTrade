@@ -147,10 +147,13 @@ class StaffCatalogueDocument(StaffCatalogueVault):
         unsupported = set(request.data) - set(serializer.fields)
         if unsupported:
             raise serializers.ValidationError({field: 'This field cannot be edited.' for field in sorted(unsupported)})
-        for field, value in serializer.validated_data.items():
+        changes = serializer.validated_data.copy()
+        if changes.get('brand_name', item.brand_name) != item.brand_name:
+            changes['resolved_brand'] = None
+        for field, value in changes.items():
             setattr(item, field, value)
-        if serializer.validated_data:
-            item.save(update_fields=serializer.validated_data.keys())
+        if changes:
+            item.save(update_fields=changes.keys())
         return Response(DocumentMetadata(item, context={'staff': True}).data)
 
     def delete(self, request, key):

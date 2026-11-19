@@ -18,30 +18,90 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
-from .items import ItemFields, ItemOutput, catalogue_product, eligible_associations, lock_product_codes
+from .items import ItemFields, ItemOutput, catalogue_product, lock_product_codes
 from .media import storage, validate_file, validate_image
 from .views import eligible_products
 from .tagging import category_hint, is_legacy_category, normalized_name
 from .models import Brand, BrandCategory, Category, CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
-def document_associations(document):
-    eligible = eligible_associations()
-    brand = document.brand_name.strip()
-    exact = eligible.filter(brand__name__iexact=brand)
-    if brand.casefold() == 'anchor' and not exact.exists():
-        return eligible.filter(brand__name__iexact='Anchor by Panasonic')
-    return exact
+def eligible_brands():
+    return Brand.objects.filter(company__verification_state='VERIFIED', company__activity_state='ACTIVE',
+                                company__owner_account__access_state='ACTIVE').select_related('company').order_by('name', 'pk')
 
 
-def eligible_document_brand(document):
+def one_edit_apart(left, right):
+    if min(len(left), len(right)) < 6 or abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        mismatches = [i for i, (a, b) in enumerate(zip(left, right)) if a != b]
+        if len(mismatches) == 1:
+            return True
+        if len(mismatches) == 2:
+            first, second = mismatches
+            return second == first + 1 and left[first:second + 1] == right[first:second + 1][::-1]
+        return False
+    shorter, longer = sorted((left, right), key=len)
+    difference = next((i for i, (a, b) in enumerate(zip(shorter, longer)) if a != b), len(shorter))
+    return shorter[difference:] == longer[difference + 1:]
+
+
+def resolve_document_brand(document, brands, *, use_saved=True):
+    if use_saved and document.resolved_brand_id:
+        return next((brand for brand in brands if brand.pk == document.resolved_brand_id), None)
     name = document.brand_name.strip()
-    eligible = Brand.objects.filter(company__verification_state='VERIFIED', company__activity_state='ACTIVE',
-                                    company__owner_account__access_state='ACTIVE')
-    matches = list(eligible.filter(name__iexact=name)[:2]) if name else []
-    if not matches and name.casefold() == 'anchor':
-        matches = list(eligible.filter(name__iexact='Anchor by Panasonic')[:2])
-    return matches[0] if len(matches) == 1 else None
+    tokens = normalized_name(name).split()
+    if not tokens:
+        return None
+    exact = [brand for brand in brands if brand.name.casefold() == name.casefold()]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    labels = [(brand, normalized_name(brand.name).split()) for brand in brands if brand.name.strip()]
+    exact_normalized = [brand for brand, parts in labels if ''.join(parts) == ''.join(tokens)]
+    if exact_normalized:
+        return exact_normalized[0] if len(exact_normalized) == 1 else None
+    leading = tokens[0]
+    full_prefix = [brand for brand, parts in labels if parts and min(len(tokens), len(parts)) > 1 and (
+        parts[:len(tokens)] == tokens or tokens[:len(parts)] == parts
+    )]
+    if full_prefix:
+        return full_prefix[0] if len(full_prefix) == 1 else None
+    prefix = [brand for brand, parts in labels if parts and (
+        (len(leading) >= 3 and parts[0] == leading) or
+        (len(leading) >= 5 and parts[0].startswith(leading))
+    )]
+    if prefix:
+        return prefix[0] if len(prefix) == 1 else None
+    near = [brand for brand, parts in labels if parts and (
+        one_edit_apart(tokens[0], parts[0]) or one_edit_apart(''.join(tokens), ''.join(parts))
+    )]
+    return near[0] if len(near) == 1 else None
+
+
+def brand_metadata(brand):
+    return {'id': brand.pk, 'name': brand.name, 'company_id': brand.company_id, 'company_name': brand.company.legal_name}
+
+
+def document_associations(brand):
+    return BrandCategory.objects.filter(brand=brand, category__active=True) if brand else BrandCategory.objects.none()
+
+
+def publish_brand(document, data):
+    brands = eligible_brands()
+    if company_id := data.get('company_id'):
+        brands = brands.filter(company_id=company_id)
+    if brand_id := data.get('brand_id'):
+        brand = brands.filter(pk=brand_id).first()
+    else:
+        choices = list(brands)
+        brand = resolve_document_brand(document, choices, use_saved=not company_id)
+        if company_id and len(choices) == 1:
+            brand = choices[0]
+    if not brand and (data.get('brand_id') or company_id):
+        raise serializers.ValidationError({
+            'brand_id': 'Choose one brand owned by a verified, active company with an active owner account.',
+        })
+    return brand
 
 
 def document_family_prefix(document):
@@ -110,6 +170,8 @@ class ReviewRow(serializers.Serializer):
 
 class ReviewInput(serializers.Serializer):
     rows = ReviewRow(many=True, min_length=1, max_length=500)
+    brand_id = serializers.IntegerField(min_value=1, required=False)
+    company_id = serializers.IntegerField(min_value=1, required=False)
 
     def validate_rows(self, rows):
         if len({row['id'] for row in rows}) != len(rows):
@@ -225,9 +287,10 @@ class StaffExtraction(APIView):
                         transaction.on_commit(partial(image_storage.delete, image), robust=True)
                     drafts.delete()
                     replaced = True
+                brand = resolve_document_brand(document, list(eligible_brands()))
                 categories = {
                     normalized_name(link.category.name): link.category.name
-                    for link in document_associations(document).select_related('category', 'brand')
+                    for link in document_associations(brand).select_related('category', 'brand')
                     if not is_legacy_category(link.category.name, link.brand.name)
                 }
                 for candidate, clean_name, banner in rows_to_save:
@@ -267,7 +330,9 @@ class StaffExtraction(APIView):
         } if progress else None)
 
     def review(self, document, rows, batch=None):
-        associations = document_associations(document)
+        brands = list(eligible_brands())
+        brand = resolve_document_brand(document, brands)
+        associations = document_associations(brand)
         options = [
             {key: value for key, value in row.items() if key != 'brand__name'}
             for row in associations.values('id', 'category__name', 'brand__name', 'brand__company__legal_name').order_by('category__name', 'id')
@@ -278,7 +343,6 @@ class StaffExtraction(APIView):
             code__in={row['product_code'].strip() for row in pending},
         ).order_by('code').values_list('code', flat=True).distinct()
         published = eligible_products()
-        brand = eligible_document_brand(document)
         canonical = [
             {'id': category.pk, 'name': category.name}
             for category in Category.objects.filter(active=True).order_by('name', 'pk')
@@ -287,6 +351,8 @@ class StaffExtraction(APIView):
         ]
         return Response({'rows': rows, 'categories': options, 'canonical_categories': canonical,
                          'default_category': category_hint(document=document), 'brand_resolved': brand is not None,
+                         'resolved_brand': brand_metadata(brand) if brand else None,
+                         'available_brands': [brand_metadata(option) for option in brands],
                          'diagnostics': document.last_extraction,
                          'summary': {
                              'pending': len(pending),
@@ -370,6 +436,8 @@ class CommitDrafts(StaffExtraction):
         input_data = ReviewInput(data=request.data)
         input_data.is_valid(raise_exception=True)
         rows = input_data.validated_data['rows']
+        explicit_brand = 'brand_id' in input_data.validated_data or 'company_id' in input_data.validated_data
+        brand_result = {}
         files = storage()
         saved = []
         try:
@@ -379,11 +447,11 @@ class CommitDrafts(StaffExtraction):
                 if len(drafts) != len(rows) or any(item.status != DraftCatalogueItem.Status.DRAFT for item in drafts.values()):
                     return Response({'detail': 'One or more drafts have already been reviewed or belong to another PDF. Reopen the review to see their current status.'}, status=409)
 
-                associations = document_associations(document).select_related('brand', 'category').in_bulk(
+                brand = publish_brand(document, input_data.validated_data) if any(row['approved'] for row in rows) else None
+                associations = document_associations(brand).select_related('brand__company', 'category').in_bulk(
                     {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
                 )
                 category_ids = {row['category_id'] for row in rows if row['approved'] and 'category_id' in row}
-                brand = eligible_document_brand(document) if category_ids else None
                 canonical = Category.objects.filter(active=True).in_bulk(category_ids) if brand else {}
                 links = {link.category_id: link for link in BrandCategory.objects.filter(
                     brand=brand, category_id__in=canonical,
@@ -407,7 +475,7 @@ class CommitDrafts(StaffExtraction):
                         category = canonical.get(row['category_id'])
                         if brand is None:
                             row_errors[str(draft.pk)] = {'draft': label, 'brand_category':
-                                'Match the PDF brand to one verified, active company brand before publishing.'}
+                                'Choose a verified, active company brand in the extraction review before publishing.'}
                             continue
                         association = None
                         if category and not is_legacy_category(category.name, brand.name):
@@ -440,6 +508,10 @@ class CommitDrafts(StaffExtraction):
                             row_errors[str(draft_id)] = {'draft': label, 'product_code': message}
                 if row_errors:
                     raise serializers.ValidationError({'row_errors': row_errors})
+                if approved and explicit_brand:
+                    document.resolved_brand = brand
+                    document.brand_name = brand.name
+                    document.save(update_fields=['resolved_brand', 'brand_name'])
                 Product.objects.bulk_create([product for _, product, _ in approved])
                 images = {}
                 for draft, product, label in approved:
@@ -466,6 +538,11 @@ class CommitDrafts(StaffExtraction):
                                    snapshot=result)
                     for (_, product, _), result in zip(approved, created, strict=True)
                 ])
+                if approved and explicit_brand:
+                    brand_result = {
+                        'resolved_brand': brand_metadata(brand),
+                        'published_for_brand': eligible_products().filter(brand_category__brand=brand).count(),
+                    }
         except Exception as error:
             for name in saved:
                 files.delete(name)
@@ -474,7 +551,7 @@ class CommitDrafts(StaffExtraction):
             if isinstance(error, OSError):
                 return Response({'detail': 'The catalogue files could not be saved. No items were published.'}, status=503)
             raise
-        return Response({'items': created, 'discarded': len(rows) - len(created)}, status=201)
+        return Response({'items': created, 'discarded': len(rows) - len(created), **brand_result}, status=201)
 
     @staticmethod
     def save_image(draft, product, label, files, saved):

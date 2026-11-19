@@ -17,8 +17,10 @@ type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number;
   pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
     ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string}[];
   skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
+type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
 type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
+  resolved_brand?: ReviewBrand | null; available_brands?: ReviewBrand[];
   diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
@@ -169,6 +171,10 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const extraction = useRef<{cancelled: boolean} | null>(null);
 
   const [brandResolved, setBrandResolved] = useState(true);
+  const [resolvedBrand, setResolvedBrand] = useState<ReviewBrand | null>();
+  const [availableBrands, setAvailableBrands] = useState<ReviewBrand[]>([]);
+  const [brandChoice, setBrandChoice] = useState('');
+  const chosenBrand = availableBrands.find(brand => String(brand.id) === brandChoice);
 
   function applyReview(result: Review, preserveEdits: boolean) {
     const options = result.canonical_categories?.map(category => ({
@@ -176,6 +182,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     })) ?? result.categories;
     setCategories(options);
     setBrandResolved(result.brand_resolved !== false);
+    setResolvedBrand(result.resolved_brand);
+    setAvailableBrands(result.available_brands ?? []);
+    setBrandChoice(current => result.available_brands?.some(brand => String(brand.id) === current) ? current : '');
     setSummary(result.summary);
     setExistingCodes(result.existing_codes ?? []);
     setRowErrors({});
@@ -331,8 +340,12 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     }
     const category = categoriesById.get(row.association);
     if (!category) issues.push('select an active category');
-    if (!brandResolved && (!category || category.canonical)) {
-      issues.push('match the PDF brand in Catalogue Vault to one verified, active company brand');
+    if (!brandResolved && !chosenBrand) {
+      issues.push(availableBrands.length ? 'choose a verified brand in the review' :
+        'create a brand under a verified, active company in Companies / Brands');
+    }
+    if (category && chosenBrand && categoryKey(category.category__name) === categoryKey(chosenBrand.name)) {
+      issues.push('select a canonical category for the chosen brand');
     }
     if (redundant.has(row.id)) issues.push('change the duplicate SKU or uncheck this draft');
     return issues.length ? [{row, message: issues.join('. ')}] : [];
@@ -399,8 +412,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           ? {category_id: Number(row.association)} : {brand_category: Number(row.association)}),
         sub_category: row.sub_category, pack_size: row.pack_size,
       } : {id: row.id, approved: false});
-      const result = await requestApi<{items: unknown[]; discarded: number}>(baseUrl, path + 'drafts/commit/', token, {
-        method: 'POST', body: JSON.stringify({rows: batch}), signal: controller.signal,
+      const result = await requestApi<{items: unknown[]; discarded: number; resolved_brand?: ReviewBrand; published_for_brand?: number}>(baseUrl, path + 'drafts/commit/', token, {
+        method: 'POST', body: JSON.stringify({rows: batch, ...(chosenBrand && {brand_id: chosenBrand.id})}), signal: controller.signal,
       });
       if (!Array.isArray(result?.items) || result.items.length !== approvedCount ||
           result.discarded !== batch.length - approvedCount) {
@@ -415,8 +428,13 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       setSummary(current => current && {
         pending: Math.max(0, current.pending - batch.length),
         published_from_document: current.published_from_document + result.items.length,
-        published_for_brand: current.published_for_brand + result.items.length,
+        published_for_brand: result.published_for_brand ?? current.published_for_brand + result.items.length,
       });
+      if (result.resolved_brand) {
+        setResolvedBrand(result.resolved_brand);
+        setBrandResolved(true);
+        setBrandChoice('');
+      }
       setPublishFeedback({kind: 'success', message: `${result.items.length} catalogue items published. ${result.discarded} drafts discarded.`});
       onCommit(result.items.length, result.discarded);
     } catch (failure) {
@@ -502,7 +520,17 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     </section>}
     {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
     {!!pending.length && !categories.length && <p>No active canonical categories are available. Add a catalogue category before publishing.</p>}
-    {!!pending.length && !brandResolved && <p>Match this PDF’s brand to one verified, active company brand before publishing.</p>}
+    {loaded && !!availableBrands.length && <label>
+      Brand
+      <select aria-label="Brand for catalogue PDF" value={brandChoice} disabled={busy} onChange={event => {
+        setBrandChoice(event.target.value);
+        setPublishFeedback(undefined);
+      }}>
+        <option value="">{resolvedBrand ? `Use matched brand — ${resolvedBrand.name} (${resolvedBrand.company_name})` : 'Select a verified brand'}</option>
+        {availableBrands.map(brand => <option key={brand.id} value={brand.id}>{brand.name} — {brand.company_name}</option>)}
+      </select>
+    </label>}
+    {loaded && !brandResolved && !availableBrands.length && <p>No eligible brands are available. Verify and activate a company, then create a brand in Companies / Brands. Reopen this review to load the brand.</p>}
     {!!rows.length && <form aria-label="Publish catalogue items" noValidate onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
         <caption>Approve the rows to publish. Unchecked drafts will be discarded when you commit.</caption>

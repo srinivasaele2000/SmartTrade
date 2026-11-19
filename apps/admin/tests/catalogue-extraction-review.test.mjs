@@ -353,7 +353,7 @@ test('valid fields leave publishing enabled with blank optional metadata, and un
     if (!brandResolved) {
       const explanation = JSON.stringify(get('Why publishing is blocked').children);
       assert.match(explanation, /70000236/);
-      assert.match(explanation, /match the PDF brand in Catalogue Vault/);
+      assert.match(explanation, /create a brand under a verified, active company/);
     } else {
       get('HSN for row 42').onChange({target: {value: ''}});
       assert.equal(get('Commit & Publish (1)').disabled, false);
@@ -362,4 +362,32 @@ test('valid fields leave publishing enabled with blank optional metadata, and un
     assert.equal(payload?.rows[0].category_id, brandResolved ? 7 : undefined);
     if (brandResolved) assert.equal(payload.rows[0].hsn_sac_code, '');
   }
+});
+
+test('choosing an eligible brand in the drawer unblocks publish and sends the selected brand ID', async () => {
+  const row = {id: 42, page: 1, status: 'DRAFT', name: 'Pipe', category: 'Pipework',
+    product_code: '70000236', price_per_unit: '10.00'};
+  const brands = [
+    {id: 11, name: 'Ashirvad Pipes', company_id: 1, company_name: 'Company One'},
+    {id: 12, name: 'Ashirvad Pipes', company_id: 2, company_name: 'Company Two'},
+  ];
+  let payload;
+  const get = review(undefined, async (_base, path, _token, options) => {
+    if (path.endsWith('extract/')) return {
+      rows: [row], categories: [], brand_resolved: false, resolved_brand: null, available_brands: brands,
+      canonical_categories: [{id: 7, name: 'Pipework'}],
+    };
+    payload = JSON.parse(options.body);
+    return {items: [{}], discarded: 0, resolved_brand: brands[1], published_for_brand: 1};
+  }, [row], () => {});
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  get('Approve 70000236').onChange({target: {checked: true}});
+  assert.equal(get('Commit & Publish (1)').disabled, true);
+  assert.match(JSON.stringify(get('Brand for catalogue PDF').children), /Company Two/);
+  get('Brand for catalogue PDF').onChange({target: {value: '12'}});
+  assert.equal(get('Commit & Publish (1)').disabled, false);
+  await get('Publish catalogue items').onSubmit({preventDefault() {}});
+  assert.equal(payload.brand_id, 12);
+  assert.equal(payload.rows[0].category_id, 7);
+  assert.match(JSON.stringify(get('Brand for catalogue PDF').children), /Use matched brand.*Company Two/);
 });

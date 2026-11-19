@@ -101,6 +101,7 @@ class CatalogueDocument(models.Model):
     business_type = models.CharField(max_length=18, choices=CATALOGUE_BUSINESS_TYPES)
     sub_category = models.CharField(max_length=40, blank=True, default='', db_index=True)
     brand_name = models.CharField(max_length=200)
+    resolved_brand = models.ForeignKey(Brand, null=True, blank=True, on_delete=models.SET_NULL)
     title = models.CharField(max_length=200)
     file = models.FileField(upload_to=vault_path, storage=vault_storage)
     filename = models.CharField(max_length=255)
