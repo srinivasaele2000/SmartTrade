@@ -20,7 +20,7 @@ type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number;
 type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
 type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
-  resolved_brand?: ReviewBrand | null; available_brands?: ReviewBrand[];
+  brand_name?: string; resolved_brand?: ReviewBrand | null; available_brands?: ReviewBrand[];
   diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
@@ -141,8 +141,8 @@ function Thumbnail({baseUrl, token, path}: {baseUrl: string; token: string; path
     : <span className="catalogue-item-placeholder">{failed ? 'Preview unavailable' : 'Loading preview…'}</span>;
 }
 
-export default function CatalogueExtractionReview({baseUrl, token, documentKey, title, close, onCommit}: {
-  baseUrl: string; token: string; documentKey: string; title: string; close: () => void;
+export default function CatalogueExtractionReview({baseUrl, token, documentKey, title, brandName, close, onCommit, onBrandProvisioned}: {
+  baseUrl: string; token: string; documentKey: string; title: string; brandName?: string; onBrandProvisioned?: () => void; close: () => void;
   onCommit: (count: number, discarded: number) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -173,8 +173,31 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const [brandResolved, setBrandResolved] = useState(true);
   const [resolvedBrand, setResolvedBrand] = useState<ReviewBrand | null>();
   const [availableBrands, setAvailableBrands] = useState<ReviewBrand[]>([]);
+  const [newBrandName, setNewBrandName] = useState(brandName ?? '');
+  const [brandFeedback, setBrandFeedback] = useState('');
   const [brandChoice, setBrandChoice] = useState('');
   const chosenBrand = availableBrands.find(brand => String(brand.id) === brandChoice);
+
+  async function provisionBrand() {
+    if (busy || !newBrandName.trim()) return;
+    setBusy(true);
+    setBrandFeedback('');
+    try {
+      const {brand} = await requestApi<{brand: ReviewBrand}>(baseUrl, '/catalogue/brands/provision/', token, {
+        method: 'POST', body: JSON.stringify({brand_name: newBrandName.trim(), document_id: documentKey}),
+      });
+      setAvailableBrands(current => current.some(option => option.id === brand.id) ? current : [...current, brand]);
+      setResolvedBrand(brand);
+      setBrandChoice(String(brand.id));
+      setBrandResolved(true);
+      setPublishFeedback(undefined);
+      onBrandProvisioned?.();
+    } catch (failure) {
+      setBrandFeedback(failure instanceof Error ? failure.message : 'Could not create the brand.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function applyReview(result: Review, preserveEdits: boolean) {
     const options = result.canonical_categories?.map(category => ({
@@ -183,6 +206,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     setCategories(options);
     setBrandResolved(result.brand_resolved !== false);
     setResolvedBrand(result.resolved_brand);
+    setNewBrandName(current => current || result.brand_name || '');
     setAvailableBrands(result.available_brands ?? []);
     setBrandChoice(current => result.available_brands?.some(brand => String(brand.id) === current) ? current : '');
     setSummary(result.summary);
@@ -341,8 +365,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     const category = categoriesById.get(row.association);
     if (!category) issues.push('select an active category');
     if (!brandResolved && !chosenBrand) {
-      issues.push(availableBrands.length ? 'choose a verified brand in the review' :
-        'create a brand under a verified, active company in Companies / Brands');
+      issues.push('choose a verified brand or create and verify one in the review');
     }
     if (category && chosenBrand && categoryKey(category.category__name) === categoryKey(chosenBrand.name)) {
       issues.push('select a canonical category for the chosen brand');
@@ -520,7 +543,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     </section>}
     {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
     {!!pending.length && !categories.length && <p>No active canonical categories are available. Add a catalogue category before publishing.</p>}
-    {loaded && !!availableBrands.length && <label>
+    {loaded && (!!availableBrands.length || !brandResolved) && <label>
       Brand
       <select aria-label="Brand for catalogue PDF" value={brandChoice} disabled={busy} onChange={event => {
         setBrandChoice(event.target.value);
@@ -530,7 +553,15 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         {availableBrands.map(brand => <option key={brand.id} value={brand.id}>{brand.name} — {brand.company_name}</option>)}
       </select>
     </label>}
-    {loaded && !brandResolved && !availableBrands.length && <p>No eligible brands are available. Verify and activate a company, then create a brand in Companies / Brands. Reopen this review to load the brand.</p>}
+    {loaded && !brandResolved && <div className="form-grid">
+      <label>New Brand Name
+        <input aria-label="New Brand Name" maxLength={160} value={newBrandName} disabled={busy}
+          onChange={event => setNewBrandName(event.target.value)} />
+      </label>
+      <button type="button" className="btn-primary" disabled={busy || !!chosenBrand || !newBrandName.trim()}
+        onClick={provisionBrand}>+ Create &amp; verify brand</button>
+    </div>}
+    {brandFeedback && <p role="alert">{brandFeedback}</p>}
     {!!rows.length && <form aria-label="Publish catalogue items" noValidate onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
         <caption>Approve the rows to publish. Unchecked drafts will be discarded when you commit.</caption>

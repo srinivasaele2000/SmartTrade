@@ -18,68 +18,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
+from .brands import brand_metadata, eligible_brands, get_or_provision_verified_brand, resolve_document_brand
 from .items import ItemFields, ItemOutput, catalogue_product, lock_product_codes
 from .media import storage, validate_file, validate_image
 from .views import eligible_products
 from .tagging import category_hint, is_legacy_category, normalized_name
-from .models import Brand, BrandCategory, Category, CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
-
-
-def eligible_brands():
-    return Brand.objects.filter(company__verification_state='VERIFIED', company__activity_state='ACTIVE',
-                                company__owner_account__access_state='ACTIVE').select_related('company').order_by('name', 'pk')
-
-
-def one_edit_apart(left, right):
-    if min(len(left), len(right)) < 6 or abs(len(left) - len(right)) > 1:
-        return False
-    if len(left) == len(right):
-        mismatches = [i for i, (a, b) in enumerate(zip(left, right)) if a != b]
-        if len(mismatches) == 1:
-            return True
-        if len(mismatches) == 2:
-            first, second = mismatches
-            return second == first + 1 and left[first:second + 1] == right[first:second + 1][::-1]
-        return False
-    shorter, longer = sorted((left, right), key=len)
-    difference = next((i for i, (a, b) in enumerate(zip(shorter, longer)) if a != b), len(shorter))
-    return shorter[difference:] == longer[difference + 1:]
-
-
-def resolve_document_brand(document, brands, *, use_saved=True):
-    if use_saved and document.resolved_brand_id:
-        return next((brand for brand in brands if brand.pk == document.resolved_brand_id), None)
-    name = document.brand_name.strip()
-    tokens = normalized_name(name).split()
-    if not tokens:
-        return None
-    exact = [brand for brand in brands if brand.name.casefold() == name.casefold()]
-    if exact:
-        return exact[0] if len(exact) == 1 else None
-    labels = [(brand, normalized_name(brand.name).split()) for brand in brands if brand.name.strip()]
-    exact_normalized = [brand for brand, parts in labels if ''.join(parts) == ''.join(tokens)]
-    if exact_normalized:
-        return exact_normalized[0] if len(exact_normalized) == 1 else None
-    leading = tokens[0]
-    full_prefix = [brand for brand, parts in labels if parts and min(len(tokens), len(parts)) > 1 and (
-        parts[:len(tokens)] == tokens or tokens[:len(parts)] == parts
-    )]
-    if full_prefix:
-        return full_prefix[0] if len(full_prefix) == 1 else None
-    prefix = [brand for brand, parts in labels if parts and (
-        (len(leading) >= 3 and parts[0] == leading) or
-        (len(leading) >= 5 and parts[0].startswith(leading))
-    )]
-    if prefix:
-        return prefix[0] if len(prefix) == 1 else None
-    near = [brand for brand, parts in labels if parts and (
-        one_edit_apart(tokens[0], parts[0]) or one_edit_apart(''.join(tokens), ''.join(parts))
-    )]
-    return near[0] if len(near) == 1 else None
-
-
-def brand_metadata(brand):
-    return {'id': brand.pk, 'name': brand.name, 'company_id': brand.company_id, 'company_name': brand.company.legal_name}
+from .models import BrandCategory, Category, CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
 def document_associations(brand):
@@ -172,6 +116,7 @@ class ReviewInput(serializers.Serializer):
     rows = ReviewRow(many=True, min_length=1, max_length=500)
     brand_id = serializers.IntegerField(min_value=1, required=False)
     company_id = serializers.IntegerField(min_value=1, required=False)
+    auto_create_brand = serializers.BooleanField(default=True)
 
     def validate_rows(self, rows):
         if len({row['id'] for row in rows}) != len(rows):
@@ -352,6 +297,7 @@ class StaffExtraction(APIView):
         return Response({'rows': rows, 'categories': options, 'canonical_categories': canonical,
                          'default_category': category_hint(document=document), 'brand_resolved': brand is not None,
                          'resolved_brand': brand_metadata(brand) if brand else None,
+                         'brand_name': document.brand_name,
                          'available_brands': [brand_metadata(option) for option in brands],
                          'diagnostics': document.last_extraction,
                          'summary': {
@@ -448,6 +394,11 @@ class CommitDrafts(StaffExtraction):
                     return Response({'detail': 'One or more drafts have already been reviewed or belong to another PDF. Reopen the review to see their current status.'}, status=409)
 
                 brand = publish_brand(document, input_data.validated_data) if any(row['approved'] for row in rows) else None
+                if (not brand and not document.resolved_brand_id and input_data.validated_data['auto_create_brand']
+                        and any(row['approved'] for row in rows)):
+                    brand = get_or_provision_verified_brand(document.brand_name, actor=request.user)
+                    explicit_brand = True
+                explicit_brand = explicit_brand or bool(brand and not document.resolved_brand_id)
                 associations = document_associations(brand).select_related('brand__company', 'category').in_bulk(
                     {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
                 )
@@ -510,7 +461,8 @@ class CommitDrafts(StaffExtraction):
                     raise serializers.ValidationError({'row_errors': row_errors})
                 if approved and explicit_brand:
                     document.resolved_brand = brand
-                    document.brand_name = brand.name
+                    if input_data.validated_data.keys() & {'brand_id', 'company_id'}:
+                        document.brand_name = brand.name
                     document.save(update_fields=['resolved_brand', 'brand_name'])
                 Product.objects.bulk_create([product for _, product, _ in approved])
                 images = {}

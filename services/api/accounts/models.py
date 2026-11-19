@@ -108,7 +108,10 @@ class Account(AbstractBaseUser):
                 name="account_valid_access_state",
             ),
             models.CheckConstraint(
-                condition=Q(mobile_e164__regex=r"^\+91[6-9][0-9]{9}$"),
+                condition=Q(mobile_e164__regex=r"^\+91[6-9][0-9]{9}$") | Q(
+                    mobile_e164__regex=r"^catalogue-[0-9a-f]{6}$", account_type=AccountType.COMPANY,
+                    mobile_verified_at__isnull=True, password__startswith="!",
+                ),
                 name="account_indian_mobile",
             ),
         ]

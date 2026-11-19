@@ -24,6 +24,7 @@ urlpatterns = [
     path('staff/catalogue/audit', StaffCatalogueAudit.as_view()),
     path('catalogue/products', PublicProducts.as_view()),
     path('catalogue/products/<int:pk>', PublicProduct.as_view()),
+    path('catalogue/brands/provision/', vault.StaffProvisionBrand.as_view()),
     path('catalogue/brands', PublicBrands.as_view()),
     path('catalogue/categories', Categories.as_view()),
     path('staff/catalogue/categories', StaffCategories.as_view()),

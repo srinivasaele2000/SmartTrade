@@ -6,10 +6,15 @@ import {useAdminPage} from './useAdminPage';
 import CatalogueExtractionReview from './CatalogueExtractionReview';
 
 type Document = {key: string; business_type: CatalogueBusinessType; sub_category: string; brand_name: string; title: string;
-  filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean};
+  filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean; brand_ready?: boolean};
 const path = '/admin/catalogues/';
 const pdfLimitMb = 100;
 const imageLimitMb = 2;
+
+function pdfBrandNotice(document: Document) {
+  if (document.content_type !== 'application/pdf') return '';
+  return document.brand_ready ? ' Brand ready for extraction review.' : ' Resolve the brand in extraction review.';
+}
 
 export function validateVaultFileSize(file: Pick<File, 'type' | 'name' | 'size'>) {
   const isPdf = file.type === 'application/pdf' || (file.type === '' && /\.pdf$/i.test(file.name));
@@ -60,11 +65,11 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     void run(async () => {
       const file = body.get('file');
       if (file instanceof File) validateVaultFileSize(file);
-      await requestApi<Document>(baseUrl, path, token, {method: 'POST', body});
+      const saved = await requestApi<Document>(baseUrl, path, token, {method: 'POST', body});
       form.reset();
       setBusiness('');
       setSubCategory('');
-      setNotice('Catalogue uploaded.');
+      setNotice('Catalogue uploaded.' + pdfBrandNotice(saved));
       page.setNumber(1);
       page.reload();
     });
@@ -94,9 +99,9 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     const fields = {title: edit.title, brand_name: edit.brand_name,
       business_type: edit.business_type, sub_category: edit.sub_category};
     void run(async () => {
-      await requestApi<Document>(baseUrl, path + edit.key + '/', token, {method: 'PATCH', body: JSON.stringify(fields)});
+      const saved = await requestApi<Document>(baseUrl, path + edit.key + '/', token, {method: 'PATCH', body: JSON.stringify(fields)});
       setEdit(null);
-      setNotice('Catalogue changes saved.');
+      setNotice('Catalogue changes saved.' + pdfBrandNotice(saved));
       page.setNumber(1);
       page.reload();
     });
@@ -168,7 +173,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       <button disabled={!page.data.next} onClick={() => page.setNumber(page.number + 1)}>Next</button>
     </nav>}
     {extraction && <CatalogueExtractionReview baseUrl={baseUrl} token={token} documentKey={extraction.key}
-      title={extraction.title} close={() => setExtraction(null)} onCommit={(count, discarded) => {
+      title={extraction.title} brandName={extraction.brand_name} onBrandProvisioned={page.reload} close={() => setExtraction(null)} onCommit={(count, discarded) => {
         setNotice(`${count} catalogue items published. ${discarded} drafts discarded.`);
         page.reload();
       }} />}

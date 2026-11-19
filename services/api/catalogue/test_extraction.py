@@ -922,7 +922,8 @@ class CatalogueExtractionTests(TestCase):
         for index, label in enumerate(('ASHIRVAD', 'ASHIRVAD CPVC', 'ASHIRVAHD', 'ashirvad pipes', 'ASHIR')):
             with self.subTest(label=label):
                 self.document.brand_name = label
-                self.document.save(update_fields=['brand_name'])
+                self.document.resolved_brand = None
+                self.document.save(update_fields=['brand_name', 'resolved_brand'])
                 review = self.client.get(url).data
                 self.assertEqual(review['resolved_brand']['id'], brand.pk)
                 self.assertIn(brand.pk, [option['id'] for option in review['available_brands']])
@@ -936,7 +937,8 @@ class CatalogueExtractionTests(TestCase):
 
         Brand.objects.create(company=brand.company, name='Ashirvad Valves')
         self.document.brand_name = 'ASHIRVAD'
-        self.document.save(update_fields=['brand_name'])
+        self.document.resolved_brand = None
+        self.document.save(update_fields=['brand_name', 'resolved_brand'])
         self.assertIsNone(self.client.get(url).data['resolved_brand'])
         self.document.brand_name = 'ASHIRVAD PIPES CPVC'
         self.document.save(update_fields=['brand_name'])
@@ -995,5 +997,42 @@ class CatalogueExtractionTests(TestCase):
         result = self.client.patch(self.base, {'brand_name': 'Fixture'}, format='json')
         self.assertEqual(result.status_code, 200, result.data)
         self.document.refresh_from_db()
-        self.assertIsNone(self.document.resolved_brand_id)
+        self.assertEqual(self.document.resolved_brand_id, self.association.brand_id)
         self.assertEqual(self.client.get(self.base + 'extract/').data['resolved_brand']['id'], self.association.brand_id)
+
+    def test_pdf_upload_edit_and_staff_endpoint_provision_catalogue_only_owners(self):
+        upload = self.client.post('/api/v1/admin/catalogues/', {
+            'title': 'Pipe catalogue', 'brand_name': 'ASHIRVAD', 'business_type': 'PLUMBING',
+            'file': SimpleUploadedFile('pipes.pdf', self.content, content_type='application/pdf'),
+        }, format='multipart')
+        self.assertEqual(upload.status_code, 201, upload.data)
+        document = CatalogueDocument.objects.get(key=upload.data['key'])
+        brand = document.resolved_brand
+        self.assertEqual(brand.name, 'ASHIRVAD')
+        self.assertTrue(brand.company.can_publish_catalogue)
+        self.assertFalse(brand.company.owner_account.has_usable_password())
+        self.assertTrue(brand.company.owner_account.mobile_e164.startswith('catalogue-'))
+        provision = '/api/v1/catalogue/brands/provision/'
+        response = self.client.post(provision, {'brand_name': 'ASHIRVAHD', 'document_id': self.document.pk}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['brand']['id'], brand.pk)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.resolved_brand_id, brand.pk)
+        edited = self.client.patch(self.base, {'brand_name': 'NEW LIGHTS'}, format='json')
+        self.assertEqual(edited.status_code, 200, edited.data)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.resolved_brand.name, 'NEW LIGHTS')
+
+    def test_commit_provisions_brand_for_legacy_pdf(self):
+        self.document.brand_name = 'Unlisted Pipeworks'
+        self.document.save(update_fields=['brand_name'])
+        draft = self.document.draft_items.create(page=1, name='Pipe', product_code='LEGACY-PIPE')
+        response = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+            'id': draft.pk, 'approved': True, 'name': draft.name, 'product_code': draft.product_code,
+            'price_per_unit': '10', 'category_id': self.association.category_id,
+        }]}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.resolved_brand.name, 'Unlisted Pipeworks')
+        self.assertEqual(Product.objects.get(code=draft.product_code).brand_category.brand_id,
+                         self.document.resolved_brand_id)

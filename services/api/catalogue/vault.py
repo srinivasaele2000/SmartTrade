@@ -1,5 +1,6 @@
 from functools import partial
 from pathlib import PurePath
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import Q
@@ -13,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.permissions import HasStaffPermission
+from .brands import BrandProvisioningBlocked, brand_metadata, get_or_provision_verified_brand
 from .media import IMAGE_TYPES, validate_file
 from .models import CatalogueDocument, DraftCatalogueItem, ProductMedia
 from .taxonomy import ALL_SUB_CATEGORIES, CATALOGUE_BUSINESS_KEYS, SUB_CATEGORIES
@@ -113,6 +115,49 @@ class PublicCatalogueFile(PublicCatalogueVault):
         return serve(get_object_or_404(CatalogueDocument, key=key, is_active=True))
 
 
+def provision_pdf_brand(item, actor):
+    try:
+        return get_or_provision_verified_brand(item.brand_name, actor=actor)
+    except BrandProvisioningBlocked:
+        # Keep the PDF available for manual resolution in the extraction drawer.
+        return None
+
+
+class BrandProvisionInput(serializers.Serializer):
+    brand_name = serializers.CharField(max_length=160)
+    company_name = serializers.CharField(max_length=200, required=False)
+    document_id = serializers.CharField(max_length=36, required=False)
+
+    def validate_document_id(self, value):
+        try:
+            if value.isascii() and value.isdecimal() and 0 < int(value) < 2**63:
+                return {'pk': int(value)}
+            return {'key': UUID(value)}
+        except ValueError as exc:
+            raise serializers.ValidationError('Enter a valid catalogue document ID.') from exc
+
+
+class StaffProvisionBrand(APIView):
+    permission_classes = [HasStaffPermission]
+    required_staff_permission = 'MODERATE_PRODUCTS'
+
+    @transaction.atomic
+    def post(self, request):
+        payload = BrandProvisionInput(data=request.data)
+        payload.is_valid(raise_exception=True)
+        values = payload.validated_data
+        document = None
+        if 'document_id' in values:
+            document = get_object_or_404(CatalogueDocument.objects.select_for_update(), is_active=True,
+                                         content_type='application/pdf', **values['document_id'])
+        brand = get_or_provision_verified_brand(values['brand_name'], values.get('company_name'), actor=request.user)
+        if document is not None:
+            document.resolved_brand = brand
+            document.brand_name = brand.name
+            document.save(update_fields=['resolved_brand', 'brand_name'])
+        return Response({'brand': brand_metadata(brand)})
+
+
 class StaffCatalogueVault(APIView):
     permission_classes = [HasStaffPermission]
     required_staff_permission = 'MODERATE_PRODUCTS'
@@ -127,12 +172,15 @@ class StaffCatalogueVault(APIView):
         item = CatalogueDocument(**serializer.validated_data)
         try:
             with transaction.atomic():
+                if item.content_type == 'application/pdf':
+                    item.resolved_brand = provision_pdf_brand(item, request.user)
                 item.save()
         except Exception:
             if item.file._committed:
                 item.file.delete(save=False)
             raise
-        return Response(DocumentMetadata(item, context={'staff': True}).data, status=201)
+        return Response({**DocumentMetadata(item, context={'staff': True}).data,
+                         'brand_ready': bool(item.resolved_brand_id)}, status=201)
 
 
 class StaffCatalogueDocument(StaffCatalogueVault):
@@ -152,9 +200,13 @@ class StaffCatalogueDocument(StaffCatalogueVault):
             changes['resolved_brand'] = None
         for field, value in changes.items():
             setattr(item, field, value)
+        if changes and item.content_type == 'application/pdf' and not item.resolved_brand_id:
+            item.resolved_brand = provision_pdf_brand(item, request.user)
+            changes['resolved_brand'] = item.resolved_brand
         if changes:
             item.save(update_fields=changes.keys())
-        return Response(DocumentMetadata(item, context={'staff': True}).data)
+        return Response({**DocumentMetadata(item, context={'staff': True}).data,
+                         'brand_ready': bool(item.resolved_brand_id)})
 
     def delete(self, request, key):
         item = get_object_or_404(CatalogueDocument, key=key)

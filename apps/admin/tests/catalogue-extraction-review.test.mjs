@@ -353,7 +353,7 @@ test('valid fields leave publishing enabled with blank optional metadata, and un
     if (!brandResolved) {
       const explanation = JSON.stringify(get('Why publishing is blocked').children);
       assert.match(explanation, /70000236/);
-      assert.match(explanation, /create a brand under a verified, active company/);
+      assert.match(explanation, /choose a verified brand or create and verify one/);
     } else {
       get('HSN for row 42').onChange({target: {value: ''}});
       assert.equal(get('Commit & Publish (1)').disabled, false);
@@ -390,4 +390,31 @@ test('choosing an eligible brand in the drawer unblocks publish and sends the se
   assert.equal(payload.brand_id, 12);
   assert.equal(payload.rows[0].category_id, 7);
   assert.match(JSON.stringify(get('Brand for catalogue PDF').children), /Use matched brand.*Company Two/);
+});
+
+test('creating a verified brand in the review preserves selection and unlocks publish', async () => {
+  const row = {id: 42, page: 1, status: 'DRAFT', name: 'Pipe', category: 'Pipework',
+    product_code: '70000236', price_per_unit: '10.00'};
+  const brand = {id: 18, name: 'ASHIRVAD', company_id: 9, company_name: 'ASHIRVAD Catalogue'};
+  let published;
+  const get = review(undefined, async (_base, path, _token, options) => {
+    if (path.endsWith('extract/')) return {
+      rows: [row], categories: [], brand_resolved: false, brand_name: 'ASHIRVAD',
+      canonical_categories: [{id: 7, name: 'Pipework'}],
+    };
+    if (path === '/catalogue/brands/provision/') {
+      assert.equal(JSON.parse(options.body).brand_name, 'ASHIRVAD');
+      return {brand};
+    }
+    published = JSON.parse(options.body);
+    return {items: [{}], discarded: 0, resolved_brand: brand};
+  }, [row], () => {});
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  get('Approve 70000236').onChange({target: {checked: true}});
+  assert.equal(get('New Brand Name').value, 'ASHIRVAD');
+  assert.equal(get('Commit & Publish (1)').disabled, true);
+  await get('+ Create & verify brand').onClick();
+  assert.equal(get('Commit & Publish (1)').disabled, false);
+  await get('Publish catalogue items').onSubmit({preventDefault() {}});
+  assert.equal(published.brand_id, brand.id);
 });
