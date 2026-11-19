@@ -587,7 +587,7 @@ class CatalogueExtractionTests(TestCase):
             for draft in drafts[:-1]
         ] + [{'id': drafts[-1].pk, 'approved': False}]
 
-        rows[165]['hsn_sac_code'] = ''
+        rows[165]['hsn_sac_code'] = 'ABC'
         invalid = self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json')
         self.assertContains(invalid, 'BATCH-165', status_code=400)
         self.assertContains(invalid, 'hsn_sac_code', status_code=400)
@@ -908,9 +908,10 @@ class CatalogueExtractionTests(TestCase):
         self.assertFalse(BrandCategory.objects.filter(brand=self.association.brand, category=pipe).exists())
         response = self.client.post(self.base + 'drafts/commit/', {'rows': [{
             'id': draft.pk, 'approved': True, 'name': 'Pipe', 'product_code': 'PIPE-41',
-            'hsn_sac_code': '3917', 'price_per_unit': '10', 'category_id': pipe.pk,
+            'hsn_sac_code': '', 'price_per_unit': '10', 'category_id': pipe.pk,
         }]}, format='json')
         self.assertEqual(response.status_code, 201, response.data)
         product = Product.objects.get(code='PIPE-41')
         self.assertEqual(product.brand_category.brand_id, self.association.brand_id)
         self.assertEqual(product.brand_category.category_id, pipe.pk)
+        self.assertEqual(product.specifications['HSN'], '')

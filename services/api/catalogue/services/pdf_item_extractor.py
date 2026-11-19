@@ -368,7 +368,7 @@ def extract_items(content, *, family_hint='', start_page=1, end_page=None, progr
         if not result:
             stats['warnings'].append('No priced SKU rows were found. Check that the selected pages contain a readable price table.')
         elif missing_hsn := sum(not row.hsn_sac_code for row in result):
-            stats['warnings'].append(f'{missing_hsn} extracted items need an HSN/SAC code before approval.')
+            stats['warnings'].append(f'{missing_hsn} extracted items have no HSN/SAC code. Add it during review if available.')
         return result
     except CataloguePDFError:
         raise

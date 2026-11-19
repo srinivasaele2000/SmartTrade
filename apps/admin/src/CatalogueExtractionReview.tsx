@@ -221,7 +221,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function extractBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!loaded || busy || photosBusy || extraction.current) return;
+    if (!loaded || busy || photoUpdates.length > 0 || extraction.current) return;
     setPublishFeedback(undefined);
     setError('');
     let remaining: string | undefined;
@@ -304,7 +304,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   }
 
   const pending = rows.filter(row => row.status === 'DRAFT');
-  const categoryIds = new Set(categories.map(option => String(option.id)));
+  const categoriesById = new Map(categories.map(option => [String(option.id), option]));
   const liveCodes = new Set(existingCodes);
   const codeCounts = new Map<string, number>();
   for (const row of pending) {
@@ -316,12 +316,28 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const eligibleCount = eligible.length;
   const selected = eligible.filter(row => row.approved);
   const approvedCount = selected.length;
-  const missingCategories = selected.filter(row => !categoryIds.has(row.association)).length;
   const redundant = duplicateSelections(selected);
   const selectableCount = eligibleCount - duplicateSelections(eligible).size;
   const allSelected = selectableCount > 0 && approvedCount === selectableCount && !redundant.size;
   const partiallySelected = approvedCount > 0 && !allSelected;
-  const photosBusy = Object.values(photoRequests).some(photo => photo.busy);
+  const photoUpdates = pending.filter(row => photoRequests[row.id]?.busy);
+  const blockers = selected.flatMap(row => {
+    const issues: string[] = [];
+    if (!row.name?.trim()) issues.push('enter a name');
+    if (!row.product_code.trim()) issues.push('enter a code');
+    if (!/^(?:[0-9]+(?:\.[0-9]{0,4})?|\.[0-9]{1,4})$/.test(row.price_per_unit?.trim() ?? '') ||
+        (row.price_per_unit?.trim().split('.')[0].replace(/^0+/, '').length ?? 0) > 14) {
+      issues.push('enter a non-negative unit price with up to 14 whole digits and 4 decimal places');
+    }
+    const category = categoriesById.get(row.association);
+    if (!category) issues.push('select an active category');
+    if (!brandResolved && (!category || category.canonical)) {
+      issues.push('match the PDF brand in Catalogue Vault to one verified, active company brand');
+    }
+    if (redundant.has(row.id)) issues.push('change the duplicate SKU or uncheck this draft');
+    return issues.length ? [{row, message: issues.join('. ')}] : [];
+  });
+  const publishDisabled = busy || photoUpdates.length > 0 || !approvedCount || blockers.length > 0;
 
   useEffect(() => {
     const first = errorToFocus.current;
@@ -367,7 +383,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function commit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (publishing.current || busy || photosBusy || !approvedCount || redundant.size || missingCategories || !brandResolved) return;
+    if (publishing.current || publishDisabled) return;
     publishing.current = true;
     setRowErrors({});
     setBusy(true);
@@ -379,7 +395,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       const batch = pending.map(row => row.approved && isEligible(row) ? {
         id: row.id, approved: true, name: row.name, product_code: row.product_code, hsn_sac_code: row.hsn_sac_code,
         price_per_unit: row.price_per_unit ?? '',
-        ...(categories.find(option => String(option.id) === row.association)?.canonical
+        ...(categoriesById.get(row.association)?.canonical
           ? {category_id: Number(row.association)} : {brand_category: Number(row.association)}),
         sub_category: row.sub_category, pack_size: row.pack_size,
       } : {id: row.id, approved: false});
@@ -426,7 +442,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   }
 
   return <dialog ref={dialog} className="contacts-dialog catalogue-review-dialog" aria-labelledby="pdf-review-title"
-    onCancel={event => {event.preventDefault(); if (!busy && !photosBusy) close();}}>
+    onCancel={event => {event.preventDefault(); if (!busy && !photoUpdates.length) close();}}>
     <header className="dialog-heading">
       <h3 id="pdf-review-title">Review extracted catalogue items</h3>
       <p>{title}</p>
@@ -436,7 +452,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         onChange={event => setRange(event.target.value)} /></label>{' '}
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
         Append to existing drafts</label>{' '}
-      <button className="btn-primary" disabled={!loaded || busy || photosBusy}>Extract batch</button>
+      <button className="btn-primary" disabled={!loaded || busy || !!photoUpdates.length}>Extract batch</button>
       {extracting && <button type="button" className="btn-ghost" disabled={cancelPending} onClick={() => {
         if (!extraction.current) return;
         extraction.current.cancelled = true;
@@ -551,7 +567,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
               {duplicate && <span className="status-pill catalogue-review-code-badge" data-status="PENDING">Duplicate code in batch</span>}
               {alreadyExists && <span className="status-pill catalogue-review-code-badge" data-status="PENDING">Already in catalogue</span>}
             </td>
-            <td><input aria-label={'HSN for row ' + row.id} value={row.hsn_sac_code} maxLength={8} required={row.approved}
+            <td><input aria-label={'HSN for row ' + row.id} value={row.hsn_sac_code} maxLength={8}
               pattern={row.approved ? '[0-9]{4,8}' : undefined} disabled={!editable} onChange={event => update(row.id, {hsn_sac_code: event.target.value})} /></td>
             <td><input aria-label={'Price for row ' + row.id} type="text" inputMode="decimal" value={row.price_per_unit ?? ''}
               pattern={row.approved ? '[0-9]+([.][0-9]{1,4})?' : undefined} required={row.approved} disabled={!editable}
@@ -580,13 +596,19 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           onClick={() => setRows(current => current.map(row => redundant.has(row.id) ? {...row, approved: false} : row))}>
           {`Uncheck duplicates (${redundant.size})`}
         </button>}
-        {missingCategories > 0 && <span role="status">Choose a category for {missingCategories} selected {missingCategories === 1 ? 'draft' : 'drafts'} before publishing.</span>}
-        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount || !!redundant.size || !!missingCategories || !brandResolved}>
+        {approvedCount > 0 && publishDisabled && <div role="status" aria-label="Why publishing is blocked">
+          {busy && <p>Wait for the current review operation to finish.</p>}
+          <ul>{blockers.map(({row, message}) => <li key={row.id}>
+            Page {row.page ?? '—'}, draft {row.id} ({row.product_code.trim() || 'no SKU'}) · {message}.
+          </li>)}
+          {photoUpdates.map(row => <li key={`photo-${row.id}`}>Draft {row.id} ({row.product_code}) · photo update in progress.</li>)}</ul>
+        </div>}
+        <button type="submit" className="btn-primary" disabled={publishDisabled}>
           {publishFeedback?.kind === 'pending' ? 'Committing & Publishing…' : `Commit & Publish (${approvedCount})`}
         </button>
       </div>}
       {publishBanner('Publish status by actions')}
     </form>}
-    <button className="btn-ghost" disabled={busy || photosBusy} onClick={close}>Close review</button>
+    <button className="btn-ghost" disabled={busy || !!photoUpdates.length} onClick={close}>Close review</button>
   </dialog>;
 }

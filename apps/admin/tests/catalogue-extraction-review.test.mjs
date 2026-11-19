@@ -22,7 +22,7 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
     {id: 3, product_code: 'missing', association: '', status: 'DRAFT'},
     {id: 4, product_code: 'invalid', association: '99', status: 'DRAFT'},
     {id: 5, product_code: 'reviewed', association: '7', status: 'APPROVED'},
-  ]).map(row => ({...row, approved: false, image_url: null}));
+  ]).map(row => ({name: 'Fixture product', price_per_unit: '10.00', ...row, approved: false, image_url: null}));
   const state = [rows, categories, false, '', {}, 0, '', false, true];
   if (options.summary) state[16] = options.summary;
   if (options.existingCodes) state[17] = options.existingCodes;
@@ -296,7 +296,7 @@ test('extraction diagnostics show each page and edited hierarchy and packing are
 
 
 test('canonical options preselect an inferred category and publish its canonical ID', async () => {
-  const row = {id: 30, category: 'Conduits, Piping & Installation Accessories', product_code: 'PIPE',
+  const row = {id: 30, name: 'Pipe', hsn_sac_code: '3917', price_per_unit: '10.00', category: 'Conduits, Piping & Installation Accessories', product_code: 'PIPE',
     status: 'DRAFT', image_url: null};
   let payload;
   const get = review(undefined, async (_base, path, _token, options) => {
@@ -331,4 +331,35 @@ test('category fallback follows all pages when a review has drafts but no option
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   assert.equal(calls.length, 3);
   assert.equal(get('Category for row 31').value, '2');
+});
+
+test('valid fields leave publishing enabled with blank optional metadata, and unresolved brand is explained inline', async () => {
+  const row = {id: 42, page: 1, status: 'DRAFT', association: '7', name: 'Pipe',
+    category: 'Pipework', product_code: '70000236', hsn_sac_code: '3917',
+    price_per_unit: '10.00', sub_category: '', pack_size: {}, image_url: null};
+  for (const brandResolved of [true, false]) {
+    let payload;
+    const get = review(undefined, async (_base, path, _token, options) => {
+      if (path.endsWith('extract/')) return {
+        rows: [row], categories: [], brand_resolved: brandResolved,
+        canonical_categories: [{id: 7, name: 'Pipework'}],
+      };
+      payload = JSON.parse(options.body);
+      return {items: [{}], discarded: 0};
+    }, [row], () => {});
+    await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+    get('Approve 70000236').onChange({target: {checked: true}});
+    assert.equal(get('Commit & Publish (1)').disabled, !brandResolved);
+    if (!brandResolved) {
+      const explanation = JSON.stringify(get('Why publishing is blocked').children);
+      assert.match(explanation, /70000236/);
+      assert.match(explanation, /match the PDF brand in Catalogue Vault/);
+    } else {
+      get('HSN for row 42').onChange({target: {value: ''}});
+      assert.equal(get('Commit & Publish (1)').disabled, false);
+    }
+    await get('Publish catalogue items').onSubmit({preventDefault() {}});
+    assert.equal(payload?.rows[0].category_id, brandResolved ? 7 : undefined);
+    if (brandResolved) assert.equal(payload.rows[0].hsn_sac_code, '');
+  }
 });

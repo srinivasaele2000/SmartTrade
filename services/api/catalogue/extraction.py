@@ -86,6 +86,10 @@ class DraftOutput(serializers.ModelSerializer):
                   'pack_size', 'sub_category', 'specifications', 'status', 'product', 'image_url']
 
 
+class PublishItemFields(ItemFields):
+    hsn_sac_code = serializers.RegexField(r'^[0-9]{4,8}$', required=False, allow_blank=True, default='')
+
+
 class DraftPackSize(serializers.Serializer):
     standard = serializers.CharField(max_length=40, required=False, allow_blank=True)
     box_quantity = serializers.CharField(max_length=40, required=False, allow_blank=True)
@@ -394,7 +398,7 @@ class CommitDrafts(StaffExtraction):
                         draft.status = DraftCatalogueItem.Status.DISCARDED
                         continue
                     label = f'Page {draft.page}, {row.get("product_code") or draft.product_code} (draft {draft.pk})'
-                    item = ItemFields(data=row)
+                    item = PublishItemFields(data=row)
                     if not item.is_valid():
                         row_errors[str(draft.pk)] = {'draft': label, **item.errors}
                         continue
