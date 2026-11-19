@@ -7,18 +7,20 @@ import {catalogueMediaUrl} from './catalogue-media-url';
 import {downloadLocalFile} from './local-files';
 import {openLocalPdf} from './open-local-pdf';
 
-export function CatalogueImage({apiBase, reference, name, detail = false, compact = false}: {
-  apiBase: string; reference?: string | null; name: string; detail?: boolean; compact?: boolean;
+export function CatalogueImage({apiBase, reference, name, detail = false, compact = false, gridBrand}: {
+  apiBase: string; reference?: string | null; name: string; detail?: boolean; compact?: boolean; gridBrand?: string;
 }) {
   const url = catalogueMediaUrl(apiBase, reference)?.href;
   const [failedUrl, setFailedUrl] = useState<string>();
-  return <View style={[styles.frame, detail && styles.detail, compact && styles.compact]}>
+  const grid = gridBrand !== undefined;
+  const initials = gridBrand?.trim().split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase();
+  return <View style={[styles.frame, detail && styles.detail, compact && styles.compact, grid && styles.grid]}>
     {url && url !== failedUrl
       ? <Image source={{uri: url}} cachePolicy="memory-disk" contentFit="contain" style={styles.image}
           accessible accessibilityLabel={name + ' product image'} onError={() => setFailedUrl(url)} />
       : <View style={styles.placeholder} accessible={compact} accessibilityLabel={compact ? 'No product image' : undefined}>
-          <Package color="#52675c" size={compact ? 24 : 36} aria-hidden={true} />
-          {!compact && <Text style={styles.placeholderText}>No product image</Text>}
+          {initials ? <Text style={styles.initials}>{initials}</Text> : <Package color="#52675c" size={compact ? 24 : 36} aria-hidden={true} />}
+          {!compact && !grid && <Text style={styles.placeholderText}>No product image</Text>}
         </View>}
   </View>;
 }
@@ -65,6 +67,8 @@ export function CataloguePdf({apiBase, reference, productId, productName}: {
 const styles = StyleSheet.create({
   frame: {height: 132, borderRadius: 10, overflow: 'hidden', backgroundColor: '#edf2ef'},
   detail: {height: 220},
+  grid: {height: '100%', borderRadius: 0, backgroundColor: '#f8fafc', padding: 12},
+  initials: {fontSize: 24, fontWeight: '700', color: '#475569', backgroundColor: '#e2e8f0', borderRadius: 12, padding: 14},
   compact: {width: 48, height: 48, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#F8FAFC', flexShrink: 0},
   image: {width: '100%', height: '100%'},
   placeholder: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8},

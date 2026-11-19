@@ -48,11 +48,11 @@ function moduleWith(states, account = null, screen, scheme = 'light', flags = fe
     'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': icons,
   })[name], identity, identity.exports);
   const button = buttonModule(React, native, jsx);
-  const catalogueMedia = {CatalogueImage: () => null, CataloguePdf: () => null};
+  const catalogueMedia = {CatalogueImage: ({reference, gridBrand}) => gridBrand ? React.createElement('span', {'data-image': reference, 'data-brand': gridBrand}) : null, CataloguePdf: () => null};
   const cards = {exports: {}};
   new Function('require', 'module', 'exports', browseCardsCompiled)(name => ({
     'react-native': native, 'react/jsx-runtime': jsx, 'lucide-react-native': new Proxy({}, {get: () => () => null}),
-    './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule, './trade-theme': theme,
+    react: React, './Button': button, './CatalogueMedia': catalogueMedia, './india': indiaModule, './trade-theme': theme,
   })[name], cards, cards.exports);
   const imports = { './src/platform-alert': {showAlert() {}}, './src/StickyBottomBar':{StickyBottomBar:({children})=>children}, 'react-native-safe-area-context':{SafeAreaProvider:({children})=>children, SafeAreaView:native.SafeAreaView, useSafeAreaInsets:()=>({bottom:48})}, './src/Button':button,
     './src/RoleIdentity': identity.exports,
@@ -211,7 +211,7 @@ test('public registration picker renders six distinct cards and excludes staff',
 
 test('buyer catalogue renders real category and brand selectors plus product metadata', () => {
   const components = moduleWith([
-    ready(page([{...product, catalogue_pdf_url: '/media/catalogue/test'}])),
+    ready(page([{...product, primary_image_url: '/media/catalogue/test-image', catalogue_pdf_url: '/media/catalogue/test'}])),
     ready(page([{ id: 2, name: 'Tools', active: true }])),
     ready(page([{ id: 4, name: 'BuildCo', company_name: 'Supplier', categories: [{ id: 2, name: 'Tools' }] }])),
   ]);
@@ -220,6 +220,8 @@ test('buyer catalogue renders real category and brand selectors plus product met
   assert.match(html, /BuildCo · Supplier/);
   assert.match(html, /Impact driver/);
   assert.match(html, /ID-10/);
+  assert.match(html, /data-image="\/media\/catalogue\/test-image"/);
+  assert.match(html, /data-brand="BuildCo"/);
   assert.match(html, /Shop by category/);
   assert.match(html, /With Catalogue/);
   assert.match(html, /Authorized Only/);

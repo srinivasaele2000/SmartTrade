@@ -9,7 +9,7 @@ import {printBrowserHtml} from './print-browser-html';
 import {printSavedPdf} from './print-document';
 import {DocumentHeader, DocumentLedgerRow, DocumentTable, DocumentTotals} from './TradeDocument';
 import {Button} from './Button';
-import {CatalogueImage} from './CatalogueMedia';
+import {ProductGrid, ProductGridCard} from './CatalogueBrowseCards';
 import {onboardingStyles as s} from './DealerWorkerContactsScreen';
 import {StickyBottomBar} from './StickyBottomBar';
 import {type ApiClient} from './api';
@@ -217,19 +217,14 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
           }
         }} />}
       {tab === 'Items' && <DealerCatalogueBrowser api={api} token={token} renderItems={catalogueItems =>
-        <View style={itemStyles.list}>{catalogueItems.map(item => <View key={item.id} style={itemStyles.card}>
-            <CatalogueImage apiBase={api.base} reference={item.image_url} name={item.name} compact />
-            <View style={itemStyles.details}>
-              <Text style={tradeType.row}>{item.name}</Text>
-              <Text style={tradeType.meta}>{item.brand_name} · Code {item.product_code} · HSN {item.hsn_sac_code || '—'}</Text>
-            </View>
-            <View style={itemStyles.priceColumn}>
-              <Text style={tradeType.price}>{inr(item.price_per_unit)}</Text>
-              <Button variant="primary" compact title="+ Add" disabled={finalized} accessibilityLabel={`Add ${item.name} to estimate`} onPress={() => {
-                setPending(item); setQuantity(items.find(row => row.product === item.id)?.quantity ?? '1');
-              }} />
-            </View>
-          </View>)}</View>} />}
+        <ProductGrid items={catalogueItems} render={item => <ProductGridCard name={item.name}
+          brand={item.brand_name} code={item.product_code} hsn={item.hsn_sac_code} badge={item.category_name}
+          price={inr(item.price_per_unit)} apiBase={api.base} image={item.image_url}>
+          <Button variant="primary" title="+ Add" disabled={finalized}
+            accessibilityLabel={`Add ${item.name} to estimate`} onPress={() => {
+              setPending(item); setQuantity(items.find(row => row.product === item.id)?.quantity ?? '1');
+            }} />
+        </ProductGridCard>} />} />}
       {tab === 'Estimate' && <>
         {!estimateListOnly && <>
         <View style={itemStyles.actions}>
@@ -449,11 +444,7 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
 
 const itemStyles = StyleSheet.create({
   header: {backgroundColor: trade.screen, gap: 6, paddingBottom: 6},
-  list: {marginHorizontal: -trade.gutter},
-  card: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: trade.gutter, paddingVertical: 9,
-    backgroundColor: trade.surface, borderBottomWidth: 1, borderColor: trade.border},
   details: {flex: 1, minWidth: 0, gap: 3},
-  priceColumn: {minWidth: 84, maxWidth: '34%', alignItems: 'flex-end', gap: 5},
   quantityCell: {width: '100%', alignItems: 'center'},
   quantity: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center'},
   quantityInput: {width: 28, minHeight: 40, textAlign: 'center', paddingHorizontal: 0, fontSize: 11, color: trade.ink},

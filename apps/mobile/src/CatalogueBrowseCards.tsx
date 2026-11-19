@@ -1,3 +1,4 @@
+import {useState, type ReactNode} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {Cable, LayoutGrid, Lightbulb, Package, Pipette, ToggleLeft, Waves} from 'lucide-react-native';
 import type {Product} from './api';
@@ -20,39 +21,79 @@ export function CategoryTile({name, all = false, selected, onPress}: {
   </Pressable>;
 }
 
+export function ProductGrid<T extends {id: number}>({items, render}: {
+  items: T[]; render: (item: T) => ReactNode;
+}) {
+  const [width, setWidth] = useState(0);
+  const columns = width >= 1000 ? 4 : width >= 640 ? 3 : 2;
+  return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={styles.grid}>
+    {Array.from({length: Math.ceil(items.length / columns)}, (_, row) => {
+      const cells = items.slice(row * columns, (row + 1) * columns);
+      return <View key={row} style={styles.gridRow}>
+        {cells.map(item => <View key={item.id} style={styles.cell}>{render(item)}</View>)}
+        {Array.from({length: columns - cells.length}, (_, index) => <View key={`empty-${index}`} style={styles.cell} />)}
+      </View>;
+    })}
+  </View>;
+}
+
+export function ProductGridCard({name, brand, code, hsn, pack, price, apiBase, image, badge, children}: {
+  name: string; brand: string; code: string; hsn?: string; pack?: string; price: string;
+  apiBase: string; image?: string | null; badge?: string; children: ReactNode;
+}) {
+  return <View style={styles.card}>
+    <View style={styles.stage}>
+      <CatalogueImage apiBase={apiBase} reference={image} name={name} gridBrand={brand} />
+      {!!badge && <Text numberOfLines={1} style={styles.badge}>{badge}</Text>}
+    </View>
+    <View style={styles.details}>
+      <Text numberOfLines={1} style={styles.brand}>{brand}</Text>
+      <Text accessibilityRole="header" accessibilityLabel={name} numberOfLines={2} style={styles.productName}>{name}</Text>
+      <Text numberOfLines={1} style={styles.code}>Code {code}</Text>
+      <Text numberOfLines={1} style={tradeType.meta}>{[hsn && 'HSN ' + hsn, pack && 'Pack ' + pack].filter(Boolean).join(' · ') || ' '}</Text>
+      <Text style={styles.price}>{price}</Text>
+      <View style={styles.actions}>{children}</View>
+    </View>
+  </View>;
+}
+
 export function ProductBrowseCard({product, apiBase, availability, onOpen}: {
   product: Product; apiBase: string; availability?: Availability; onOpen: () => void;
 }) {
-  return <View style={styles.card}>
-    <CatalogueImage apiBase={apiBase} reference={product.primary_image_url} name={product.name} compact />
-    <View style={styles.details}>
-      <Text accessibilityRole="header" style={styles.productName}>{product.name}</Text>
-      <Text style={tradeType.meta}>{product.brand_name} · Code {product.code}
-        {typeof product.specifications.HSN === 'string' && product.specifications.HSN ? ' · HSN ' + product.specifications.HSN : ''}</Text>
-      {(availability?.authorized || product.catalogue_pdf_url) && <View style={styles.tags}>
-        {availability?.authorized && <Text style={[styles.tag, styles.verifiedTag]}>Authorized dealer</Text>}
-        {availability?.inStock && <Text style={[styles.tag, styles.verifiedTag]}>In stock at a dealer</Text>}
-        {product.catalogue_pdf_url && <Text style={styles.tag}>PDF available</Text>}
-      </View>}
-    </View>
-    <View style={styles.actions}>
-      <Text style={styles.price}>{product.catalogue_price === null ? 'Price not listed' : inr(product.catalogue_price)}</Text>
-      {product.catalogue_price !== null && <Text style={tradeType.meta}>GST not specified</Text>}
-      <Button variant="tertiary" compact title="View Details" accessibilityLabel={`View details for ${product.name}`} onPress={onOpen} />
-    </View>
-  </View>;
+  const pack = product.specifications['Pack size'];
+  return <ProductGridCard name={product.name} brand={product.brand_name} code={product.code}
+    hsn={String(product.specifications.HSN ?? '')}
+    pack={pack && typeof pack === 'object' ? Object.values(pack).join(' / ') : String(pack ?? '')}
+    apiBase={apiBase} image={product.primary_image_url}
+    badge={availability?.inStock ? 'In stock at a dealer' : product.category_name}
+    price={product.catalogue_price === null ? 'Price not listed' : inr(product.catalogue_price)}>
+    <Text style={tradeType.meta}>{[
+      availability?.authorized && 'Authorized dealer',
+      product.catalogue_pdf_url && 'PDF available',
+      product.catalogue_price !== null && 'GST not specified',
+    ].filter(Boolean).join(' · ')}</Text>
+    <Button variant="tertiary" compact title="View Details" accessibilityLabel={`View details for ${product.name}`} onPress={onOpen} />
+  </ProductGridCard>;
 }
 
 const styles = StyleSheet.create({
   tile: {flexDirection: 'row', alignItems: 'center', minHeight: 28, gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 14, borderWidth: 1, borderColor: trade.border, backgroundColor: trade.surface},
   tileSelected: {borderColor: trade.accent, backgroundColor: trade.accentTint}, pressed: {opacity: 0.76},
   tileTitle: {fontWeight: '600', fontSize: 12, color: trade.heading},
-  card: {flexDirection: 'row', alignItems: 'center', backgroundColor: trade.surface, borderBottomWidth: 1, borderColor: trade.border, paddingVertical: 9, paddingHorizontal: trade.gutter, gap: 10},
-  details: {flex: 1, minWidth: 0, gap: 3},
-  productName: tradeType.row,
-  actions: {minWidth: 84, maxWidth: '34%', alignItems: 'flex-end', gap: 3},
-  price: {...tradeType.price, textAlign: 'right'},
-  tags: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
-  tag: {color: '#304a3d', backgroundColor: '#edf2ef', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, fontSize: 11, fontWeight: '700'},
-  verifiedTag: {backgroundColor: trade.successTint, color: trade.success},
+  grid: {gap: 10, width: '100%'},
+  gridRow: {flexDirection: 'row', alignItems: 'stretch', gap: 10},
+  cell: {flex: 1, minWidth: 0},
+  card: {flex: 1, backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0',
+    elevation: 1, shadowColor: '#0f172a', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: {width: 0, height: 2}},
+  stage: {aspectRatio: 4 / 3, overflow: 'hidden', borderTopLeftRadius: 11, borderTopRightRadius: 11,
+    backgroundColor: '#f8fafc', borderBottomWidth: 1, borderColor: '#e2e8f0'},
+  badge: {position: 'absolute', top: 8, left: 8, maxWidth: '85%', paddingHorizontal: 7, paddingVertical: 4,
+    borderRadius: 12, backgroundColor: '#ecfdf5', color: '#14532d', fontSize: 10, fontWeight: '700'},
+  details: {flex: 1, minWidth: 0, padding: 10, gap: 5},
+  brand: {color: '#475569', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 10.5, fontWeight: '700'},
+  productName: {minHeight: 36, lineHeight: 18, fontSize: 14, fontWeight: '600', color: '#0f172a'},
+  code: {alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: '#f1f5f9', color: '#334155',
+    borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2, fontSize: 11, fontVariant: ['tabular-nums']},
+  price: {...tradeType.price, color: '#14532d'},
+  actions: {marginTop: 'auto', paddingTop: 4, gap: 4},
 });

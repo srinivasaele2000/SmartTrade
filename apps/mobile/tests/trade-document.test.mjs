@@ -78,3 +78,32 @@ test('issued tax invoice renders the saved invoice metadata, HSN and tax amounts
   assert.match(result, /Code: 68001 \| HSN: 8536 2 ₹100\.00 18% ₹200\.00/);
   assert.match(result, /CGST ₹18\.00 SGST ₹18\.00 Grand Total \(₹\) ₹236\.00/);
 });
+
+test('product grid adapts to its container and preserves the product action', () => {
+  let width = 0;
+  const media = [];
+  const {ProductGrid, ProductGridCard} = load('CatalogueBrowseCards', {
+    ...base, react: {useState: () => [width, value => {width = value;}]},
+    './CatalogueMedia': {CatalogueImage: props => {media.push(props); return null;}},
+  });
+  const items = Array.from({length: 5}, (_, id) => ({id}));
+  let added;
+  const render = item => ProductGridCard({
+    name: 'Modular switch', brand: 'Anchor', code: 'SKU-22', hsn: '8536', price: '₹50.00',
+    apiBase: '/api/v1', image: item.id ? null : '/media/catalogue/switch',
+    children: jsx('Button', {title: '+ Add', onPress: () => {added = item.id;}}),
+  });
+  const grid = () => ProductGrid({items, render});
+  assert.equal(grid().props.children.length, 3);
+  grid().props.onLayout({nativeEvent: {layout: {width: 720}}});
+  assert.equal(grid().props.children[0].props.children[0].length, 3);
+  grid().props.onLayout({nativeEvent: {layout: {width: 1100}}});
+  assert.equal(grid().props.children[0].props.children[0].length, 4);
+  const nodes = flatten(grid());
+  assert.match(text(nodes), /Anchor Modular switch Code SKU-22 HSN 8536 ₹50.00/);
+  assert.equal(media[0].reference, '/media/catalogue/switch');
+  assert.equal(media[1].reference, null);
+  assert.equal(media[1].gridBrand, 'Anchor');
+  nodes.find(node => node.props.title === '+ Add').props.onPress();
+  assert.equal(added, 0);
+});
