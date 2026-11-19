@@ -6,11 +6,15 @@ type Draft = {
   price_per_unit: string | null; category: string; status: 'DRAFT' | 'APPROVED' | 'DISCARDED';
   image_url: string | null;
   pack_size?: {standard?: string; box_quantity?: string};
+  sub_category?: string;
 };
 type Category = {id: number; category__name: string; brand__company__legal_name: string};
 type Row = Draft & {approved: boolean; association: string};
 type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
-  items_extracted?: number; skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
+  items_extracted?: number; matrix_items?: number; wrapped_items?: number;
+  pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
+    ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string}[];
+  skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
 type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[];
   diagnostics?: Diagnostics;
@@ -350,6 +354,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       const batch = pending.map(row => row.approved && isEligible(row) ? {
         id: row.id, approved: true, name: row.name, product_code: row.product_code, hsn_sac_code: row.hsn_sac_code,
         price_per_unit: row.price_per_unit ?? '', brand_category: Number(row.association),
+        sub_category: row.sub_category, pack_size: row.pack_size,
       } : {id: row.id, approved: false});
       const result = await requestApi<{items: unknown[]; discarded: number}>(baseUrl, path + 'drafts/commit/', token, {
         method: 'POST', body: JSON.stringify({rows: batch}), signal: controller.signal,
@@ -435,7 +440,18 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         <div><dt>Product sections</dt><dd>{diagnostics.product_sections ?? 0}</dd></div>
         <div><dt>Items extracted</dt><dd>{diagnostics.items_extracted ?? 0}</dd></div>
         <div><dt>Skipped pages</dt><dd>{diagnostics.skipped_pages?.length ?? 0}</dd></div>
+        <div><dt>Matrix items</dt><dd>{diagnostics.matrix_items ?? 0}</dd></div>
+        <div><dt>Wrapped items</dt><dd>{diagnostics.wrapped_items ?? 0}</dd></div>
       </dl>}
+      {!!diagnostics.pages?.length && <details>
+        <summary>Page diagnostics</summary>
+        <ul>{diagnostics.pages.map(page => <li key={page.page}>
+          Page {page.page} · {page.items} items · {page.thumbnails} thumbnails · {page.matrix_items} matrix items
+          {page.ocr && ` · OCR attempted with ${page.ocr === 'rapidocr' ? 'RapidOCR' : 'Tesseract'}`}
+          {page.reason && ` · ${page.reason.replaceAll('_', ' ')}`}
+          {page.ocr_note && ` · ${page.ocr_note}`}
+        </li>)}</ul>
+      </details>}
       {!!diagnostics.warnings?.length && <details>
         <summary>{diagnostics.warnings.length} extraction {diagnostics.warnings.length === 1 ? 'warning' : 'warnings'}</summary>
         <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
@@ -488,8 +504,16 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
             <td><textarea rows={2} aria-label={'Name for row ' + row.id} value={row.name} maxLength={200} required={row.approved}
               disabled={!editable} onChange={event => update(row.id, {name: event.target.value})} />
               {rowErrors[row.id] && <p className="action-message error" aria-label={`Error for draft ${row.id}`}>{rowErrors[row.id]}</p>}
-              {row.pack_size?.standard && <div>Standard pack {row.pack_size.standard}</div>}
-              {row.pack_size?.box_quantity && <div>Box quantity {row.pack_size.box_quantity}</div>}
+              <details>
+                <summary>{[row.sub_category, row.pack_size?.standard && `Pack ${row.pack_size.standard}`,
+                  row.pack_size?.box_quantity && `Box ${row.pack_size.box_quantity}`].filter(Boolean).join(' · ') || 'Sub-category and pack size'}</summary>
+                <label>Sub-category <input aria-label={`Sub-category for draft ${row.id}`} value={row.sub_category ?? ''} maxLength={120}
+                  disabled={!editable} onChange={event => update(row.id, {sub_category: event.target.value})} /></label>
+                <label>Standard pack <input aria-label={`Standard pack for draft ${row.id}`} value={row.pack_size?.standard ?? ''} maxLength={40}
+                  disabled={!editable} onChange={event => update(row.id, {pack_size: {...row.pack_size, standard: event.target.value}})} /></label>
+                <label>Box quantity <input aria-label={`Box quantity for draft ${row.id}`} value={row.pack_size?.box_quantity ?? ''} maxLength={40}
+                  disabled={!editable} onChange={event => update(row.id, {pack_size: {...row.pack_size, box_quantity: event.target.value}})} /></label>
+              </details>
             </td>
             <td><input aria-label={'Code for row ' + row.id} value={row.product_code} maxLength={100} required={row.approved}
               disabled={!editable} onChange={event => update(row.id, {product_code: event.target.value,

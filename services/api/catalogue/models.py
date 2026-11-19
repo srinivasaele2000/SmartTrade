@@ -148,6 +148,8 @@ class DraftCatalogueItem(models.Model):
     price_per_unit = models.DecimalField(max_digits=18, decimal_places=4, null=True)
     category = models.CharField(max_length=120, blank=True)
     pack_size = models.JSONField(default=dict, blank=True)
+    sub_category = models.CharField(max_length=120, blank=True, default='')
+    specifications = models.JSONField(default=dict, blank=True)
     image = models.ImageField(upload_to=extracted_image_path, storage=vault_storage, blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     product = models.OneToOneField(Product, on_delete=models.PROTECT, null=True, blank=True)

@@ -110,8 +110,8 @@ def require_available_code(code, *, exclude=None):
         raise serializers.ValidationError({'product_code': 'This product code is already in use.'})
 
 
-def catalogue_product(fields, *, pack_size=None, sub_category=None):
-    specifications = {'HSN': fields['hsn_sac_code']}
+def catalogue_product(fields, *, pack_size=None, sub_category=None, extracted_specs=None):
+    specifications = {**(extracted_specs or {}), 'HSN': fields['hsn_sac_code']}
     if sub_category:
         specifications['Sub-category'] = sub_category
     if pack_size:

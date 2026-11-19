@@ -91,9 +91,15 @@ def read_page_tesseract(page, timeout):
     scale = 72 / dpi
     boxes = []
     for word in csv.DictReader(StringIO(result.stdout.decode('utf-8', errors='replace')), delimiter='\t'):
-        if word['level'] == '5' and word['text'] and word['text'].strip():
+        text = (word.get('text') or '').strip()
+        if word.get('level') != '5' or not text:
+            continue
+        try:
             x, y, width, height = (int(word[key]) for key in ('left', 'top', 'width', 'height'))
-            boxes.append(TextBox(x * scale, y * scale, (x + width) * scale, (y + height) * scale, word['text'].strip()))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            boxes.append(TextBox(x * scale, y * scale, (x + width) * scale, (y + height) * scale, text))
     return boxes, ''
 
 

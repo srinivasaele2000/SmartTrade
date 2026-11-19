@@ -264,3 +264,27 @@ test('structured API errors highlight and scroll to the exact draft IDs', async 
   get.runLastEffect();
   assert.deepEqual(calls, ['[data-draft-id="3829"]', 'scroll', 'focus']);
 });
+
+test('extraction diagnostics show each page and edited hierarchy and packing are sent on publish', async () => {
+  const row = {id: 8, product_code: 'SW-8', association: '7', status: 'DRAFT',
+    name: 'Switch 2M', sub_category: 'ROMA', pack_size: {standard: '12', box_quantity: '96'}};
+  let payload;
+  const get = review(undefined, async (_base, path, _token, options) => {
+    if (path.endsWith('extract/')) return {rows: [], categories: [], diagnostics: {
+      status: 'no_items', pages_scanned: 1, matrix_items: 2,
+      pages: [{page: 3, items: 2, thumbnails: 1, matrix_items: 2, ocr: 'tesseract'}],
+    }};
+    payload = JSON.parse(options.body);
+    return {items: [{}], discarded: 0};
+  }, [row], () => {});
+  get('Sub-category for draft 8').onChange({target: {value: 'Bell Push'}});
+  get('Standard pack for draft 8').onChange({target: {value: '6'}});
+  get('Box quantity for draft 8').onChange({target: {value: ''}});
+  get('Select all eligible rows').onChange();
+  await get('Publish catalogue items').onSubmit({preventDefault() {}});
+  assert.equal(payload.rows[0].sub_category, 'Bell Push');
+  assert.deepEqual(payload.rows[0].pack_size, {standard: '6', box_quantity: ''});
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  assert.ok(get('Page diagnostics'));
+  assert.ok(get('Matrix items'));
+});

@@ -20,7 +20,7 @@ from rest_framework.test import APIClient
 from catalogue.extraction import normalize_item_name
 from catalogue.models import Brand, BrandCategory, CatalogueAudit, CatalogueDocument, Category, DraftCatalogueItem, Product, ProductMedia
 from catalogue.services.pdf_item_extractor import (
-    Candidate, clean_extracted_name, extract_items, item_name, matching_image,
+    Candidate, clean_extracted_name, extract_items, item_name, matching_image, price,
     strip_leading_category_banner,
 )
 from catalogue.test_catalogue_layout import parallel_price_list
@@ -775,3 +775,118 @@ class CatalogueExtractionTests(TestCase):
         row, = response.data['results']
         self.assertEqual(row['sub_category'], 'Roma Urban')
         self.assertEqual(row['category_name'], self.association.category.name)
+
+    def test_matrix_and_wrapped_specs_keep_context_across_review_chunks(self):
+        stream = BytesIO()
+        pdf = canvas.Canvas(stream, pagesize=(595, 800))
+        pdf.setFont('Helvetica', 9)
+        pdf.drawString(35, 760, 'Series: ROMA URBAN')
+        pdf.drawString(35, 743, 'HSN: 85365090')
+        pdf.drawString(35, 726, 'Std. Pkg.: 12 Box Qty: 96')
+        for x, label in ((225, '6A'), (410, '16A')):
+            pdf.drawString(x, 706, label)
+        headers = [(35, 'Description'), (205, 'SKU'), (292, 'MRP'), (389, 'SKU'), (478, 'LP')]
+        for x, value in headers:
+            pdf.drawString(x, 690, value)
+        for y in (670, 625):
+            for x, value in zip((35, 205, 292, 389, 478),
+                                ('Bell push', '66605R', 'Rs. 1,23,456.50/-', '98123-BLK/2', 'MRP 2,450/-')):
+                pdf.drawString(x, y, value)
+            pdf.drawString(35, y - 12, '2M 250W DP ISI Matte Black')
+        pdf.showPage()
+        pdf.setFont('Helvetica', 9)
+        for x, value in zip((35, 205, 292, 389, 478), ('Socket', 'SO-6A', '55', 'SO-16A', '85')):
+            pdf.drawString(x, 730, value)
+        pdf.drawString(35, 685, 'Section: PENTA')
+        pdf.drawString(35, 667, 'HSN Code: 85366990')
+        for x, value in headers:
+            pdf.drawString(x, 650, value)
+        for x, value in zip((35, 205, 292, 389, 478), ('Switch', 'PE-6A', '75', '', '')):
+            pdf.drawString(x, 630, value)
+        pdf.save()
+        self.document.file.save('matrix.pdf', ContentFile(stream.getvalue()))
+        first = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1, 'range_end': 2}, format='json')
+        self.assertEqual(first.status_code, 200, first.data)
+        rows = {row['product_code']: row for row in first.data['rows']}
+        self.assertEqual(set(rows), {'66605R', '98123-BLK/2'})
+        row = rows['66605R']
+        self.assertEqual(row['price_per_unit'], '123456.5000')
+        self.assertIn('Bell push 2M 250W DP ISI Matte Black', row['name'])
+        self.assertEqual(row['specifications']['Variant'], '6A')
+        self.assertEqual(row['specifications']['Wattage'], '250W')
+        self.assertEqual(row['specifications']['Pole configuration'], 'DP')
+        self.assertEqual(row['specifications']['Standard'], 'ISI')
+        self.assertEqual(row['specifications']['Finish'], 'Matte Black')
+        self.assertEqual(row['pack_size'], {'standard': '12', 'box_quantity': '96'})
+
+        second = self.client.post(self.base + 'extract/', {
+            'start_page': 2, 'end_page': 2, 'range_end': 2, 'append': True,
+        }, format='json')
+        self.assertEqual(second.status_code, 200, second.data)
+        rows = {row['product_code']: row for row in second.data['rows']}
+        inherited = rows['SO-16A']
+        self.assertIn('16A', inherited['name'])
+        self.assertEqual(inherited['sub_category'], 'ROMA URBAN')
+        self.assertEqual(inherited['hsn_sac_code'], '85365090')
+        self.assertEqual(inherited['pack_size'], row['pack_size'])
+        self.assertEqual(rows['PE-6A']['hsn_sac_code'], '85366990')
+        self.assertEqual(rows['PE-6A']['sub_category'], 'PENTA')
+        self.assertEqual(rows['PE-6A']['pack_size'], {})
+        self.assertEqual([page['page'] for page in second.data['diagnostics']['pages']], [1, 2])
+        self.assertEqual(second.data['diagnostics']['pages'][0]['wrapped_items'], 2)
+
+        approved = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+            'id': row['id'], 'approved': True, 'name': row['name'], 'product_code': row['product_code'],
+            'hsn_sac_code': row['hsn_sac_code'], 'price_per_unit': row['price_per_unit'],
+            'brand_category': self.association.pk, 'sub_category': 'Bell Push', 'pack_size': {'standard': '6'},
+        }]}, format='json')
+        self.assertEqual(approved.status_code, 201, approved.data)
+        published = Product.objects.get(code='66605R')
+        self.assertEqual(published.specifications['Sub-category'], 'Bell Push')
+        self.assertEqual(published.specifications['Pack size'], {'standard': '6'})
+        self.assertEqual(published.specifications['Wattage'], '250W')
+
+    def test_native_image_spanning_a_block_is_shared_without_spilling_into_next_row(self):
+        stream = BytesIO()
+        pdf = canvas.Canvas(stream, pagesize=(595, 800))
+        pdf.setFont('Helvetica', 9)
+        pdf.drawImage(ImageReader(Image.new('RGB', (50, 60), 'red')), 25, 651, 48, 63)
+        pdf.drawImage(ImageReader(Image.new('RGB', (7, 7), 'green')), 48, 598, 7, 7)
+        for x, value in ((26, 'Photo'), (93, 'Description'), (266, 'SKU'), (395, 'MRP')):
+            pdf.drawString(x, 730, value)
+        for i, y in enumerate((704, 686, 668, 600)):
+            for x, value in ((93, 'Switch'), (266, f'P-{i}'), (395, '30')):
+                pdf.drawString(x, y, value)
+        pdf.save()
+        stats = {}
+        rows = extract_items(stream.getvalue(), diagnostics=stats)
+        self.assertEqual(len(rows), 4)
+        self.assertTrue(rows[0].image)
+        self.assertEqual([row.image for row in rows], [rows[0].image] * 3 + [None])
+        self.assertEqual(stats['pages'][0]['thumbnails'], 3)
+
+    def test_scanned_page_with_missing_tesseract_records_reason_and_keeps_batch_resumable(self):
+        with pymupdf.open() as document:
+            page = document.new_page()
+            image = BytesIO()
+            Image.new('RGB', (50, 50), 'red').save(image, format='PNG')
+            page.insert_image((10, 10, 110, 110), stream=image.getvalue())
+            content = document.tobytes()
+        stats, progress = {}, {}
+        with patch('catalogue.services.pdf_item_extractor.read_page', return_value=[]), patch(
+            'catalogue.services.catalogue_ocr.shutil.which', return_value=None,
+        ):
+            self.assertEqual(extract_items(content, range_end=1, diagnostics=stats, progress=progress), [])
+        self.assertEqual(progress['processed_through'], 1)
+        self.assertEqual(stats['pages'][0]['reason'], 'ocr_no_readable_text')
+        self.assertIn('Tesseract is unavailable', stats['pages'][0]['ocr_note'])
+
+
+    def test_price_normalizes_inr_suffixes_without_accepting_ambiguous_amounts(self):
+        from decimal import Decimal
+
+        for raw in ('₹ 1,23,456.50/-', 'LP INR 123,456.50', 'MRP: Rs. 123456.50 / -'):
+            with self.subTest(raw=raw):
+                self.assertEqual(price(raw), Decimal('123456.50'))
+        for raw in ('12,34', '₹ 25 to 50', 'Rs. -5.00', 'call for price'):
+            self.assertIsNone(price(raw))

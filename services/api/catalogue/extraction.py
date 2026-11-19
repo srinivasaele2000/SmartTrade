@@ -73,7 +73,12 @@ class DraftOutput(serializers.ModelSerializer):
     class Meta:
         model = DraftCatalogueItem
         fields = ['id', 'page', 'name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category',
-                  'pack_size', 'status', 'product', 'image_url']
+                  'pack_size', 'sub_category', 'specifications', 'status', 'product', 'image_url']
+
+
+class DraftPackSize(serializers.Serializer):
+    standard = serializers.CharField(max_length=40, required=False, allow_blank=True)
+    box_quantity = serializers.CharField(max_length=40, required=False, allow_blank=True)
 
 
 class ReviewRow(serializers.Serializer):
@@ -84,6 +89,8 @@ class ReviewRow(serializers.Serializer):
     hsn_sac_code = serializers.CharField(max_length=8, required=False, allow_blank=True)
     price_per_unit = serializers.CharField(max_length=24, required=False, allow_blank=True)
     brand_category = serializers.IntegerField(min_value=1, required=False)
+    sub_category = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    pack_size = DraftPackSize(required=False)
 
 
 class ReviewInput(serializers.Serializer):
@@ -144,7 +151,10 @@ class StaffExtraction(APIView):
         batch = serializer.validated_data
         progressive = 'range_end' in batch
         progress = {}
-        diagnostics = {'start_page': batch['start_page'], 'end_page': batch['end_page']}
+        diagnostics = {'start_page': batch['start_page'], 'end_page': batch['end_page'], 'range_end': batch.get('range_end')}
+        previous = document.last_extraction
+        adjacent = previous.get('processed_through') == batch['start_page'] - 1
+        layout_context = previous.get('layout_context') if adjacent else None
         try:
             from .services.pdf_item_extractor import MAX_CATALOGUE_PDF_BYTES, MAX_ROWS, CataloguePDFError, extract_items
         except ImportError:
@@ -156,13 +166,19 @@ class StaffExtraction(APIView):
                 candidates = extract_items(source.read(MAX_CATALOGUE_PDF_BYTES + 1), family_hint=family_hint,
                                            start_page=batch['start_page'], end_page=batch['end_page'],
                                            progress=progress, diagnostics=diagnostics,
-                                           range_end=batch.get('range_end'))
+                                           range_end=batch.get('range_end'), layout_context=layout_context)
         except FileNotFoundError:
             self.record_failure(document, diagnostics, 'The source PDF file is missing.')
             return Response({'detail': 'The source PDF file is missing.'}, status=404)
         except CataloguePDFError as error:
             self.record_failure(document, diagnostics, str(error))
             raise serializers.ValidationError({'file': str(error)}) from error
+
+        if progressive and adjacent and previous.get('range_end') == batch.get('range_end'):
+            for key in ('pages', 'skipped_pages', 'warnings'):
+                diagnostics[key] = previous.get(key, []) + diagnostics.get(key, [])
+            for key in ('pages_scanned', 'ocr_pages', 'product_sections', 'items_extracted', 'matrix_items', 'wrapped_items'):
+                diagnostics[key] = previous.get(key, 0) + diagnostics.get(key, 0)
 
         saved = []
         added = 0
@@ -212,7 +228,8 @@ class StaffExtraction(APIView):
                     item = DraftCatalogueItem(source_document=document, page=candidate.page,
                         name=clean_name, product_code=candidate.product_code, hsn_sac_code=candidate.hsn_sac_code,
                         price_per_unit=candidate.price_per_unit, category=category,
-                        pack_size=candidate.pack_size)
+                        pack_size=candidate.pack_size, sub_category=(candidate.sub_category or family_hint)[:120],
+                        specifications=candidate.specifications)
                     if candidate.image:
                         item.image.save('thumbnail.png', ContentFile(candidate.image), save=False)
                         saved.append(item.image)
@@ -362,8 +379,11 @@ class CommitDrafts(StaffExtraction):
                     values = item.validated_data
                     code = values['product_code']
                     code_rows.setdefault(code, []).append((draft.pk, label))
+                    draft.sub_category = row.get('sub_category', draft.sub_category or family)
+                    if 'pack_size' in row:
+                        draft.pack_size = {key: value for key, value in row['pack_size'].items() if value}
                     product = catalogue_product({**values, 'brand_category': association}, pack_size=draft.pack_size,
-                                                sub_category=family)
+                                                sub_category=draft.sub_category, extracted_specs=draft.specifications)
                     approved.append((draft, product, label))
 
                 lock_product_codes(code_rows)
@@ -391,7 +411,8 @@ class CommitDrafts(StaffExtraction):
                     draft.status = DraftCatalogueItem.Status.APPROVED
                 ProductMedia.objects.bulk_create(list(images.values()))
                 DraftCatalogueItem.objects.bulk_update(
-                    list(drafts.values()), ['name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category', 'product', 'status'],
+                    list(drafts.values()), ['name', 'product_code', 'hsn_sac_code', 'price_per_unit', 'category',
+                                            'sub_category', 'pack_size', 'product', 'status'],
                     batch_size=100,
                 )
                 created = ItemOutput([product for _, product, _ in approved], many=True,

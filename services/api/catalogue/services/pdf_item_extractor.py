@@ -3,7 +3,7 @@
 from contextlib import ExitStack
 from collections import Counter
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from io import BytesIO
 import re
 import subprocess
@@ -16,7 +16,7 @@ from pdfplumber.utils.exceptions import PdfminerException
 from pdfminer.pdftypes import PDFException
 from PIL import Image
 
-from .catalogue_layout import NOISE, layout_rows, native_boxes, skip_reason
+from .catalogue_layout import DIMENSION, FACT_COLUMNS, NOISE, SKU, code_value, layout_rows, native_boxes, skip_reason
 from .catalogue_ocr import OCR_PAGE_SECONDS, RAPID_OCR_SECONDS, OCRPageTimeout, TextBox, read_page, read_page_tesseract
 from .scanned_thumbnails import caption_key, crop_photo, crop_photos, matching_caption
 
@@ -68,6 +68,10 @@ class Candidate:
     category: str
     image: bytes | None = None
     pack_size: dict = field(default_factory=dict)
+    sub_category: str = ''
+    specifications: dict = field(default_factory=dict)
+    matrix: bool = False
+    wrapped: bool = False
 
 
 def matching_image(row, images):
@@ -80,7 +84,9 @@ def matching_image(row, images):
             continue
         overlap = max(0, min(y1, bottom) - max(y0, top)) / (y1 - y0)
         if overlap >= 0.65 and top <= (y0 + y1) / 2 <= bottom:
-            matches.append((overlap, image))
+            vertical_distance = abs((top + bottom) - (y0 + y1)) / max(2, 2 * (bottom - top))
+            horizontal_overlap = max(0, min(x1, right) - max(x0, left)) / max(1, x1 - x0)
+            matches.append((overlap + .2 * horizontal_overlap - .3 * vertical_distance, image))
     matches.sort(key=lambda match: match[0], reverse=True)
     if not matches or (len(matches) > 1 and matches[0][0] == matches[1][0]):
         return None
@@ -138,17 +144,48 @@ def thumbnail(document, page, image):
 
 
 def price(value):
-    cleaned = re.sub(r'^(?:₹|INR\s*|Rs\.?\s*)', '', value, flags=re.I).replace(',', '').strip()
-    if not re.fullmatch(r'\d{1,14}(?:\.\d{1,4})?', cleaned):
+    cleaned = re.sub(r'^(?:(?:MRP|LP)\b[\s.:]*|₹\s*|INR\s*|Rs\.?\s*)+', '', value.strip(), flags=re.I)
+    cleaned = re.sub(r'\s*/\s*-\s*$', '', cleaned).strip()
+    if not re.fullmatch(r'(?:\d+|\d{1,3}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+)(?:\.\d{1,4})?', cleaned):
         return None
-    try:
-        return Decimal(cleaned)
-    except InvalidOperation:
+    cleaned = cleaned.replace(',', '')
+    if len(cleaned.split('.')[0]) > 14:
         return None
+    return Decimal(cleaned)
 
 
-def layout_candidates(document, page, rows, boxes, images, page_number, family_hint, *, scanned=False):
+def product_specifications(description, cells):
+    facts = {label: cells[key] for key, label in FACT_COLUMNS.items() if cells.get(key)}
+    for match in DIMENSION.finditer(description):
+        value = match[0]
+        unit = value.replace(' ', '').upper()
+        if unit in {'SP', 'DP', 'TP', 'FP', 'SPN', 'TPN'}:
+            facts.setdefault('Pole configuration', value)
+        elif re.fullmatch(r'[\d.]+K?W', unit):
+            facts.setdefault('Wattage', value)
+        elif re.fullmatch(r'[\d.]+M', unit):
+            facts.setdefault('Module', value)
+        elif re.fullmatch(r'[\d.]+(?:AX?|MA)', unit):
+            facts.setdefault('Rating', value)
+    if match := re.search(r'\b(?:ISI|BIS|IS\s*[: ]\s*\d{3,6})\b', description, re.I):
+        facts.setdefault('Standard', match[0])
+    if match := re.search(r'\b(?:(?:glossy|matte)\s+)?(?:white|black|ivory|chrome|grey|gray|silver)\b', description, re.I):
+        facts.setdefault('Finish', match[0])
+    return facts
+
+
+def layout_candidates(document, page, rows, boxes, images, page_number, family_hint):
     candidates = []
+    photo_cache = {}
+    column_crops = {}
+
+    def image_bytes(image):
+        if image is None:
+            return None
+        key = tuple(image['bbox'])
+        if key not in photo_cache:
+            photo_cache[key] = thumbnail(document, page, image)
+        return photo_cache[key]
     for row in rows:
         cells = row.cells
         description = cells.get('name', '')
@@ -164,18 +201,35 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
         if way and way.isdecimal():
             way += ' Way'
         options = ' · '.join(filter(None, (size, row.length, cells.get('turn'), cells.get('knob'),
-                                          way, cells.get('electrical_details'))))
+                                          way, cells.get('electrical_details'), cells.get('pole'),
+                                          cells.get('wattage'), cells.get('finish'), cells.get('standard'))))
         if options:
             description = f'{description} - {options}'
         name, banner = row_name({**cells, 'name': description}, '', family_hint)
         if not name:
             continue
         left, top, right, bottom = row.bounds
-        row_band = (left, top - 10, right, bottom + 10)
-        photo = thumbnail(document, page, matching_image(row_band, images))
-        if photo is None and row.image_bounds and scanned:
-            photo = crop_photo(page, (row.image_bounds[0], top - 13, row.image_bounds[1], bottom + 13), boxes)
-        if photo is None and row.group:
+        horizontal = row.image_bounds or (left, right)
+        row_band = (horizontal[0], top - 5, horizontal[1], bottom + 5)
+        column_images = [image for image in images if
+                         horizontal[0] <= (image['bbox'][0] + image['bbox'][2]) / 2 <= horizontal[1]]
+        photo = image_bytes(matching_image(row_band, column_images))
+        if photo is None and row.image_bounds:
+            center = (top + bottom) / 2
+            spanning = [image for image in column_images if image['bbox'][1] <= center <= image['bbox'][3]]
+            if len(spanning) == 1:
+                photo = image_bytes(spanning[0])
+            if photo is None:
+                if horizontal not in column_crops:
+                    aligned = [peer for peer in rows if peer.image_bounds == horizontal]
+                    column_crops[horizontal] = crop_photos(page, (
+                        horizontal[0], min(peer.bounds[1] for peer in aligned) - 20,
+                        horizontal[1], max(peer.bounds[3] for peer in aligned) + 20,
+                    ), boxes)
+                crops = [data for y0, y1, _, data in column_crops[horizontal] if y0 <= center <= y1]
+                if len(crops) == 1:
+                    photo = crops[0]
+        if photo is None and (row.group or row.series):
             # Group illustrations can sit above the variant rows. Only use a
             # single image that can be attributed to this section alone.
             peers = [peer for peer in rows if peer.bounds[0] == left]
@@ -186,9 +240,13 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
             section_images = [image for image in images if left <= image['bbox'][0] and image['bbox'][2] <= right
                               and max(above, first - 108) <= image['bbox'][1] and image['bbox'][3] <= last + 8]
             if len(section_images) == 1:
-                photo = thumbnail(document, page, section_images[0])
+                photo = image_bytes(section_images[0])
+        facts = product_specifications(name, cells)
+        if row.length:
+            facts['Variant'] = row.length
         candidates.append(Candidate(page_number, name, row.code, row.hsn, row.amount,
-                                    (row.category or banner)[:120], photo, row.pack))
+                                    (row.category or banner)[:120], photo, row.pack,
+                                    row.series, facts, row.matrix, row.wrapped))
     return candidates
 
 
@@ -198,7 +256,9 @@ def product_images(page, repeated):
         original = fitz.Rect(image['bbox'])
         box = original * page.rotation_matrix
         if (box.is_empty or box.width * box.height > page.rect.get_area() * .35 or
-                box.width > page.rect.width * .8 or min(box.width, box.height) < 10):
+                box.width > page.rect.width * .8 or min(box.width, box.height) < 12):
+            continue
+        if (box.y1 <= page.rect.height * .065 or box.y0 >= page.rect.height * .935):
             continue
         if repeated[image.get('xref')] > 1 and (
                 box.y0 < page.rect.height * .09 or box.y1 > page.rect.height * .91 or max(box.width, box.height) < 35):
@@ -270,8 +330,8 @@ def strip_leading_category_banner(description):
     description = (description or '').strip()
     category = ''
     while match := CATEGORY_PREFIX_REGEX.match(description):
-        # Singular switch/socket are common item descriptions in electrical tables.
-        if match['category'].casefold() in {'switch', 'socket'} and match['category'] != match['category'].upper():
+        # Mixed-case singular product names often introduce specifications, not headings.
+        if match['category'].casefold() in {'switch', 'socket', 'bell push'} and match['category'] != match['category'].upper():
             break
         category = category or ' '.join(match['category'].upper().split())
         description = description[match.end():]
@@ -297,14 +357,14 @@ def row_name(values, section, family_hint):
     return name, category or embedded_category
 
 
-def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None):
+def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None):
     stats = diagnostics if diagnostics is not None else {}
     stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0,
-                 skipped_pages=[], warnings=[])
+                 skipped_pages=[], warnings=[], pages=[], matrix_items=0, wrapped_items=0)
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
         raise CataloguePDFError(f'The PDF exceeds the {CATALOGUE_PDF_LIMIT_MB} MB extraction limit.')
     try:
-        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end)
+        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context)
         if not result:
             stats['warnings'].append('No priced SKU rows were found. Check that the selected pages contain a readable price table.')
         elif missing_hsn := sum(not row.hsn_sac_code for row in result):
@@ -316,38 +376,43 @@ def extract_items(content, *, family_hint='', start_page=1, end_page=None, progr
         raise CataloguePDFError('Could not read this PDF file. Please verify the file is a valid PDF.') from error
 
 
-def extract_ocr_page(document, page, page_number, family_hint, images, deadline, stats):
+def extract_ocr_page(document, page, page_number, family_hint, images, deadline, stats, context):
     stats['ocr_pages'] += 1
+    stats['pages'][-1]['ocr'] = 'rapidocr'
     page_deadline = min(deadline, monotonic() + OCR_PAGE_SECONDS)
     try:
         boxes = read_page(page, timeout=min(RAPID_OCR_SECONDS, page_deadline - monotonic()))
     except OCRPageTimeout:
         stats['warnings'].append(f'Page {page_number}: RapidOCR timed out. Trying the fallback engine.')
         boxes = []
-    except (subprocess.SubprocessError, OSError, ValueError, ImportError):
+    except (subprocess.SubprocessError, OSError, ValueError, ImportError, RuntimeError):
         stats['warnings'].append(f'Page {page_number}: RapidOCR could not read the page. Trying the fallback engine.')
         boxes = []
     has_text = bool(boxes)
     for fallback in (False, True):
         if fallback:
+            stats['pages'][-1]['ocr'] = 'tesseract'
             boxes, warning = read_page_tesseract(page, page_deadline - monotonic())
             if warning:
+                stats['pages'][-1]['ocr_note'] = warning
                 stats['warnings'].append(f'Page {page_number}: {warning}')
             has_text |= bool(boxes)
         if reason := skip_reason(boxes):
             stats['skipped_pages'].append({'page': page_number, 'reason': reason})
             return [], has_text
-        rows, sections, advanced = layout_rows(boxes, page.rect.width, price)
-        candidates = (layout_candidates(document, page, rows, boxes, images, page_number, family_hint, scanned=True)
+        attempt_context = dict(context)
+        rows, sections, advanced = layout_rows(boxes, page.rect.width, price, context=attempt_context)
+        candidates = (layout_candidates(document, page, rows, boxes, images, page_number, family_hint)
                       if advanced or fallback else [])
         if not candidates and not fallback:
             candidates = ocr_rows(document, page, boxes, page_number, family_hint, images=images)
             if not candidates and rows:
-                candidates = layout_candidates(document, page, rows, boxes, images, page_number, family_hint, scanned=True)
+                candidates = layout_candidates(document, page, rows, boxes, images, page_number, family_hint)
         if candidates:
+            context.update(attempt_context)
             stats['product_sections'] += sections or 1
             return candidates, has_text
-    stats['skipped_pages'].append({'page': page_number, 'reason': 'no_priced_rows'})
+    stats['skipped_pages'].append({'page': page_number, 'reason': 'no_priced_rows' if has_text else 'ocr_no_readable_text'})
     return [], has_text
 
 
@@ -356,7 +421,32 @@ def has_outlined_or_scanned_content(page):
     return graphics['fill-image'] > 0 or graphics['fill-path'] + graphics['stroke-path'] >= 80
 
 
-def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end):
+def finish_page(result, start, stats, context):
+    page = stats['pages'][-1]
+    unique = {}
+    for item in result[start:]:
+        key = (item.product_code, item.name, item.hsn_sac_code, item.price_per_unit, item.sub_category,
+               tuple(sorted(item.pack_size.items())), tuple(sorted(item.specifications.items())))
+        previous = unique.get(key)
+        if previous is None or (not previous.image and item.image):
+            unique[key] = item
+    result[start:] = unique.values()
+    if len(result) > MAX_ROWS:
+        raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+    if not unique:
+        context.clear()
+    page.update(items=len(unique), matrix_items=sum(item.matrix for item in unique.values()),
+                wrapped_items=sum(item.wrapped for item in unique.values()),
+                thumbnails=sum(bool(item.image) for item in unique.values()))
+    if stats['skipped_pages'] and stats['skipped_pages'][-1]['page'] == page['page']:
+        page['reason'] = stats['skipped_pages'][-1]['reason']
+    stats['matrix_items'] += page['matrix_items']
+    stats['wrapped_items'] += page['wrapped_items']
+    stats['items_extracted'] = len(result)
+    stats['layout_context'] = {'page': page['page'], **context}
+
+
+def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context):
     deadline = monotonic() + EXTRACTION_BUDGET_SECONDS
     with ExitStack() as stack:
         document = stack.enter_context(fitz.open(stream=content, filetype='pdf'))
@@ -379,6 +469,8 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
             BytesIO(content), password='', pages=list(range(start_page, end_page + 1)),
         ))
         result = []
+        context = dict(layout_context or {}) if (layout_context or {}).get('page') == start_page - 1 else {}
+        context.pop('page', None)
         has_text = False
         used_ocr = False
         repeated = Counter(xref for index in range(start_page - 1, end_page)
@@ -392,40 +484,41 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
                 return result
             raster_page = document[index]
             page_number = index + 1
+            page_start = len(result)
+            stats['pages'].append({'page': page_number, 'ocr': None})
             stats['pages_scanned'] += 1
             native_text = raster_page.get_text()
             has_text |= any(character.isalnum() for character in native_text)
             boxes = native_boxes(raster_page)
             if reason := skip_reason(boxes):
                 stats['skipped_pages'].append({'page': page_number, 'reason': reason})
+                finish_page(result, page_start, stats, context)
                 page.close()
                 continue
             images = product_images(raster_page, repeated)
             if sum(character.isalnum() for character in native_text) < MIN_NATIVE_TEXT and any(
                     kind != 'fill-text' for kind, _ in raster_page.get_bboxlog()):
                 used_ocr = True
-                candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats)
+                candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats, context)
                 has_text |= ocr_text
                 result.extend(candidates)
                 stats['items_extracted'] = len(result)
-                if len(result) > MAX_ROWS:
-                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+                finish_page(result, page_start, stats, context)
                 page.close()
                 continue
             if not native_text.strip():
                 stats['skipped_pages'].append({'page': page_number, 'reason': 'blank'})
+                finish_page(result, page_start, stats, context)
                 page.close()
                 continue
-            rows, sections, advanced = layout_rows(boxes, raster_page.rect.width, price)
+            rows, sections, advanced = layout_rows(boxes, raster_page.rect.width, price, context=context)
             if rows and advanced:
                 result.extend(layout_candidates(document, raster_page, rows, boxes, images, page_number, family_hint))
                 stats['product_sections'] += sections
                 stats['items_extracted'] = len(result)
-                if len(result) > MAX_ROWS:
-                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
+                finish_page(result, page_start, stats, context)
                 page.close()
                 continue
-            page_start = len(result)
             tables = page.find_tables()
             for table in tables:
                 photos = labelled_images(raster_page, table.bbox, images)
@@ -462,16 +555,16 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
                     if 'name' not in name_cells:
                         continue
                     name, detected_category = row_name(name_cells, section, family_hint)
+                    code = code_value(cell('product_code'))
                     amount = price(cell('price_per_unit'))
-                    if not name or not cell('product_code') or amount is None or NOISE.match(cell('name')):
+                    if not name or not code or amount is None or NOISE.match(cell('name')):
                         continue
-                    if len(result) >= MAX_ROWS:
-                        raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
-                    result.append(Candidate(index + 1, name, cell('product_code')[:100],
+                    result.append(Candidate(index + 1, name, code[:100],
                         cell('hsn_sac_code')[:8], amount,
                         (cell('category') or detected_category or section)[:120],
                         thumbnail(document, raster_page,
-                                  matching_image(row.bbox, images) or photos.get(cell('product_code')))))
+                                  photos.get(code) or matching_image(row.bbox, images)),
+                        sub_category=section or detected_category, specifications=product_specifications(name, name_cells)))
                 if header_row is not None and row_count == len(result):
                     # Some price lists draw borders only around column headers.
                     # Infer body rows from code, HSN and price on the same baseline.
@@ -483,24 +576,18 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
                     if 'hsn_sac_code' in columns:
                         result.extend(aligned_rows(page, header_row, columns, bottom, limit, section, family_hint,
                                                    index + 1, document, raster_page, images, photos))
-                    if len(result) > MAX_ROWS:
-                        raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
                 stats['product_sections'] += len(result) > row_count
             if len(result) == page_start and rows:
                 result.extend(layout_candidates(document, raster_page, rows, boxes, images, page_number, family_hint))
                 stats['product_sections'] += sections
-                if len(result) > MAX_ROWS:
-                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
             if len(result) == page_start and has_outlined_or_scanned_content(raster_page):
                 used_ocr = True
-                candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats)
+                candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats, context)
                 has_text |= ocr_text
                 result.extend(candidates)
-                if len(result) > MAX_ROWS:
-                    raise CataloguePDFError('The PDF exceeds the 500-row extraction limit.')
             elif len(result) == page_start:
                 stats['skipped_pages'].append({'page': page_number, 'reason': 'no_priced_rows'})
-            stats['items_extracted'] = len(result)
+            finish_page(result, page_start, stats, context)
             page.close()
         if progress is not None:
             progress.update(start_page=start_page, end_page=end_page, processed_through=end_page)
@@ -558,7 +645,8 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
             if field:
                 cells.setdefault(field, []).append(box.text)
         values = {field: ' '.join(words) for field, words in cells.items()}
-        code = values.get('product_code', '')
+        code = code_value(values.get('product_code', ''))
+        values['product_code'] = code
         amount = price(values.get('price_per_unit', ''))
         top = min(box.top for box in line)
         bottom = max(box.bottom for box in line)
@@ -566,7 +654,7 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
             pending[-1][0]['name'] += ' ' + values['name']
             pending[-1][3] = bottom
             continue
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./_-]*', code) or amount is None or not values.get('name'):
+        if not SKU.fullmatch(code) or amount is None or not values.get('name'):
             continue
         if any(field == 'hsn_sac_code' for _, field in columns) and not re.fullmatch(r'\d{4,8}', values.get('hsn_sac_code', '')):
             continue
@@ -683,7 +771,8 @@ def aligned_rows(page, header, columns, start, end, section, family_hint, page_n
         if name:
             image = matching_image((header.bbox[0], top, header.bbox[2], bottom), images) or photos.get(code['text'])
             output.append(Candidate(page_number, name, code['text'][:100], hsn,
-                                    amount, (detected_category or family)[:120], thumbnail(document, raster_page, image)))
+                                    amount, (detected_category or family)[:120], thumbnail(document, raster_page, image),
+                                    sub_category=family, specifications=product_specifications(name, name_cells)))
     return output
 
 
