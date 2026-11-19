@@ -342,6 +342,7 @@ class CommitDrafts(StaffExtraction):
                     {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
                 )
                 approved = []
+                family = document_family_prefix(document)
                 code_rows = {}
                 row_errors = {}
                 for row in rows:
@@ -361,7 +362,8 @@ class CommitDrafts(StaffExtraction):
                     values = item.validated_data
                     code = values['product_code']
                     code_rows.setdefault(code, []).append((draft.pk, label))
-                    product = catalogue_product({**values, 'brand_category': association}, pack_size=draft.pack_size)
+                    product = catalogue_product({**values, 'brand_category': association}, pack_size=draft.pack_size,
+                                                sub_category=family)
                     approved.append((draft, product, label))
 
                 lock_product_codes(code_rows)

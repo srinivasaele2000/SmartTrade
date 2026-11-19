@@ -605,7 +605,7 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(ProductMedia.objects.count(), 331)
         self.assertEqual(CatalogueAudit.objects.filter(action='PRODUCT_CREATED').count(), 331)
         self.assertEqual(self.document.draft_items.filter(status='APPROVED', product__isnull=False).count(), 331)
-        self.assertEqual(Product.objects.get(code='BATCH-165').specifications, {'HSN': '8536', 'Pack size': {'standard': '10'}})
+        self.assertEqual(Product.objects.get(code='BATCH-165').specifications, {'HSN': '8536', 'Pack size': {'standard': '10'}, 'Sub-category': 'SAMPLE'})
         self.assertEqual(self.client.post(self.base + 'drafts/commit/', {'rows': rows}, format='json').status_code, 409)
 
     def test_publish_rolls_back_database_and_copied_photos_when_a_draft_image_is_missing(self):
@@ -740,3 +740,38 @@ class CatalogueExtractionTests(TestCase):
         self.assertTrue(response.data['rows'])
         self.assertNotIn('ROMA', [entry['category__name'] for entry in response.data['categories']])
         self.assertTrue(all(row['category'] == canonical.name for row in response.data['rows']))
+
+
+    def test_sub_category_counts_and_filter_are_scoped_to_priced_items(self):
+        for code, label in [('S1', 'ROMA'), ('S2', ' Roma '), ('S3', 'Penta'), ('S4', '')]:
+            Product.objects.create(code=code, name='Switch', unit='Unit', brand_category=self.association,
+                                   catalogue_price=12, currency='INR', state='PUBLISHED',
+                                   specifications={'Series': label})
+        url = '/api/v1/catalogue/items/'
+        params = {'brand': self.association.brand_id, 'category': self.association.category_id}
+        response = self.client.get(url, {**params, 'facets': 'sub_categories', 'search': 'Switch'})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {'count': 4, 'sub_categories': [
+            {'id': 'penta', 'count': 1}, {'id': 'roma', 'count': 2},
+        ]})
+        response = self.client.get(url, {**params, 'sub_category': ' ROMA ', 'search': 'Switch'})
+        self.assertEqual(response.data['count'], 2)
+        self.assertEqual({row['sub_category'].lower() for row in response.data['results']}, {'roma'})
+
+
+    def test_existing_import_uses_its_pdf_family_without_changing_top_level_category(self):
+        self.document.filename = 'Roma_Urban.PDF'
+        self.document.save(update_fields=['filename'])
+        product = Product.objects.create(
+            code='OLD', name='Switch', unit='Unit', brand_category=self.association,
+            catalogue_price=12, currency='INR', state='PUBLISHED',
+        )
+        DraftCatalogueItem.objects.create(
+            source_document=self.document, page=1, name='Switch', product_code='OLD',
+            status='APPROVED', product=product,
+        )
+        response = self.client.get('/api/v1/catalogue/items/', {'sub_category': 'roma urban'})
+        self.assertEqual(response.status_code, 200, response.data)
+        row, = response.data['results']
+        self.assertEqual(row['sub_category'], 'Roma Urban')
+        self.assertEqual(row['category_name'], self.association.category.name)

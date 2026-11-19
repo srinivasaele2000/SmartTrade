@@ -1,7 +1,7 @@
 import {ApiClient, ApiError, type Page} from './api.ts';
 
 export type CatalogueItem = {id: number; name: string; product_code: string; hsn_sac_code: string;
-  price_per_unit: string; brand_name: string; category_name: string; image_url: string | null};
+  price_per_unit: string; brand_name: string; category_name: string; sub_category?: string; image_url: string | null};
 export type EstimateLine = {product: number | null; dealer_custom_item?: number | null; list_price_per_unit?: string | null;
   product_name: string; product_code?: string; hsn_sac_code: string;
   unit_price: string; quantity: string; line_total?: string; net_unit_rate?: string;

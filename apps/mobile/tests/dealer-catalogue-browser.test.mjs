@@ -9,13 +9,13 @@ const compiled = ts.transpileModule(source, {compilerOptions: {
   module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
 }}).outputText;
 
-function fixture(platform = 'android') {
+function fixture(platform = 'android', groups = []) {
   const states = [], refs = [], effects = [], requests = [], loaders = [], pages = [];
   let stateIndex, refIndex, historyIndex;
   let text = '';
   let hardwareBack;
   const products = [
-    {id: 1, name: 'Anchor switch', brand: '7', category: '2'},
+    {id: 1, name: 'Anchor switch', brand: '7', category: '2', series: 'roma'},
     {id: 2, name: 'Other cable', brand: '8', category: '3'},
   ];
   const brands = [
@@ -49,7 +49,7 @@ function fixture(platform = 'android') {
     './trade-theme': {trade: {}, tradeType: {}},
     './Button': {Button: props => jsx('Button', props)},
     './HistoryPager': {HistoryPager: () => null},
-    './useResource': {useResource: () => ({state: {status: 'ready', data: 1}})},
+    './useResource': {useResource: () => ({state: {status: 'ready', data: {count: 2, sub_categories: groups}}})},
     './useDebouncedSearch': {useDebouncedSearch: () => ({
       text, query: text.trim(), change(value) {text = value;}, submit() {}, pending: false,
     })},
@@ -62,6 +62,7 @@ function fixture(platform = 'android') {
       requests.push(path);
       const filters = new URL(path, 'http://example.test').searchParams;
       return page(products.filter(p =>
+        (!filters.get('sub_category') || p.series === filters.get('sub_category')) &&
         (!filters.get('brand') || p.brand === filters.get('brand')) &&
         (!filters.get('category') || p.category === filters.get('category')) &&
         (!filters.get('search') || p.name.toLowerCase().includes(filters.get('search').toLowerCase())),
@@ -151,10 +152,11 @@ test('typing on landing searches all catalogue items without a card selection', 
 test('browser Back returns from the product view without leaving the dealer home', async () => {
   const original = globalThis.window;
   let listener;
+  const entries = [null];
   const history = {
-    state: null,
-    pushState(value) {this.state = value;},
-    back() {this.state = null;},
+    get state() {return entries.at(-1);},
+    pushState(value) {entries.push(value);},
+    back() {entries.pop();},
   };
   globalThis.window = {
     history,
@@ -162,12 +164,21 @@ test('browser Back returns from the product view without leaving the dealer home
     removeEventListener() {},
   };
   try {
-    const app = fixture('web');
+    const app = fixture('web', [{id: 'roma', count: 1}, {id: 'penta', count: 1}]);
     await app.refresh();
     app.get('Browse ANCHOR').props.onPress();
     await app.refresh();
     const cleanup = app.effects[0]();
     assert.match(history.state.dealerCatalogue, /^smarttrade-catalogue-/);
+    app.get('Browse ROMA').props.onPress();
+    await app.refresh();
+    app.effects[1]();
+    assert.equal(history.state.catalogueDepth, 2);
+    history.back();
+    listener();
+    await app.refresh();
+    assert.ok(app.get('Browse ROMA'));
+    assert.equal(history.state.catalogueDepth, 1);
     history.back();
     listener();
     cleanup();
@@ -201,4 +212,34 @@ test('brand search composes with the category and Browse All Items is an explici
   await app.refresh();
   assert.ok(app.get('Browse ANCHOR'));
   assert.equal(app.get('Search catalogue items').props.value, '');
+});
+
+
+test('brand opens multiple sub-categories before fetching items and Back steps through each level', async () => {
+  const app = fixture('android', [{id: 'roma', count: 1}, {id: 'penta', count: 1}]);
+  await app.refresh();
+  app.get('Browse ANCHOR').props.onPress();
+  await app.refresh();
+  assert.ok(app.get('View All ANCHOR Items (2)'));
+  assert.deepEqual(app.requests, []);
+  app.get('Browse ROMA').props.onPress();
+  await app.refresh();
+  assert.match(app.requests.at(-1), /brand=7.*sub_category=roma/);
+  assert.deepEqual(app.products(), ['Anchor switch']);
+  app.effects[0]();
+  assert.equal(app.back(), true);
+  await app.refresh();
+  assert.ok(app.get('Browse ROMA'));
+  app.get('Back to Brands & Categories').props.onPress();
+  await app.refresh();
+  assert.ok(app.get('Browse ANCHOR'));
+});
+
+test('a single sub-category opens the complete parent product grid directly', async () => {
+  const app = fixture('android', [{id: 'roma', count: 1}]);
+  await app.refresh();
+  app.get('Browse Switchgear').props.onPress();
+  await app.refresh();
+  assert.deepEqual(app.products(), ['Anchor switch']);
+  assert.equal(app.get('Browse ROMA'), undefined);
 });

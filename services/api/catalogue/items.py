@@ -2,6 +2,9 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Case, Count, F, TextField, Value, When
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Coalesce, Length, Lower, NullIf, Replace, Substr, Trim
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.parsers import JSONParser, MultiPartParser
@@ -21,6 +24,23 @@ def item_hsn(product):
     return str(product.specifications.get('HSN', ''))[:8]
 
 
+def with_sub_category(query):
+    filename = 'draftcatalogueitem__source_document__filename'
+    family = Case(
+        When(**{filename + '__iendswith': '.pdf'}, then=Trim(Replace(Replace(
+            Substr(filename, 1, Length(filename) - 4), Value('_'), Value(' '),
+        ), Value('-'), Value(' ')))),
+        output_field=TextField(),
+    )
+    return query.annotate(sub_category_label=Coalesce(
+        NullIf(Trim(KeyTextTransform('Sub-category', 'specifications')), Value('')),
+        NullIf(Trim(KeyTextTransform('Series', 'specifications')), Value('')),
+        NullIf(family, Value('')),
+        NullIf(NullIf(F('draftcatalogueitem__source_document__sub_category'), Value('OTHER')), Value('')),
+        Value(''), output_field=TextField(),
+    )).annotate(sub_category_key=Lower(F('sub_category_label')))
+
+
 class ItemOutput(serializers.ModelSerializer):
     product_code = serializers.CharField(source='code')
     price_per_unit = serializers.DecimalField(source='catalogue_price', max_digits=18, decimal_places=4)
@@ -29,6 +49,11 @@ class ItemOutput(serializers.ModelSerializer):
     brand_id = serializers.IntegerField(source='brand_category.brand_id')
     category_name = serializers.CharField(source='brand_category.category.name')
     image_url = serializers.SerializerMethodField()
+    sub_category = serializers.SerializerMethodField()
+
+    def get_sub_category(self, product):
+        return getattr(product, 'sub_category_label', product.specifications.get('Sub-category', ''))
+
 
     def get_hsn_sac_code(self, product):
         return item_hsn(product)
@@ -41,7 +66,7 @@ class ItemOutput(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ['id', 'name', 'product_code', 'price_per_unit', 'hsn_sac_code', 'brand_id',
-                  'brand_category', 'brand_name', 'category_name', 'image_url']
+                  'brand_category', 'brand_name', 'category_name', 'sub_category', 'image_url']
 
 
 def eligible_associations():
@@ -85,8 +110,10 @@ def require_available_code(code, *, exclude=None):
         raise serializers.ValidationError({'product_code': 'This product code is already in use.'})
 
 
-def catalogue_product(fields, *, pack_size=None):
+def catalogue_product(fields, *, pack_size=None, sub_category=None):
     specifications = {'HSN': fields['hsn_sac_code']}
+    if sub_category:
+        specifications['Sub-category'] = sub_category
     if pack_size:
         specifications['Pack size'] = pack_size
     return Product(
@@ -130,7 +157,22 @@ class CatalogueItems(APIView):
                 if not value.isdecimal():
                     raise serializers.ValidationError({parameter: 'Expected a numeric ID.'})
                 query = query.filter(**{field: value})
+        query = with_sub_category(query)
+        sub_category = request.query_params.get('sub_category', '').strip().lower()
+        if sub_category:
+            query = query.filter(sub_category_key=sub_category)
         query = search_products(query, request.query_params.get('search', ''), ranked=True)
+        if request.query_params.get('facets') == 'sub_categories':
+            groups = list(query.order_by().values('sub_category_key').annotate(
+                count=Count('pk'),
+            ).order_by('sub_category_key'))
+            return Response({
+                'count': sum(group['count'] for group in groups),
+                'sub_categories': [
+                    {'id': group['sub_category_key'], 'count': group['count']}
+                    for group in groups if group['sub_category_key']
+                ],
+            })
         paginator = Pages()
         items = paginator.paginate_queryset(query, request)
         return paginator.get_paginated_response(ItemOutput(items, many=True, context={'request': request}).data)
