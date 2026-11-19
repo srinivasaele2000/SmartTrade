@@ -22,7 +22,7 @@ from .items import ItemFields, ItemOutput, catalogue_product, eligible_associati
 from .media import storage, validate_file, validate_image
 from .views import eligible_products
 from .tagging import category_hint, is_legacy_category, normalized_name
-from .models import CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
+from .models import Brand, BrandCategory, Category, CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
 
 
 def document_associations(document):
@@ -32,6 +32,16 @@ def document_associations(document):
     if brand.casefold() == 'anchor' and not exact.exists():
         return eligible.filter(brand__name__iexact='Anchor by Panasonic')
     return exact
+
+
+def eligible_document_brand(document):
+    name = document.brand_name.strip()
+    eligible = Brand.objects.filter(company__verification_state='VERIFIED', company__activity_state='ACTIVE',
+                                    company__owner_account__access_state='ACTIVE')
+    matches = list(eligible.filter(name__iexact=name)[:2]) if name else []
+    if not matches and name.casefold() == 'anchor':
+        matches = list(eligible.filter(name__iexact='Anchor by Panasonic')[:2])
+    return matches[0] if len(matches) == 1 else None
 
 
 def document_family_prefix(document):
@@ -89,6 +99,7 @@ class ReviewRow(serializers.Serializer):
     hsn_sac_code = serializers.CharField(max_length=8, required=False, allow_blank=True)
     price_per_unit = serializers.CharField(max_length=24, required=False, allow_blank=True)
     brand_category = serializers.IntegerField(min_value=1, required=False)
+    category_id = serializers.IntegerField(min_value=1, required=False)
     sub_category = serializers.CharField(max_length=120, required=False, allow_blank=True)
     pack_size = DraftPackSize(required=False)
 
@@ -263,7 +274,16 @@ class StaffExtraction(APIView):
             code__in={row['product_code'].strip() for row in pending},
         ).order_by('code').values_list('code', flat=True).distinct()
         published = eligible_products()
-        return Response({'rows': rows, 'categories': options, 'diagnostics': document.last_extraction,
+        brand = eligible_document_brand(document)
+        canonical = [
+            {'id': category.pk, 'name': category.name}
+            for category in Category.objects.filter(active=True).order_by('name', 'pk')
+            if not is_legacy_category(category.name, document.brand_name) and
+               not (brand and is_legacy_category(category.name, brand.name))
+        ]
+        return Response({'rows': rows, 'categories': options, 'canonical_categories': canonical,
+                         'default_category': category_hint(document=document), 'brand_resolved': brand is not None,
+                         'diagnostics': document.last_extraction,
                          'summary': {
                              'pending': len(pending),
                              'published_from_document': published.filter(draftcatalogueitem__source_document=document).count(),
@@ -358,6 +378,12 @@ class CommitDrafts(StaffExtraction):
                 associations = document_associations(document).select_related('brand', 'category').in_bulk(
                     {row['brand_category'] for row in rows if row['approved'] and 'brand_category' in row},
                 )
+                category_ids = {row['category_id'] for row in rows if row['approved'] and 'category_id' in row}
+                brand = eligible_document_brand(document) if category_ids else None
+                canonical = Category.objects.filter(active=True).in_bulk(category_ids) if brand else {}
+                links = {link.category_id: link for link in BrandCategory.objects.filter(
+                    brand=brand, category_id__in=canonical,
+                ).select_related('category', 'brand__company')} if canonical else {}
                 approved = []
                 family = document_family_prefix(document)
                 code_rows = {}
@@ -373,6 +399,19 @@ class CommitDrafts(StaffExtraction):
                         row_errors[str(draft.pk)] = {'draft': label, **item.errors}
                         continue
                     association = associations.get(row.get('brand_category'))
+                    if 'category_id' in row:
+                        category = canonical.get(row['category_id'])
+                        if brand is None:
+                            row_errors[str(draft.pk)] = {'draft': label, 'brand_category':
+                                'Match the PDF brand to one verified, active company brand before publishing.'}
+                            continue
+                        association = None
+                        if category and not is_legacy_category(category.name, brand.name):
+                            if category.pk not in links:
+                                link, _ = BrandCategory.objects.get_or_create(brand=brand, category=category)
+                                link.brand, link.category = brand, category
+                                links[category.pk] = link
+                            association = links[category.pk]
                     if association is None or is_legacy_category(association.category.name, association.brand.name):
                         row_errors[str(draft.pk)] = {'draft': label, 'brand_category': 'Choose a category for the PDF brand.'}
                         continue

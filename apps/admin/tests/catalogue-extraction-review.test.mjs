@@ -104,7 +104,7 @@ test('completed rows render before the next chunk finishes and cancel keeps the 
       startedSecond();
       await new Promise(resolve => {finishSecond = resolve;});
     }
-    return {rows: [row], categories: [], batch: {
+    return {rows: [row], categories: [], canonical_categories: [], batch: {
       processed_through: body.end_page, added: 1, replaced: requests.length === 1,
     }};
   });
@@ -146,8 +146,8 @@ test('header selects all eligible drafts and clears all selections on the next t
   assert.equal(get('Approve one').checked, true);
   assert.equal(get('Approve two').checked, true);
   for (const label of ['Approve missing', 'Approve invalid']) {
-    assert.equal(get(label).checked, false);
-    assert.equal(get(label).disabled, true);
+    assert.equal(get(label).checked, true);
+    assert.equal(get(label).disabled, false);
   }
   get(master).onChange();
   assert.equal(get(master).checked, false);
@@ -169,9 +169,14 @@ test('partial approval sets native indeterminate state and an indeterminate togg
   assert.equal(get(master).checked, true);
 });
 
-test('header is disabled when no category association is eligible', () => {
+test('rows without categories can be selected, but cannot be published until assigned', () => {
   const get = review([]);
-  assert.equal(get('Select all eligible rows').disabled, true);
+  assert.equal(get('Select all eligible rows').disabled, false);
+  get('Approve one').onChange({target: {checked: true}});
+  assert.equal(get('Approve one').checked, true);
+  assert.equal(get('Commit & Publish (1)').disabled, true);
+  get('Approve one').onChange({target: {checked: false}});
+  assert.equal(get('Approve one').checked, false);
 });
 
 test('publishing 331 approvals submits once and keeps progress and errors beside the action', async () => {
@@ -287,4 +292,43 @@ test('extraction diagnostics show each page and edited hierarchy and packing are
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   assert.ok(get('Page diagnostics'));
   assert.ok(get('Matrix items'));
+});
+
+
+test('canonical options preselect an inferred category and publish its canonical ID', async () => {
+  const row = {id: 30, category: 'Conduits, Piping & Installation Accessories', product_code: 'PIPE',
+    status: 'DRAFT', image_url: null};
+  let payload;
+  const get = review(undefined, async (_base, path, _token, options) => {
+    if (path.endsWith('extract/')) return {
+      rows: [row], categories: [], canonical_categories: [
+        {id: 23, name: 'Lighting'}, {id: 41, name: 'Conduits, Piping & Installation Accessories'},
+      ],
+    };
+    payload = JSON.parse(options.body);
+    return {items: [{}], discarded: 0};
+  }, [row], () => {});
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  const select = get('Category for row 30');
+  assert.equal(select.value, '41');
+  assert.deepEqual(select.children[1].map(option => option.props.value), [23, 41]);
+  get('Approve PIPE').onChange({target: {checked: true}});
+  assert.equal(get('Approve PIPE').checked, true);
+  await get('Publish catalogue items').onSubmit({preventDefault() {}});
+  assert.equal(payload.rows[0].category_id, 41);
+});
+
+test('category fallback follows all pages when a review has drafts but no options', async () => {
+  const row = {id: 31, category: 'Second category', product_code: 'PIPE2', status: 'DRAFT', image_url: null};
+  const calls = [];
+  const get = review(undefined, async (_base, path) => {
+    calls.push(path);
+    if (path.endsWith('extract/')) return {rows: [row], categories: []};
+    const second = new URL(path, 'https://example.test').searchParams.get('page') === '2';
+    return {results: [{id: second ? 2 : 1, name: second ? 'Second category' : 'First category', active: true}],
+      next: second ? null : 'next'};
+  }, [row]);
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  assert.equal(calls.length, 3);
+  assert.equal(get('Category for row 31').value, '2');
 });

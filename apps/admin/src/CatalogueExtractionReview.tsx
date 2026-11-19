@@ -8,7 +8,9 @@ type Draft = {
   pack_size?: {standard?: string; box_quantity?: string};
   sub_category?: string;
 };
-type Category = {id: number; category__name: string; brand__company__legal_name: string};
+type CanonicalCategory = {id: number; name: string};
+type Category = {id: number; category__name: string; brand__company__legal_name?: string; canonical?: boolean};
+const categoryKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 type Row = Draft & {approved: boolean; association: string};
 type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
   items_extracted?: number; matrix_items?: number; wrapped_items?: number;
@@ -16,7 +18,7 @@ type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number;
     ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string}[];
   skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
-type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[];
+type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
   diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
 const EXTRACTION_TIMEOUT_MS = 180_000;
@@ -52,7 +54,19 @@ async function requestExtraction(baseUrl: string, path: string, token: string, b
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS);
   try {
-    return await requestApi<Review>(baseUrl, path, token, {method: body ? 'POST' : 'GET', body, signal: controller.signal});
+    const review = await requestApi<Review>(baseUrl, path, token, {method: body ? 'POST' : 'GET', body, signal: controller.signal});
+    if (review.canonical_categories === undefined && (!body || (review.rows.length && !review.categories.length))) {
+      const canonical: CanonicalCategory[] = [];
+      for (let page = 1; ; page++) {
+        const result = await requestApi<{results: (CanonicalCategory & {active: boolean})[]; next: string | null}>(
+          baseUrl, `/catalogue/categories?scope=canonical&page=${page}&page_size=100`, token, {signal: controller.signal},
+        );
+        canonical.push(...result.results.filter(category => category.active));
+        if (!result.next) break;
+      }
+      review.canonical_categories = canonical;
+    }
+    return review;
   } catch (failure) {
     if (controller.signal.aborted || (failure instanceof ApiError && [408, 504].includes(failure.status))) {
       throw new Error('The request timed out. Try again with a smaller page range.');
@@ -154,8 +168,14 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
   const publishing = useRef(false);
   const extraction = useRef<{cancelled: boolean} | null>(null);
 
+  const [brandResolved, setBrandResolved] = useState(true);
+
   function applyReview(result: Review, preserveEdits: boolean) {
-    setCategories(result.categories);
+    const options = result.canonical_categories?.map(category => ({
+      id: category.id, category__name: category.name, canonical: true,
+    })) ?? result.categories;
+    setCategories(options);
+    setBrandResolved(result.brand_resolved !== false);
     setSummary(result.summary);
     setExistingCodes(result.existing_codes ?? []);
     setRowErrors({});
@@ -164,10 +184,14 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       const edits = preserveEdits ? new Map(current.map(row => [row.id, row])) : new Map<number, Row>();
       return result.rows.map(row => {
         const previous = edits.get(row.id);
-        if (previous?.status === 'DRAFT' && row.status === 'DRAFT') return {...previous, image_url: row.image_url};
-        const matching = result.categories.filter(option => row.category.toLowerCase() === option.category__name.toLowerCase());
-        const selected = matching.length === 1 ? matching[0] : !row.category.trim() && result.categories.length === 1 ? result.categories[0] : null;
-        return {...row, approved: false, association: selected ? String(selected.id) : ''};
+        const existing = previous?.status === 'DRAFT' && row.status === 'DRAFT' ? previous : undefined;
+        const hints = [row.category, result.default_category ?? ''].map(categoryKey).filter(Boolean);
+        const selected = hints.map(hint => options.filter(option => categoryKey(option.category__name) === hint))
+          .find(matches => matches.length === 1)?.[0] ?? (!hints.length && options.length === 1 ? options[0] : undefined);
+        const association = options.some(option => String(option.id) === existing?.association)
+          ? existing?.association : selected && String(selected.id);
+        return {...row, ...existing, image_url: row.image_url, approved: existing?.approved ?? false,
+          association: association ?? ''};
       });
     });
     setAppend(result.rows.some(row => row.status === 'DRAFT'));
@@ -287,11 +311,12 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     const code = row.product_code.trim();
     if (code) codeCounts.set(code, (codeCounts.get(code) ?? 0) + 1);
   }
-  const isEligible = (row: Row) => row.status === 'DRAFT' && categoryIds.has(row.association) && !liveCodes.has(row.product_code.trim());
+  const isEligible = (row: Row) => row.status === 'DRAFT' && !liveCodes.has(row.product_code.trim());
   const eligible = pending.filter(isEligible);
   const eligibleCount = eligible.length;
   const selected = eligible.filter(row => row.approved);
   const approvedCount = selected.length;
+  const missingCategories = selected.filter(row => !categoryIds.has(row.association)).length;
   const redundant = duplicateSelections(selected);
   const selectableCount = eligibleCount - duplicateSelections(eligible).size;
   const allSelected = selectableCount > 0 && approvedCount === selectableCount && !redundant.size;
@@ -342,7 +367,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
 
   async function commit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (publishing.current || busy || photosBusy || !approvedCount || redundant.size) return;
+    if (publishing.current || busy || photosBusy || !approvedCount || redundant.size || missingCategories || !brandResolved) return;
     publishing.current = true;
     setRowErrors({});
     setBusy(true);
@@ -353,7 +378,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     try {
       const batch = pending.map(row => row.approved && isEligible(row) ? {
         id: row.id, approved: true, name: row.name, product_code: row.product_code, hsn_sac_code: row.hsn_sac_code,
-        price_per_unit: row.price_per_unit ?? '', brand_category: Number(row.association),
+        price_per_unit: row.price_per_unit ?? '',
+        ...(categories.find(option => String(option.id) === row.association)?.canonical
+          ? {category_id: Number(row.association)} : {brand_category: Number(row.association)}),
         sub_category: row.sub_category, pack_size: row.pack_size,
       } : {id: row.id, approved: false});
       const result = await requestApi<{items: unknown[]; discarded: number}>(baseUrl, path + 'drafts/commit/', token, {
@@ -367,7 +394,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       setRows(current => current.map(row => committed.has(row.id) ? {
         ...row, approved: false, status: committed.get(row.id) ? 'APPROVED' : 'DISCARDED',
       } : row));
-      const addedCodes = batch.flatMap(row => row.approved && row.product_code ? [row.product_code.trim()] : []);
+      const addedCodes = selected.map(row => row.product_code.trim()).filter(Boolean);
       setExistingCodes(current => [...current, ...addedCodes]);
       setSummary(current => current && {
         pending: Math.max(0, current.pending - batch.length),
@@ -458,7 +485,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       </details>}
     </section>}
     {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
-    {!!pending.length && !categories.length && <p>Approval requires an active category linked to this PDF’s brand under a verified, active company. Check the vault’s brand name against the catalogue brand.</p>}
+    {!!pending.length && !categories.length && <p>No active canonical categories are available. Add a catalogue category before publishing.</p>}
+    {!!pending.length && !brandResolved && <p>Match this PDF’s brand to one verified, active company brand before publishing.</p>}
     {!!rows.length && <form aria-label="Publish catalogue items" noValidate onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
         <caption>Approve the rows to publish. Unchecked drafts will be discarded when you commit.</caption>
@@ -467,6 +495,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         <thead><tr><th scope="col">Approve<br />
           <input type="checkbox" aria-label="Select all eligible rows" checked={allSelected}
             disabled={busy || !eligibleCount}
+            title={!eligibleCount && pending.length ? 'Every pending draft has a SKU already in the catalogue.' : undefined}
             ref={input => {if (input) input.indeterminate = partiallySelected;}} onChange={toggleAll} />
         </th>{['Page', 'Image', 'Name', 'Code', 'HSN / SAC', 'Unit price (₹)', 'Category'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
         <tbody>{rows.map(row => {
@@ -479,7 +508,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           return <tr key={row.id} data-draft-id={row.id} tabIndex={-1}
             aria-label={`Draft ${row.id}`} className={rowErrors[row.id] ? 'catalogue-review-row-error' : undefined}>
             <td>{row.status === 'DRAFT' ? <input type="checkbox" aria-label={'Approve ' + row.product_code}
-              checked={row.approved && !alreadyExists} disabled={!editable || !isEligible(row)} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
+              checked={row.approved && !alreadyExists} disabled={!editable || alreadyExists}
+              title={alreadyExists ? 'This SKU is already in the catalogue. Change the code to approve this draft.' : undefined} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
             <td>{row.page}</td>
             <td><div className="catalogue-review-photo">
               {previewPath && <Thumbnail key={previewPath} baseUrl={baseUrl} token={token} path={previewPath} />}
@@ -530,11 +560,11 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
               {row.status === 'DRAFT' && <select aria-label={'Category for row ' + row.id} value={row.association}
                 disabled={!editable} required={row.approved} onChange={event => {
                   const association = event.target.value;
-                  update(row.id, {association, approved: row.approved && categoryIds.has(association)});
+                  update(row.id, {association});
                 }}>
                 <option value="">Select category</option>
                 {categories.map(option => <option value={option.id} key={option.id}>
-                  {option.category__name} · {option.brand__company__legal_name}
+                  {option.category__name}{option.brand__company__legal_name && ` · ${option.brand__company__legal_name}`}
                 </option>)}
               </select>}</td>
           </tr>;
@@ -550,7 +580,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           onClick={() => setRows(current => current.map(row => redundant.has(row.id) ? {...row, approved: false} : row))}>
           {`Uncheck duplicates (${redundant.size})`}
         </button>}
-        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount || !!redundant.size}>
+        {missingCategories > 0 && <span role="status">Choose a category for {missingCategories} selected {missingCategories === 1 ? 'draft' : 'drafts'} before publishing.</span>}
+        <button type="submit" className="btn-primary" disabled={busy || photosBusy || !approvedCount || !!redundant.size || !!missingCategories || !brandResolved}>
           {publishFeedback?.kind === 'pending' ? 'Committing & Publishing…' : `Commit & Publish (${approvedCount})`}
         </button>
       </div>}

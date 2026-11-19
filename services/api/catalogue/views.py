@@ -11,7 +11,7 @@ from companies.models import CompanyProfile
 from companies.permissions import HasStaffPermission, IsCompanyAccount
 from .models import Brand, BrandCategory, CatalogueAudit, Category, Product, ProductVariant
 from .search import search_products
-from .tagging import category_filter, untagged_products
+from .tagging import LEGACY_CATEGORY_PATTERN, category_filter, untagged_products
 from .serializers import BrandSerializer, BrandCategorySerializer, CategorySerializer, ProductSerializer, PublicBrandSerializer, VariantSerializer
 
 
@@ -147,6 +147,8 @@ class Categories(generics.ListAPIView):
 
     def get_queryset(self):
         scope = self.request.query_params.get('scope')
+        if scope == 'canonical':
+            return super().get_queryset().exclude(name__iregex=LEGACY_CATEGORY_PATTERN)
         if scope not in ('public', 'priced'):
             return super().get_queryset()
         eligible = eligible_products()

@@ -890,3 +890,27 @@ class CatalogueExtractionTests(TestCase):
                 self.assertEqual(price(raw), Decimal('123456.50'))
         for raw in ('12,34', '₹ 25 to 50', 'Rs. -5.00', 'call for price'):
             self.assertIsNone(price(raw))
+
+
+    def test_review_offers_unlinked_canonical_categories_and_publish_links_verified_brand(self):
+        pipe = Category.objects.create(name='Conduits, Piping & Installation Accessories')
+        Category.objects.create(name='Retired taxonomy', active=False)
+        Category.objects.create(name='ROMA')
+        self.document.business_type = 'PLUMBING'
+        self.document.sub_category = 'PIPES_FITTINGS'
+        self.document.save(update_fields=['business_type', 'sub_category'])
+        draft = self.document.draft_items.create(page=1, name='Pipe', product_code='PIPE-41', category=pipe.name)
+        result = self.client.get(self.base + 'extract/').data
+        self.assertIn({'id': pipe.pk, 'name': pipe.name}, result['canonical_categories'])
+        self.assertNotIn('ROMA', [row['name'] for row in result['canonical_categories']])
+        self.assertNotIn('Retired taxonomy', [row['name'] for row in result['canonical_categories']])
+        self.assertEqual(result['default_category'], pipe.name)
+        self.assertFalse(BrandCategory.objects.filter(brand=self.association.brand, category=pipe).exists())
+        response = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+            'id': draft.pk, 'approved': True, 'name': 'Pipe', 'product_code': 'PIPE-41',
+            'hsn_sac_code': '3917', 'price_per_unit': '10', 'category_id': pipe.pk,
+        }]}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        product = Product.objects.get(code='PIPE-41')
+        self.assertEqual(product.brand_category.brand_id, self.association.brand_id)
+        self.assertEqual(product.brand_category.category_id, pipe.pk)
