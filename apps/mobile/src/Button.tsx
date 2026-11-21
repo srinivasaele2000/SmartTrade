@@ -16,9 +16,9 @@ export const buttonPalette = {
   disabled: {backgroundColor:trade.screen, borderColor:trade.border, color:trade.muted},
 } as const;
 
-type Props = {title:string; onPress:()=>unknown; variant?:ButtonVariant; icon?:ButtonIcon; disabled?:boolean; loading?:boolean; selected?:boolean; accessibilityLabel?:string; compact?:boolean};
+type Props = {title:string; onPress:()=>unknown; variant?:ButtonVariant; icon?:ButtonIcon; disabled?:boolean; loading?:boolean; selected?:boolean; accessibilityLabel?:string; compact?:boolean; gridIconOnly?:boolean};
 /** Action intent is explicit at each call site; labels never determine permissions or styling. */
-export function Button({title,onPress,variant='secondary',icon,disabled=false,loading=false,selected=false,accessibilityLabel,compact=false}:Props) {
+export function Button({title,onPress,variant='secondary',icon,disabled=false,loading=false,selected=false,accessibilityLabel,compact=false,gridIconOnly=false}:Props) {
   const gate = useRef(false);
   const [pending,setPending] = useState(false);
   const busy = loading || pending;
@@ -41,10 +41,10 @@ export function Button({title,onPress,variant='secondary',icon,disabled=false,lo
       }
     } catch(error) {gate.current=false;throw error;}
   }
-  return <Pressable accessibilityRole={variant==='navigation'?'tab':'button'} accessibilityLabel={accessibilityLabel??title} accessibilityState={{disabled:unavailable,busy, ...(variant==='navigation'?{selected}:{})}} disabled={unavailable} onPress={press} hitSlop={compact ? {top: 6, bottom: 6, left: 2, right: 2} : undefined} style={({pressed})=>[s.button,{backgroundColor:palette.backgroundColor,borderColor:palette.borderColor},variant==='navigation'&&s.navigation,compact&&s.compact,pressed&&!unavailable&&s.pressed]}>
+  return <Pressable accessibilityRole={variant==='navigation'?'tab':'button'} accessibilityLabel={accessibilityLabel??title} accessibilityState={{disabled:unavailable,busy, ...(variant==='navigation'?{selected}:{})}} disabled={unavailable} onPress={press} hitSlop={compact ? {top: 6, bottom: 6, left: 2, right: 2} : undefined} style={({pressed})=>[s.button,{backgroundColor:palette.backgroundColor,borderColor:palette.borderColor},variant==='navigation'&&s.navigation,compact&&s.compact,gridIconOnly&&s.gridIconOnly,pressed&&!unavailable&&s.pressed]}>
     <View style={s.content}>
       {busy?<ActivityIndicator size="small" color={palette.color} accessibilityLabel="Processing" />:Icon?<Icon size={18} strokeWidth={2} color={palette.color} aria-hidden={true}/>:null}
-      <Text style={[s.label,{color:palette.color}]}>{title}</Text>
+      {!gridIconOnly && <Text style={[s.label,{color:palette.color}]}>{title}</Text>}
       {variant==='navigation'&&selected&&!busy&&<Check size={16} color={palette.color} aria-hidden={true}/>}
     </View>
   </Pressable>;
@@ -53,6 +53,7 @@ const s=StyleSheet.create({
   button:{minHeight:48,paddingVertical:8,paddingHorizontal:12,borderRadius:9,borderWidth:1,justifyContent:'center',maxWidth:'100%',flexShrink:1},
   navigation:{borderRadius:8,paddingHorizontal:10},
   compact:{minHeight:28,minWidth:40,paddingVertical:3,paddingHorizontal:8,borderRadius:trade.radius},
+  gridIconOnly:{minHeight:40,minWidth:0,paddingHorizontal:0,paddingVertical:2,borderRadius:5},
   content:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:6},
   label:{fontSize:13,fontWeight:'600',lineHeight:18,textAlign:'center',flexShrink:1},
   pressed:{opacity:0.78,transform:[{scale:0.99}]},

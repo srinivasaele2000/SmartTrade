@@ -23,7 +23,7 @@ import DealerWorkspace from './src/DealerWorkspace';
 import {PersonalProfile} from './src/Onboarding';
 import {RoleIdentity} from './src/RoleIdentity';
 import {CatalogueImage, CataloguePdf} from './src/CatalogueMedia';
-import {CategoryTile, ProductBrowseCard, ProductGrid} from './src/CatalogueBrowseCards';
+import {CategoryTile, ProductBrowseCard, CatalogueGrid} from './src/CatalogueBrowseCards';
 import {loadBrowseAvailability, type Availability, type BrowseFilter} from './src/catalogue-browse';
 import EnquiryWorkspace from './src/EnquiryWorkspace';
 import OrderWorkspace from './src/OrderWorkspace';
@@ -208,7 +208,7 @@ export function CatalogueScreen({open, active = true, nearby, openSupport}: {ope
           filters.search ? `No products found for “${filters.search}”. Check the spelling or adjust your filters.`
             : 'No products match these filters. Clear filters or browse another category.'
         }</Text></View>}
-        <ProductGrid items={productPage.results} render={product => <ProductBrowseCard product={product} apiBase={api.base}
+        <CatalogueGrid label="Catalogue products" items={productPage.results} render={product => <ProductBrowseCard product={product} apiBase={api.base}
           availability={facts?.get(product.id)} onOpen={() => open(product.id)} />} />
         <Pager page={page} {...productPage} onPage={setPage} />
       </>}

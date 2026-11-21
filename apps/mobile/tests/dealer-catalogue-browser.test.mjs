@@ -5,7 +5,8 @@ import ts from 'typescript';
 
 const jsx = (type, props) => ({type, props});
 const source = readFileSync(new URL('../src/DealerCatalogueBrowser.tsx', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(source, {compilerOptions: {
+const cardsSource = readFileSync(new URL('../src/CatalogueBrowseCards.tsx', import.meta.url), 'utf8');
+const compile = source => ts.transpileModule(source, {compilerOptions: {
   module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
 }}).outputText;
 
@@ -40,7 +41,6 @@ function fixture(platform = 'android', groups = []) {
   };
   const native = new Proxy({
     StyleSheet: {create: value => value}, Platform: {OS: platform},
-    useWindowDimensions: () => ({width: 390}),
     BackHandler: {addEventListener(_event, callback) {hardwareBack = callback; return {remove() {}};}},
   }, {get: (value, name) => value[name] ?? name});
   const imports = {
@@ -69,8 +69,11 @@ function fixture(platform = 'android', groups = []) {
       ));
     }},
   };
+  const cards = {};
+  new Function('require', 'exports', compile(cardsSource))(name => imports[name], cards);
+  imports['./CatalogueBrowseCards'] = cards;
   const exports = {};
-  new Function('require', 'exports', compiled)(name => imports[name], exports);
+  new Function('require', 'exports', compile(source))(name => imports[name], exports);
   let nodes;
   function render() {
     stateIndex = refIndex = historyIndex = 0;
@@ -93,6 +96,8 @@ function fixture(platform = 'android', groups = []) {
   return {
     refresh, requests, effects,
     get: label => nodes.find(node => node.props?.title === label || node.props?.accessibilityLabel === label),
+    columnCounts: label => nodes.find(node => node.props?.accessibilityLabel === label).props.children
+      .map(row => row.props.children.flat().length),
     products: () => nodes.filter(node => node.type === 'Product').map(node => node.props.name),
     back: () => hardwareBack(),
   };
@@ -103,6 +108,8 @@ test('dealer landing loads choices without fetching the product catalogue', asyn
   await app.refresh();
   assert.ok(app.get('Browse ANCHOR'));
   assert.ok(app.get('Browse Switchgear'));
+  assert.deepEqual(app.columnCounts('Shop by brand'), [8]);
+  assert.deepEqual(app.columnCounts('Shop by category'), [8]);
   assert.deepEqual(app.products(), []);
   assert.deepEqual(app.requests, []);
 });
@@ -170,6 +177,7 @@ test('browser Back returns from the product view without leaving the dealer home
     await app.refresh();
     const cleanup = app.effects[0]();
     assert.match(history.state.dealerCatalogue, /^smarttrade-catalogue-/);
+  assert.deepEqual(app.columnCounts('Sub-Categories'), [8]);
     app.get('Browse ROMA').props.onPress();
     await app.refresh();
     app.effects[1]();

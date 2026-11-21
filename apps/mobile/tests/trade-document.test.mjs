@@ -79,27 +79,24 @@ test('issued tax invoice renders the saved invoice metadata, HSN and tax amounts
   assert.match(result, /CGST ₹18\.00 SGST ₹18\.00 Grand Total \(₹\) ₹236\.00/);
 });
 
-test('product grid adapts to its container and preserves the product action', () => {
-  let width = 0;
+test('product grid keeps eight columns and preserves the product action', () => {
   const media = [];
-  const {ProductGrid, ProductGridCard} = load('CatalogueBrowseCards', {
-    ...base, react: {useState: () => [width, value => {width = value;}]},
+  const {CatalogueGrid, ProductGridCard} = load('CatalogueBrowseCards', {
+    ...base,
     './CatalogueMedia': {CatalogueImage: props => {media.push(props); return null;}},
   });
-  const items = Array.from({length: 5}, (_, id) => ({id}));
+  const items = Array.from({length: 9}, (_, id) => ({id}));
   let added;
   const render = item => ProductGridCard({
     name: 'Modular switch', brand: 'Anchor', code: 'SKU-22', hsn: '8536', price: '₹50.00',
     apiBase: '/api/v1', image: item.id ? null : '/media/catalogue/switch',
     children: jsx('Button', {title: '+ Add', onPress: () => {added = item.id;}}),
   });
-  const grid = () => ProductGrid({items, render});
-  assert.equal(grid().props.children.length, 3);
-  grid().props.onLayout({nativeEvent: {layout: {width: 720}}});
-  assert.equal(grid().props.children[0].props.children[0].length, 3);
-  grid().props.onLayout({nativeEvent: {layout: {width: 1100}}});
-  assert.equal(grid().props.children[0].props.children[0].length, 4);
-  const nodes = flatten(grid());
+  const grid = CatalogueGrid({items, render});
+  assert.equal(grid.props.children.length, 2);
+  assert.deepEqual(grid.props.children.map(row => row.props.children.flat().length), [8, 8]);
+  assert.equal(grid.props.children[1].props.children[0].length, 1);
+  const nodes = flatten(grid);
   assert.match(text(nodes), /Anchor Modular switch Code SKU-22 HSN 8536 ₹50.00/);
   assert.equal(media[0].reference, '/media/catalogue/switch');
   assert.equal(media[1].reference, null);

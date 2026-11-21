@@ -1,8 +1,9 @@
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
-import {ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
+import {ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Boxes, Cable, Lightbulb, Plug, Store, Wrench} from 'lucide-react-native';
 import type {ApiClient, Brand} from './api';
 import {Button} from './Button';
+import {CatalogueGrid} from './CatalogueBrowseCards';
 import {type CatalogueItem, estimatePage} from './dealer-estimates';
 import {HistoryPager} from './HistoryPager';
 import {useHistoryPage} from './useHistoryPage';
@@ -23,9 +24,9 @@ function categoryIcon(name: string) {
   return Boxes;
 }
 
-function ChoiceCard({api, token, kind, choice, width, onPress}: {
+function ChoiceCard({api, token, kind, choice, onPress}: {
   api: ApiClient; token: string; kind: 'brand' | 'category'; choice: Choice;
-  width: number; onPress: () => void;
+  onPress: () => void;
 }) {
   const count = useResource(useCallback(async signal => {
     const params = new URLSearchParams({[kind]: choice.id, page_size: '1'});
@@ -34,14 +35,14 @@ function ChoiceCard({api, token, kind, choice, width, onPress}: {
   }, [api, token, kind, choice.id]));
   const Icon = kind === 'brand' ? Store : categoryIcon(choice.name);
   return <Pressable accessibilityRole="button" accessibilityLabel={`Browse ${choice.name}`}
-    onPress={onPress} style={({pressed}) => [styles.card, {width}, pressed && styles.pressed]}>
+    onPress={onPress} style={({pressed}) => [styles.card, pressed && styles.pressed]}>
     <View style={styles.badge}>{kind === 'brand'
       ? <Text style={styles.initials}>{choice.name.replace(/[^a-z0-9 ]/gi, '').split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase()}</Text>
-      : <Icon size={23} color="#166534" />}</View>
-    <Text style={tradeType.row}>{choice.name}</Text>
-    {count.state.status === 'ready' ? <Text style={tradeType.meta}>{count.state.data} items</Text>
-      : count.state.status === 'error' ? <Text style={tradeType.meta}>Count unavailable</Text>
-      : <Text style={tradeType.meta}>Loading count…</Text>}
+      : <Icon size={14} color="#166534" />}</View>
+    <Text numberOfLines={2} style={styles.choiceTitle}>{choice.name}</Text>
+    {count.state.status === 'ready' ? <Text style={styles.count} numberOfLines={1}>{count.state.data}</Text>
+      : count.state.status === 'error' ? <Text style={styles.count} numberOfLines={1}>—</Text>
+      : <Text style={styles.count} numberOfLines={1}>…</Text>}
   </Pressable>;
 }
 
@@ -66,9 +67,6 @@ export default function DealerCatalogueBrowser({api, token, renderItems}: {
   const waitingForFacets = Boolean(root && facets.state.status !== 'ready');
   const inResults = Boolean(browseAll || brand || category || search.text.trim());
   const marker = useRef('smarttrade-catalogue-' + Math.random().toString(36).slice(2));
-  const {width} = useWindowDimensions();
-  const columns = width >= 1100 ? 4 : width >= 720 ? 3 : 2;
-  const cardWidth = Math.floor((Math.min(width, 1440) - 24 - (columns - 1) * 10) / columns);
   const reset = useCallback(() => {
     setBrand(undefined); setCategory(undefined); setBrowseAll(false); setRoot(undefined);
     setSeries(undefined); setShowProducts(false); search.change('');
@@ -155,17 +153,22 @@ export default function DealerCatalogueBrowser({api, token, renderItems}: {
       {brands.state.status === 'loading' && <ActivityIndicator accessibilityLabel="Loading brands" />}
       {brands.state.status === 'error' && <><Text>{brands.state.message}</Text><Button variant="secondary" title="Retry brands" onPress={brands.retry} /></>}
       {brands.state.status === 'ready' && !brandChoices.length && <Text>No priced catalogue brands are available yet.</Text>}
-      <View style={styles.grid}>{brandChoices.map(value => <ChoiceCard key={value.id} api={api} token={token} kind="brand"
-        choice={{...value, id: String(value.id)}} width={cardWidth} onPress={() => selectRoot('brand', {...value, id: String(value.id)})} />)}</View>
+      <CatalogueGrid label="Shop by brand" items={brandChoices} render={value => {
+        const choice = {...value, id: String(value.id)};
+        return <ChoiceCard api={api} token={token} kind="brand" choice={choice} onPress={() => selectRoot('brand', choice)} />;
+      }} />
       <HistoryPager {...brands} />
       <Text accessibilityRole="header" style={tradeType.section}>Shop by category</Text>
       {categories.state.status === 'loading' && <ActivityIndicator accessibilityLabel="Loading categories" />}
       {categories.state.status === 'error' && <><Text>{categories.state.message}</Text><Button variant="secondary" title="Retry categories" onPress={categories.retry} /></>}
-      <View style={styles.grid}>{categoryChoices.map(value => <ChoiceCard key={value.id} api={api} token={token} kind="category"
-        choice={{id: String(value.id), name: value.name}} width={cardWidth} onPress={() => selectRoot('category', {id: String(value.id), name: value.name})} />)}
-        {categories.state.status === 'ready' && categories.state.data.has_uncategorized && <ChoiceCard api={api} token={token} kind="category"
-          choice={{id: 'uncategorized', name: 'Uncategorized'}} width={cardWidth} onPress={() => selectRoot('category', {id: 'uncategorized', name: 'Uncategorized'})} />}
-      </View>
+      <CatalogueGrid label="Shop by category" items={[
+        ...categoryChoices,
+        ...(categories.state.status === 'ready' && categories.state.data.has_uncategorized
+          ? [{id: 'uncategorized', name: 'Uncategorized'}] : []),
+      ]} render={value => {
+        const choice = {id: String(value.id), name: value.name};
+        return <ChoiceCard api={api} token={token} kind="category" choice={choice} onPress={() => selectRoot('category', choice)} />;
+      }} />
       <HistoryPager {...categories} />
     </> : waitingForFacets ? (facets.state.status === 'error'
       ? <><Text accessibilityRole="alert">{facets.state.message}</Text><Button variant="secondary" title="Retry sub-categories" onPress={facets.retry} /></>
@@ -175,16 +178,16 @@ export default function DealerCatalogueBrowser({api, token, renderItems}: {
       <Text style={tradeType.meta}>{facets.state.data.count} items</Text>
       <Button variant="secondary" title={`View All ${root?.choice.name} Items (${facets.state.data.count})`}
         onPress={() => setShowProducts(true)} />
-      <View style={styles.grid}>{groups.map(group => {
+      <CatalogueGrid label="Sub-Categories" items={groups} render={group => {
         const label = group.id.replaceAll('_', ' ').toUpperCase();
         const Icon = categoryIcon(label);
         return <Pressable key={group.id} accessibilityRole="button" accessibilityLabel={`Browse ${label}`}
-          style={({pressed}) => [styles.card, {width: cardWidth}, pressed && styles.pressed]}
+          style={({pressed}) => [styles.card, pressed && styles.pressed]}
           onPress={() => {setSeries(group.id); setShowProducts(true);}}>
-          <View style={styles.badge}><Icon size={23} color="#166534" /></View>
-          <Text style={tradeType.row}>{label}</Text><Text style={tradeType.meta}>{group.count} items</Text>
+          <View style={styles.badge}><Icon size={14} color="#166534" /></View>
+          <Text numberOfLines={2} style={styles.choiceTitle}>{label}</Text><Text numberOfLines={1} style={styles.count}>{group.count}</Text>
         </Pressable>;
-      })}</View>
+      }} />
     </> : <>
       {brands.state.status === 'error' && <Button variant="secondary" title="Retry brands" onPress={brands.retry} />}
       {categories.state.status === 'error' && <Button variant="secondary" title="Retry categories" onPress={categories.retry} />}
@@ -219,11 +222,12 @@ const styles = StyleSheet.create({
   search: {flexDirection: 'row', alignItems: 'center', gap: 6},
   input: {flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13,
     borderWidth: 1, borderColor: trade.border, borderRadius: 8, backgroundColor: trade.surface, color: trade.ink},
-  grid: {flexDirection: 'row', flexWrap: 'wrap', gap: 10},
-  card: {minHeight: 132, padding: 12, gap: 8, borderWidth: 1, borderColor: trade.border,
-    borderRadius: 12, backgroundColor: trade.surface, elevation: 1},
+  card: {flex: 1, minHeight: 64, padding: 2, gap: 2, borderWidth: 1, borderColor: trade.border,
+    borderRadius: 6, backgroundColor: trade.surface, elevation: 1},
   pressed: {backgroundColor: '#ECFDF5', borderColor: '#166534'},
-  badge: {width: 40, height: 40, borderRadius: 10, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center'},
-  initials: {fontSize: 16, fontWeight: '700', color: '#166534'},
+  badge: {width: 18, height: 18, borderRadius: 4, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center'},
+  initials: {fontSize: 9, fontWeight: '700', color: '#166534'},
+  choiceTitle: {fontSize: 10, lineHeight: 13, fontWeight: '600', color: trade.heading},
+  count: {fontSize: 9, lineHeight: 12, color: trade.muted, fontVariant: ['tabular-nums']},
   filters: {alignItems: 'center', gap: 6, paddingVertical: 4},
 });

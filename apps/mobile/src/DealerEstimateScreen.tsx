@@ -9,7 +9,7 @@ import {printBrowserHtml} from './print-browser-html';
 import {printSavedPdf} from './print-document';
 import {DocumentHeader, DocumentLedgerRow, DocumentTable, DocumentTotals} from './TradeDocument';
 import {Button} from './Button';
-import {ProductGrid, ProductGridCard} from './CatalogueBrowseCards';
+import {CatalogueGrid, ProductGridCard} from './CatalogueBrowseCards';
 import {onboardingStyles as s} from './DealerWorkerContactsScreen';
 import {StickyBottomBar} from './StickyBottomBar';
 import {type ApiClient} from './api';
@@ -217,10 +217,10 @@ export default function DealerEstimateScreen({api, token, accountId, initialTab 
           }
         }} />}
       {tab === 'Items' && <DealerCatalogueBrowser api={api} token={token} renderItems={catalogueItems =>
-        <ProductGrid items={catalogueItems} render={item => <ProductGridCard name={item.name}
+        <CatalogueGrid label="Catalogue products" items={catalogueItems} render={item => <ProductGridCard name={item.name}
           brand={item.brand_name} code={item.product_code} hsn={item.hsn_sac_code} badge={item.category_name}
           price={inr(item.price_per_unit)} apiBase={api.base} image={item.image_url}>
-          <Button variant="primary" title="+ Add" disabled={finalized}
+          <Button variant="primary" gridIconOnly icon="plus" title="+ Add" disabled={finalized}
             accessibilityLabel={`Add ${item.name} to estimate`} onPress={() => {
               setPending(item); setQuantity(items.find(row => row.product === item.id)?.quantity ?? '1');
             }} />

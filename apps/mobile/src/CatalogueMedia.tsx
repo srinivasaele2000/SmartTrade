@@ -19,7 +19,7 @@ export function CatalogueImage({apiBase, reference, name, detail = false, compac
       ? <Image source={{uri: url}} cachePolicy="memory-disk" contentFit="contain" style={styles.image}
           accessible accessibilityLabel={name + ' product image'} onError={() => setFailedUrl(url)} />
       : <View style={styles.placeholder} accessible={compact} accessibilityLabel={compact ? 'No product image' : undefined}>
-          {initials ? <Text style={styles.initials}>{initials}</Text> : <Package color="#52675c" size={compact ? 24 : 36} aria-hidden={true} />}
+          {initials ? <Text style={styles.initials}>{initials}</Text> : <Package color="#52675c" size={grid ? 14 : compact ? 24 : 36} aria-hidden={true} />}
           {!compact && !grid && <Text style={styles.placeholderText}>No product image</Text>}
         </View>}
   </View>;
@@ -67,8 +67,8 @@ export function CataloguePdf({apiBase, reference, productId, productName}: {
 const styles = StyleSheet.create({
   frame: {height: 132, borderRadius: 10, overflow: 'hidden', backgroundColor: '#edf2ef'},
   detail: {height: 220},
-  grid: {height: '100%', borderRadius: 0, backgroundColor: '#f8fafc', padding: 12},
-  initials: {fontSize: 24, fontWeight: '700', color: '#475569', backgroundColor: '#e2e8f0', borderRadius: 12, padding: 14},
+  grid: {height: '100%', borderRadius: 0, backgroundColor: '#f8fafc', padding: 2},
+  initials: {fontSize: 11, fontWeight: '700', color: '#475569', backgroundColor: '#e2e8f0', borderRadius: 4, padding: 2},
   compact: {width: 48, height: 48, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#F8FAFC', flexShrink: 0},
   image: {width: '100%', height: '100%'},
   placeholder: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8},
