@@ -125,7 +125,7 @@ test('completed rows render before the next chunk finishes and cancel keeps the 
   const running = get('Extract catalogue batch').onSubmit({preventDefault() {}});
   await secondStarted;
   assert.ok(get('Approve new-sku'));
-  get('Cancel after current chunk').onClick();
+  get('Stop after these pages').onClick();
   finishSecond();
   await running;
   assert.equal(requests.length, 2);
@@ -187,7 +187,7 @@ test('rows without categories can be selected, but cannot be published until ass
   assert.equal(get('Select all eligible rows').disabled, false);
   get('Approve one').onChange({target: {checked: true}});
   assert.equal(get('Approve one').checked, true);
-  assert.equal(get('Commit & Publish (1)').disabled, true);
+  assert.equal(get('Publish selected items (1)').disabled, true);
   get('Approve one').onChange({target: {checked: false}});
   assert.equal(get('Approve one').checked, false);
 });
@@ -205,7 +205,7 @@ test('publishing 331 approvals submits once and keeps progress and errors beside
     return new Promise((resolve, reject) => {finish = {resolve, reject};});
   }, rows, (...args) => published.push(args));
   get('Select all eligible rows').onChange();
-  assert.equal(get('Commit & Publish (331)').disabled, false);
+  assert.equal(get('Publish selected items (331)').disabled, false);
   const form = get('Publish catalogue items');
   assert.equal(form.noValidate, true);
   const event = {preventDefault() {}};
@@ -215,7 +215,7 @@ test('publishing 331 approvals submits once and keeps progress and errors beside
   assert.equal(requests[0].path, '/admin/catalogues/test/drafts/commit/');
   assert.equal(requests[0].options.method, 'POST');
   assert.equal(JSON.parse(requests[0].options.body).rows.length, 331);
-  assert.equal(get('Committing & Publishing…').disabled, true);
+  assert.equal(get('Publishing selected items…').disabled, true);
   for (const label of ['Publish status at top', 'Publish status by actions']) {
     assert.match(get(label).children, /Publishing 331/);
   }
@@ -226,7 +226,7 @@ test('publishing 331 approvals submits once and keeps progress and errors beside
     assert.equal(get(label).role, 'alert');
     assert.match(get(label).children, /SW-0.*valid HSN/);
   }
-  assert.equal(get('Commit & Publish (331)').disabled, false);
+  assert.equal(get('Publish selected items (331)').disabled, false);
   get('HSN for row 1').onChange({target: {value: '8536'}});
   const retry = get('Publish catalogue items').onSubmit(event);
   assert.equal(JSON.parse(requests[1].options.body).rows[0].hsn_sac_code, '8536');
@@ -234,7 +234,7 @@ test('publishing 331 approvals submits once and keeps progress and errors beside
   await retry;
   assert.deepEqual(published, [[331, 0]]);
   assert.match(get('Publish status by actions').children, /331 catalogue items published/);
-  assert.equal(get('Commit & Publish (331)'), undefined);
+  assert.equal(get('Publish selected items (331)'), undefined);
 });
 
 
@@ -252,14 +252,14 @@ test('review shows pending and published counts, skips catalogue codes and selec
   assert.equal(get('Approve LIVE').disabled, true);
   get('Select all eligible rows').onChange();
   assert.equal(get('Approve SAME').checked, true);
-  assert.equal(get('Commit & Publish (1)').disabled, false);
+  assert.equal(get('Publish selected items (1)').disabled, false);
   // The second occurrence can be selected manually, then reduced to one in a click.
   const second = get('Draft 2').children[0].props.children.props;
   assert.equal(second.checked, false);
   second.onChange({target: {checked: true}});
-  assert.equal(get('Commit & Publish (2)').disabled, true);
+  assert.equal(get('Publish selected items (2)').disabled, true);
   get('Uncheck duplicates (1)').onClick();
-  assert.equal(get('Commit & Publish (1)').disabled, false);
+  assert.equal(get('Publish selected items (1)').disabled, false);
 });
 
 test('structured API errors highlight and scroll to the exact draft IDs', async () => {
@@ -303,8 +303,10 @@ test('extraction diagnostics show each page and edited hierarchy and packing are
   assert.equal(payload.rows[0].sub_category, 'Bell Push');
   assert.deepEqual(payload.rows[0].pack_size, {standard: '6', box_quantity: ''});
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
-  assert.ok(get('Page diagnostics'));
-  assert.ok(get('Matrix items'));
+  assert.ok(get('Page-by-page summary'));
+  assert.ok(get('Pages checked'));
+  assert.ok(get('Products found'));
+  assert.equal(get('Matrix items'), undefined);
 });
 
 
@@ -338,8 +340,35 @@ test('a zero-item extraction displays its page diagnostic in an open panel', asy
     pages: [{page: 2, items: 0, thumbnails: 0, matrix_items: 0, ocr: null, reason: 'no_priced_rows', message}],
   }}));
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
-  assert.equal(get(message).children, message);
+  assert.ok(get('Page 2 — 0 products found · 0 photos cropped · Read by the backup text reader'));
+  assert.ok(get('Page 2: No product prices were found on this page.'));
+  assert.ok(get('Pages that need attention'));
+  assert.equal(get(message), undefined);
   assert.match(JSON.stringify(get('Extraction diagnostics').children), /"open":true/);
+});
+
+test('mixed extraction explains provider fallbacks without exposing codes or token counts', async () => {
+  const cases = [
+    ['no priced rows', 'Some pages had no product prices'],
+    ['timeout', 'AI took too long on some pages'],
+    ['http 503', 'AI service was temporarily busy'],
+    ['http_429_rate_limit', 'AI rate limit reached — pause 30s between batches'],
+    ['invalid_json', 'AI returned an unreadable format'],
+    ['invalid response', 'AI returned an unreadable format'],
+    ['no_valid_rows:invalid_price', 'No valid priced products found on page'],
+  ];
+  const get = review(undefined, async () => ({rows: [], categories: [], diagnostics: {
+    status: 'complete', pages_scanned: 8, items_extracted: 6,
+    pages: [{page: 9, mode: 'ai_vision', items: 6, thumbnails: 2, input_tokens: 1388},
+      ...cases.map(([vision_fallback], index) => ({page: index + 10, items: 0, thumbnails: 0, vision_fallback}))],
+  }}));
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  assert.ok(get('Extracted with AI Vision'));
+  assert.ok(get('Backup text reader used'));
+  assert.ok(get('Page 9 — 6 products found · 2 photos cropped · Extracted by AI Vision'));
+  for (const [, label] of cases) assert.ok(get(label));
+  const markup = JSON.stringify(get('Extraction diagnostics').children);
+  assert.doesNotMatch(markup, /1388|invalid_json|no_valid_rows|http_429/);
 });
 
 test('category fallback follows all pages when a review has drafts but no options', async () => {
@@ -373,14 +402,14 @@ test('valid fields leave publishing enabled with blank optional metadata, and un
     }, [row], () => {});
     await get('Extract catalogue batch').onSubmit({preventDefault() {}});
     get('Approve 70000236').onChange({target: {checked: true}});
-    assert.equal(get('Commit & Publish (1)').disabled, !brandResolved);
+    assert.equal(get('Publish selected items (1)').disabled, !brandResolved);
     if (!brandResolved) {
       const explanation = JSON.stringify(get('Why publishing is blocked').children);
       assert.match(explanation, /70000236/);
       assert.match(explanation, /choose a verified brand or create and verify one/);
     } else {
       get('HSN for row 42').onChange({target: {value: ''}});
-      assert.equal(get('Commit & Publish (1)').disabled, false);
+      assert.equal(get('Publish selected items (1)').disabled, false);
     }
     await get('Publish catalogue items').onSubmit({preventDefault() {}});
     assert.equal(payload?.rows[0].category_id, brandResolved ? 7 : undefined);
@@ -406,10 +435,10 @@ test('choosing an eligible brand in the drawer unblocks publish and sends the se
   }, [row], () => {});
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   get('Approve 70000236').onChange({target: {checked: true}});
-  assert.equal(get('Commit & Publish (1)').disabled, true);
+  assert.equal(get('Publish selected items (1)').disabled, true);
   assert.match(JSON.stringify(get('Brand for catalogue PDF').children), /Company Two/);
   get('Brand for catalogue PDF').onChange({target: {value: '12'}});
-  assert.equal(get('Commit & Publish (1)').disabled, false);
+  assert.equal(get('Publish selected items (1)').disabled, false);
   await get('Publish catalogue items').onSubmit({preventDefault() {}});
   assert.equal(payload.brand_id, 12);
   assert.equal(payload.rows[0].category_id, 7);
@@ -436,9 +465,9 @@ test('creating a verified brand in the review preserves selection and unlocks pu
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   get('Approve 70000236').onChange({target: {checked: true}});
   assert.equal(get('New Brand Name').value, 'ASHIRVAD');
-  assert.equal(get('Commit & Publish (1)').disabled, true);
+  assert.equal(get('Publish selected items (1)').disabled, true);
   await get('+ Create & verify brand').onClick();
-  assert.equal(get('Commit & Publish (1)').disabled, false);
+  assert.equal(get('Publish selected items (1)').disabled, false);
   await get('Publish catalogue items').onSubmit({preventDefault() {}});
   assert.equal(published.brand_id, brand.id);
 });

@@ -12,11 +12,51 @@ type CanonicalCategory = {id: number; name: string};
 type Category = {id: number; category__name: string; brand__company__legal_name?: string; canonical?: boolean};
 const categoryKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 type Row = Draft & {approved: boolean; association: string};
-type Diagnostics = {caption_skus_found?: number; cropped_thumbnails_attached?: number; status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
-  items_extracted?: number; matrix_items?: number; wrapped_items?: number;
-  pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
-    ocr: 'rapidocr' | 'tesseract' | null; mode?: string; vision_provider?: string; vision_fallback?: string; input_tokens?: number; output_tokens?: number; ocr_note?: string; reason?: string; message?: string}[];
-  skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
+type PageSummary = {page: number; items: number; thumbnails: number; mode?: string; vision_fallback?: string; reason?: string};
+type Diagnostics = {status?: string; pages_scanned?: number; items_extracted?: number; cropped_thumbnails_attached?: number;
+  pages?: PageSummary[]; skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
+
+function fallbackLabel(value: string) {
+  const code = value.toLowerCase().trim().replaceAll(' ', '_');
+  if (code.startsWith('no_valid_rows')) return 'No valid priced products found on page';
+  switch (code) {
+    case 'no_priced_rows': return 'Some pages had no product prices';
+    case 'timeout': return 'AI took too long on some pages';
+    case 'http_503': return 'AI service was temporarily busy';
+    case 'http_429':
+    case 'http_429_rate_limit': return 'AI rate limit reached — pause 30s between batches';
+    case 'invalid_response':
+    case 'invalid_json':
+    case 'incomplete_response': return 'AI returned an unreadable format';
+    case 'batch_time_budget': return 'AI ran out of time for this batch';
+    case 'transport_error': return 'Could not reach the AI service';
+    default: return 'AI could not read some pages';
+  }
+}
+
+function pageNote(page: PageSummary) {
+  switch (page.reason) {
+    case 'blank': return 'This page was blank.';
+    case 'table_of_contents': return 'This page was a table of contents.';
+    case 'prices_on_request': return 'Prices were listed as available on request.';
+    case 'ocr_no_readable_text': return 'The text on this page could not be read.';
+    case 'no_priced_rows': return 'No product prices were found on this page.';
+    default: return page.items ? '' : 'No products were found on this page.';
+  }
+}
+
+function warningLabel(warning: string) {
+  const missingTaxCode = /^(\d+) extracted items have no HSN\/SAC code/i.exec(warning);
+  if (missingTaxCode) {
+    const count = Number(missingTaxCode[1]);
+    return `${count} ${count === 1 ? 'product is' : 'products are'} missing an HSN/SAC code. Add it if available.`;
+  }
+  if (/^No priced SKU rows/i.test(warning)) return 'Check that the selected pages contain a readable price list.';
+  const page = /^Page (\d+):/.exec(warning);
+  return page ? `Page ${page[1]}: The text reader had trouble. Check the page in the PDF.`
+    : 'Check the PDF for products or prices the reader may have missed.';
+}
+
 type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
 type Review = {page_count?: number | null; summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
@@ -259,7 +299,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         setLoaded(true);
       })
       .catch(failure => {
-        if (active) setError(failure instanceof Error ? failure.message : 'Extraction failed. Please retry.');
+        if (active) setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/)[0] : 'Could not read the selected pages. Try again.');
       })
       .finally(() => {if (active) setBusy(false);});
     return () => {active = false;};
@@ -309,7 +349,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           const chunk = Math.floor((start - first) / CHUNK_PAGES) + 1;
           const end = Math.min(first + chunk * CHUNK_PAGES - 1, last);
           remaining = `${start}-${last}`;
-          setBatchStatus(`Extracting pages ${start}–${end} of ${first}–${last} (Chunk ${chunk}/${total})… ${added} drafts added.`);
+          setBatchStatus(`Extracting pages ${start}–${end} of ${first}–${last} (Step ${chunk} of ${total})… ${added} drafts added.`);
           const result = await requestExtraction(baseUrl, path + 'extract/', token, JSON.stringify({
             start_page: start, end_page: end, range_end: last, append: activeAppend,
             ...(activeAppend && replacePending ? {replace_on_items: true} : {}),
@@ -336,7 +376,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       }
       setExtracted(true);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Extraction failed. Please retry.');
+      setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/)[0] : 'Could not read the selected pages. Try again.');
       if (remaining) {
         setBatchStatus(`Saved progress: ${pagesDone} pages processed, ${added} draft items added.`);
         setRange(remaining);
@@ -382,9 +422,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       issues.push('choose a verified brand or create and verify one in the review');
     }
     if (category && chosenBrand && categoryKey(category.category__name) === categoryKey(chosenBrand.name)) {
-      issues.push('select a canonical category for the chosen brand');
+      issues.push('select a catalogue category for the chosen brand');
     }
-    if (redundant.has(row.id)) issues.push('change the duplicate SKU or uncheck this draft');
+    if (redundant.has(row.id)) issues.push('change the duplicate product code or deselect this draft');
     return issues.length ? [{row, message: issues.join('. ')}] : [];
   });
   const publishDisabled = busy || photoUpdates.length > 0 || !approvedCount || blockers.length > 0;
@@ -472,7 +512,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         setBrandResolved(true);
         setBrandChoice('');
       }
-      setPublishFeedback({kind: 'success', message: `${result.items.length} catalogue items published. ${result.discarded} drafts discarded.`});
+      setPublishFeedback({kind: 'success', message: `${result.items.length} catalogue items published. ${result.discarded} drafts removed.`});
       onCommit(result.items.length, result.discarded);
     } catch (failure) {
       const unconfirmed = controller.signal.aborted || (failure instanceof ApiError &&
@@ -480,7 +520,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       const errors = failure instanceof ApiError ? publishRowErrors(failure.fieldErrors?.row_errors) : {};
       errorToFocus.current = Object.keys(errors)[0];
       setRowErrors(errors);
-      const message = Object.keys(errors).length ? 'Review the highlighted drafts and try again.' : failure instanceof Error ? failure.message : 'Could not commit the selected items.';
+      const message = Object.keys(errors).length ? 'Review the highlighted drafts and try again.' : failure instanceof Error ? failure.message : 'Could not publish the selected items.';
       setPublishFeedback({kind: 'error', message: unconfirmed
         ? `${controller.signal.aborted ? 'The publish request timed out.' : message} Reopen the review to check the draft status before retrying.`
         : message});
@@ -496,6 +536,19 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       className={`action-message ${publishFeedback.kind}`}>{publishFeedback.message}</p>;
   }
 
+  const checkedPages = diagnostics?.pages ?? [];
+  const fallbackBadges = [...new Set(checkedPages.flatMap(page => [
+    ...(page.vision_fallback ? [fallbackLabel(page.vision_fallback)] : []),
+    ...(page.reason === 'no_priced_rows' ? [fallbackLabel(page.reason)] : []),
+  ]))];
+  const attentionNotes = [...new Set([
+    ...checkedPages.flatMap(page => {
+      const notes = [pageNote(page), page.vision_fallback ? fallbackLabel(page.vision_fallback) : ''].filter(Boolean);
+      return notes.length ? [`Page ${page.page}: ${notes.join(' · ')}`] : [];
+    }),
+    ...(diagnostics?.warnings ?? []).map(warningLabel),
+  ])];
+
   return <dialog ref={dialog} className="contacts-dialog catalogue-review-dialog" aria-labelledby="pdf-review-title"
     onCancel={event => {event.preventDefault(); if (!busy && !photoUpdates.length) close();}}>
     <header className="dialog-heading">
@@ -506,7 +559,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       <label>Page range <input value={range} aria-label="Page range" required aria-describedby="extraction-range-help" placeholder={`e.g. ${rangeExample}`} disabled={busy}
         onChange={event => setRange(event.target.value)} /></label>{' '}
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
-        Append to existing drafts</label>{' '}
+        <span>Keep existing drafts and add to them <small>Uncheck to replace current drafts</small></span></label>{' '}
       <small id="extraction-range-help" aria-label="Page range limits">
         {totalPages ? `Total: ${totalPages} pages` : 'Total page count unavailable'}
         {' · '}{range.trim() && rangeError ? rangeError : `Enter a page range (e.g. ${rangeExample}) before extracting.`}
@@ -516,7 +569,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         if (!extraction.current) return;
         extraction.current.cancelled = true;
         setCancelPending(true);
-      }}>Cancel after current chunk</button>}
+      }}>Stop after these pages</button>}
     </form>
     {pending.length > 0 && !append && <p>Extracting this batch will replace all pending drafts for this catalogue.</p>}
     {busy && publishFeedback?.kind !== 'pending' && !batchStatus && <p role="status">{loaded ? 'Processing catalogue items…' : 'Loading existing drafts…'}</p>}
@@ -525,9 +578,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {publishBanner('Publish status at top')}
     {error && !loaded && <button disabled={busy} onClick={() => retry(value => value + 1)}>Retry loading drafts</button>}
     {loaded && <dl className="extraction-metrics" aria-label="Catalogue publish summary" aria-live="polite">
-      <div><dt>Pending drafts in this document</dt><dd>{pending.length}</dd></div>
-      <div><dt>Published from this document</dt><dd>{summary?.published_from_document ?? '—'}</dd></div>
-      <div><dt>Published for this brand</dt><dd>{summary?.published_for_brand ?? '—'}</dd></div>
+      <div><dt>Drafts ready for review</dt><dd>{pending.length}</dd></div>
+      <div><dt>Published from this PDF</dt><dd>{summary?.published_from_document ?? '—'}</dd></div>
+      <div><dt>Total published for brand</dt><dd>{summary?.published_for_brand ?? '—'}</dd></div>
     </dl>}
     {batchStatus && <p role="status">{batchStatus}</p>}
     {extracting && pageProgress && <div className="extraction-progress">
@@ -535,43 +588,32 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       <span>{pageProgress.done} / {pageProgress.total} pages</span>
     </div>}
     {diagnostics?.status && <section className="extraction-diagnostics" aria-label="Extraction diagnostics" aria-live="polite">
-      {diagnostics.pages?.some(page => page.mode === 'ai_vision') && <span className="cell-meta">AI Vision</span>}
-      {diagnostics.pages?.some(page => page.mode !== 'ai_vision') && <span className="cell-meta">Rule-based fallback</span>}
-      {[...new Set(diagnostics.pages?.flatMap(page => page.vision_fallback ? [page.vision_fallback] : []))].map(reason =>
-        <span key={reason} className="cell-meta" role="status">Vision fallback · {reason.replaceAll('_', ' ')}</span>)}
+      <div className="extraction-badges">
+        {checkedPages.some(page => page.mode === 'ai_vision') && <span className="extraction-badge">Extracted with AI Vision</span>}
+        {checkedPages.some(page => page.mode !== 'ai_vision') && <span className="extraction-badge">Backup text reader used</span>}
+        {fallbackBadges.map(label => <span className="extraction-badge warning" key={label}>{label}</span>)}
+      </div>
       {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
       {diagnostics.pages_scanned !== undefined && <dl className="extraction-metrics">
-        <div><dt>Pages examined</dt><dd>{diagnostics.pages_scanned}</dd></div>
-        {diagnostics.caption_skus_found !== undefined && <div><dt>Gallery SKUs matched</dt><dd>{diagnostics.caption_skus_found}</dd></div>}
-        {diagnostics.cropped_thumbnails_attached !== undefined && <div><dt>Gallery thumbnails attached</dt><dd>{diagnostics.cropped_thumbnails_attached}</dd></div>}
-        <div><dt>OCR pages</dt><dd>{diagnostics.ocr_pages ?? 0}</dd></div>
-        <div><dt>Product sections</dt><dd>{diagnostics.product_sections ?? 0}</dd></div>
-        <div><dt>Items extracted</dt><dd>{diagnostics.items_extracted ?? 0}</dd></div>
-        <div><dt>Skipped pages</dt><dd>{diagnostics.skipped_pages?.length ?? 0}</dd></div>
-        <div><dt>Matrix items</dt><dd>{diagnostics.matrix_items ?? 0}</dd></div>
-        <div><dt>Wrapped items</dt><dd>{diagnostics.wrapped_items ?? 0}</dd></div>
+        <div><dt>Pages checked</dt><dd>{diagnostics.pages_scanned}</dd></div>
+        <div><dt>Products found</dt><dd>{diagnostics.items_extracted ?? 0}</dd></div>
+        <div><dt>Photos cropped</dt><dd>{checkedPages.length
+          ? checkedPages.reduce((count, page) => count + page.thumbnails, 0)
+          : diagnostics.cropped_thumbnails_attached ?? 0}</dd></div>
+        <div><dt>Pages without products</dt><dd>{checkedPages.length
+          ? checkedPages.filter(page => !page.items).length : diagnostics.skipped_pages?.length ?? 0}</dd></div>
       </dl>}
-      {!!diagnostics.pages?.length && <details open={diagnostics.items_extracted === 0 ? true : undefined}>
-        <summary>Page diagnostics</summary>
-        <ul>{diagnostics.pages.map(page => <li key={page.page}>
-          Page {page.page} · {page.items} items · {page.thumbnails} thumbnails · {page.matrix_items} matrix items
-          {page.ocr && ` · OCR attempted with ${page.ocr === 'rapidocr' ? 'RapidOCR' : 'Tesseract'}`}
-          {page.reason && ` · ${page.reason.replaceAll('_', ' ')}`}
-          {page.vision_provider && ` · ${page.vision_provider} ${page.mode === 'ai_vision' ? 'Vision' : 'fallback'}`}
-          {page.vision_fallback && ` · ${page.vision_fallback.replaceAll('_', ' ')}`}
-          {page.input_tokens !== undefined && ` · ${page.input_tokens} input tokens`}
-          {page.output_tokens !== undefined && ` · ${page.output_tokens} output tokens`}
-          {page.ocr_note && ` · ${page.ocr_note}`}
-          {page.message && <p>{page.message}</p>}
-        </li>)}</ul>
+      {!!checkedPages.length && <details open={diagnostics.items_extracted === 0 ? true : undefined}>
+        <summary>Page-by-page summary</summary>
+        <ul>{checkedPages.map(page => <li key={page.page}>{`Page ${page.page} — ${page.items} ${page.items === 1 ? 'product' : 'products'} found · ${page.thumbnails} ${page.thumbnails === 1 ? 'photo' : 'photos'} cropped · ${page.mode === 'ai_vision' ? 'Extracted by AI Vision' : 'Read by the backup text reader'}`}</li>)}</ul>
       </details>}
-      {!!diagnostics.warnings?.length && <details>
-        <summary>{diagnostics.warnings.length} extraction {diagnostics.warnings.length === 1 ? 'warning' : 'warnings'}</summary>
-        <ul>{diagnostics.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      {!!attentionNotes.length && <details>
+        <summary>Pages that need attention</summary>
+        <ul>{attentionNotes.map(note => <li key={note}>{note}</li>)}</ul>
       </details>}
     </section>}
-    {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No supported pricing rows were found in this batch.</p>}
-    {!!pending.length && !categories.length && <p>No active canonical categories are available. Add a catalogue category before publishing.</p>}
+    {extracted && !busy && !error && !diagnostics?.status && !rows.length && <p>No products with prices were found on the selected pages.</p>}
+    {!!pending.length && !categories.length && <p>No catalogue categories are available. Add a catalogue category before publishing.</p>}
     {loaded && (!!availableBrands.length || !brandResolved) && <label>
       Brand
       <select aria-label="Brand for catalogue PDF" value={brandChoice} disabled={busy} onChange={event => {
@@ -593,13 +635,13 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {brandFeedback && <p role="alert">{brandFeedback}</p>}
     {!!rows.length && <form aria-label="Publish catalogue items" noValidate onSubmit={commit}>
       <div className="onboarding-table"><table className="catalogue-review-table">
-        <caption>Approve the rows to publish. Unchecked drafts will be discarded when you commit.</caption>
+        <caption>Select the products you want to publish. Unselected drafts will be removed when you publish.</caption>
         <colgroup>{['approve', 'page', 'image', 'name', 'code', 'hsn', 'price', 'category'].map(column =>
           <col key={column} className={'catalogue-review-col-' + column} />)}</colgroup>
         <thead><tr><th scope="col">Approve<br />
           <input type="checkbox" aria-label="Select all eligible rows" checked={allSelected}
             disabled={busy || !eligibleCount}
-            title={!eligibleCount && pending.length ? 'Every pending draft has a SKU already in the catalogue.' : undefined}
+            title={!eligibleCount && pending.length ? 'All draft product codes are already in the catalogue.' : undefined}
             ref={input => {if (input) input.indeterminate = partiallySelected;}} onChange={toggleAll} />
         </th>{['Page', 'Image', 'Name', 'Code', 'HSN / SAC', 'Unit price (₹)', 'Category'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
         <tbody>{rows.map(row => {
@@ -613,7 +655,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
             aria-label={`Draft ${row.id}`} className={rowErrors[row.id] ? 'catalogue-review-row-error' : undefined}>
             <td>{row.status === 'DRAFT' ? <input type="checkbox" aria-label={'Approve ' + row.product_code}
               checked={row.approved && !alreadyExists} disabled={!editable || alreadyExists}
-              title={alreadyExists ? 'This SKU is already in the catalogue. Change the code to approve this draft.' : undefined} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status}</span>}</td>
+              title={alreadyExists ? 'This product code is already in the catalogue. Change it to select this draft.' : undefined} onChange={event => update(row.id, {approved: event.target.checked})} /> : <span className="status-pill" data-status={row.status}>{row.status === 'APPROVED' ? 'Published' : 'Removed'}</span>}</td>
             <td>{row.page}</td>
             <td><div className="catalogue-review-photo">
               {previewPath && <Thumbnail key={previewPath} baseUrl={baseUrl} token={token} path={previewPath} />}
@@ -674,9 +716,9 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           </tr>;
         })}</tbody>
       </table></div>
-      {!!pending.length && <p>Existing catalogue codes are skipped. Change the code to publish as a new item. Unselected drafts are discarded on publish.</p>}
+      {!!pending.length && <p>A product with an existing code can only be published under a new code.</p>}
       {!!pending.length && <div className="catalogue-review-selection">
-        <span aria-live="polite">{approvedCount} of {selectableCount} items selected for approval</span>
+        <span aria-live="polite">{approvedCount} of {selectableCount} products selected to publish</span>
         <button type="button" className="button button-quiet" disabled={busy || !eligibleCount} onClick={toggleAll}>
           {allSelected ? 'Clear selection' : `Select all (${selectableCount})`}
         </button>
@@ -687,12 +729,12 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         {approvedCount > 0 && publishDisabled && <div role="status" aria-label="Why publishing is blocked">
           {busy && <p>Wait for the current review operation to finish.</p>}
           <ul>{blockers.map(({row, message}) => <li key={row.id}>
-            Page {row.page ?? '—'}, draft {row.id} ({row.product_code.trim() || 'no SKU'}) · {message}.
+            Page {row.page ?? '—'}, draft {row.id} ({row.product_code.trim() || 'no product code'}) · {message}.
           </li>)}
           {photoUpdates.map(row => <li key={`photo-${row.id}`}>Draft {row.id} ({row.product_code}) · photo update in progress.</li>)}</ul>
         </div>}
         <button type="submit" className="btn-primary" disabled={publishDisabled}>
-          {publishFeedback?.kind === 'pending' ? 'Committing & Publishing…' : `Commit & Publish (${approvedCount})`}
+          {publishFeedback?.kind === 'pending' ? 'Publishing selected items…' : `Publish selected items (${approvedCount})`}
         </button>
       </div>}
       {publishBanner('Publish status by actions')}

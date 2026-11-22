@@ -326,3 +326,10 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .catalogue-review-table .catalogue-review-row-error > td { background: #fff1f2; }
 .catalogue-review-table .catalogue-review-row-error:focus { outline: 2px solid #be123c; outline-offset: -2px; }
 .catalogue-review-code-badge { margin-top: 4px; max-width: 100%; white-space: normal; }
+
+.extraction-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.extraction-badges:empty { display: none; }
+.extraction-badge { padding: 4px 10px; border-radius: 999px; background: var(--mint); color: var(--forest); font-size: 12px; font-weight: 600; }
+.extraction-badge.warning { background: #fffbeb; color: #854d0e; }
+.extraction-diagnostics details + details { margin-top: 8px; }
+.extraction-toolbar label small { display: block; color: var(--muted); }
