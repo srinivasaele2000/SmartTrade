@@ -41,6 +41,7 @@ class Product(models.Model):
     currency = models.CharField(max_length=3, blank=True)
     state = models.CharField(max_length=10, choices=[(s, s) for s in ('DRAFT', 'PUBLISHED', 'ARCHIVED')], default='DRAFT')
     moderation_state = models.CharField(max_length=9, choices=[(s, s) for s in ('VISIBLE', 'HIDDEN', 'SUSPENDED')], default='VISIBLE')
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

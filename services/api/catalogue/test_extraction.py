@@ -98,6 +98,31 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_admin_items_order_by_creation_and_paginate_filtered_results(self):
+        from datetime import timedelta
+        from django.utils.timezone import now
+
+        items = Product.objects.bulk_create([
+            Product(brand_category=self.association, code=f'VAHANI-{index:02}', name='VAHANI fitting',
+                    unit='Unit', catalogue_price='39', currency='INR', state='PUBLISHED')
+            for index in range(53)
+        ])
+        timestamp = now()
+        Product.objects.filter(pk__in=[item.pk for item in items]).update(created_at=timestamp)
+        Product.objects.filter(pk=items[0].pk).update(created_at=timestamp + timedelta(seconds=1))
+        expected = [items[0].pk, *reversed([item.pk for item in items[1:]])]
+        path = '/api/v1/catalogue/items/'
+        query = {'ordering': 'newest', 'search': ' vahani '}
+        first = self.client.get(path, query).data
+        self.assertEqual(first['count'], 53)
+        self.assertEqual([row['id'] for row in first['results']], expected[:50])
+        self.assertIsNotNone(first['next'])
+        second = self.client.get(path, {**query, 'page': 2}).data
+        self.assertEqual([row['id'] for row in second['results']], expected[50:])
+        self.assertIsNone(second['next'])
+        smaller = self.client.get(path, {**query, 'page_size': 25, 'page': 2}).data
+        self.assertEqual([row['id'] for row in smaller['results']], expected[25:50])
+
     def test_dense_vision_page_keeps_valid_rows_and_counts_skipped_rows(self):
         from catalogue.services.ai_vision_extractor import parse_items
 

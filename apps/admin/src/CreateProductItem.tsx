@@ -7,9 +7,10 @@ type Item = {id: number; name: string; product_code: string; hsn_sac_code: strin
   brand_id: number; brand_category: number; category_name: string; image_url: string | null};
 type Option = {id: number; brand_id: number; brand__name: string; category__name: string};
 const path = '/catalogue/items/';
+const pageSize = 50;
 
 export function itemFilters(search: string) {
-  const filters = new URLSearchParams({page_size: '25'});
+  const filters = new URLSearchParams({page_size: String(pageSize), ordering: 'newest'});
   const query = search.trim().replace(/\s+/g, ' ');
   if (query) filters.set('search', query);
   return filters.toString();
@@ -54,6 +55,7 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
       await requestApi<Item>(baseUrl, path, token, {method: 'POST', body: data});
       form.reset();
       setNotice('Catalogue item created.');
+      page.setNumber(1);
       page.reload();
       total.reload();
     } catch (failure) {setError(failure instanceof Error ? failure.message : 'Could not create the catalogue item.');}
@@ -101,6 +103,10 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
   const results = page.data?.results;
   const count = page.data?.count;
   const totalCount = total.data?.count;
+  const pageCount = Math.ceil((count ?? 0) / pageSize);
+  const pageOffset = (page.number - 1) * pageSize;
+  const visiblePages = [...new Set([1, page.number - 1, page.number, page.number + 1, pageCount])]
+    .filter(number => number >= 1 && number <= pageCount).sort((first, second) => first - second);
 
   return <section className="detail-card catalogue-items" aria-labelledby="catalogue-items-title">
     <details className="catalogue-item-create">
@@ -159,8 +165,16 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
           </div></td>
         </tr>)}</tbody>
       </table></div>}
-    {page.data && (page.data.previous || page.data.next) && <nav className="catalogue-items-pagination" aria-label="Item pages">
+    {page.data && <nav className="catalogue-items-pagination" aria-label="Item pages">
+      <span className="catalogue-items-range" role="status">{count
+        ? `Showing ${pageOffset + 1}–${pageOffset + page.data.results.length} of ${count} items`
+        : 'Showing 0 items'}</span>
       <button disabled={!page.data.previous} onClick={() => page.setNumber(page.number - 1)}>Previous</button>
+      {visiblePages.map((number, index) => <span key={number}>
+        {index > 0 && number - visiblePages[index - 1] > 1 && <span aria-hidden="true"> … </span>}
+        <button aria-label={`Page ${number}`} aria-current={page.number === number ? 'page' : undefined}
+          onClick={() => page.setNumber(number)}>{number}</button>
+      </span>)}
       <button disabled={!page.data.next} onClick={() => page.setNumber(page.number + 1)}>Next</button>
     </nav>}
     {action && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="catalogue-item-action-title"

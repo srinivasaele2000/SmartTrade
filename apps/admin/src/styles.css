@@ -260,7 +260,7 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .catalogue-items-search button { flex: none; min-height: 24px; padding: 0 5px; border: 0; background: transparent; cursor: pointer; font-size: 19px; color: var(--secondary); }
 .catalogue-search-icon { position: relative; flex: none; width: 11px; height: 11px; border: 1.5px solid #526759; border-radius: 50%; }
 .catalogue-search-icon::after { position: absolute; content: ''; width: 5px; height: 1.5px; background: #526759; transform: rotate(45deg); left: 7px; top: 8px; }
-.catalogue-items-scroll { overflow: auto; max-height: min(75vh, 780px); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.catalogue-items-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .catalogue-items-table { width: 100%; min-width: 860px; table-layout: fixed; border-spacing: 0; text-align: left; }
 .catalogue-items-col-image { width: 44px; }
 .catalogue-items-col-code { width: 90px; }
@@ -281,7 +281,9 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .catalogue-items-table :is(th, td):nth-child(5), .catalogue-items-table :is(th, td):last-child { text-align: right; font-weight: 600; }
 .catalogue-items-actions { display: inline-flex; flex-direction: row; gap: 6px; white-space: nowrap; }
 .catalogue-items-actions .button { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
-.catalogue-items-pagination { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.catalogue-items-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.catalogue-items-range { margin-inline-end: auto; }
+.catalogue-items-pagination button[aria-current="page"] { background: var(--brand); color: white; }
 .catalogue-review-dialog { width: min(90rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); }
 .extraction-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--canvas); }
 .extraction-toolbar label:has(input[type=checkbox]) { display: flex; align-items: center; min-height: 38px; gap: 6px; }

@@ -161,7 +161,10 @@ class CatalogueItems(APIView):
         sub_category = request.query_params.get('sub_category', '').strip().lower()
         if sub_category:
             query = query.filter(sub_category_key=sub_category)
-        query = search_products(query, request.query_params.get('search', ''), ranked=True)
+        newest = request.query_params.get('ordering') == 'newest'
+        query = search_products(query, request.query_params.get('search', ''), ranked=not newest)
+        if newest:
+            query = query.order_by('-created_at', '-pk')
         if request.query_params.get('facets') == 'sub_categories':
             groups = list(query.order_by().values('sub_category_key').annotate(
                 count=Count('pk'),
@@ -174,6 +177,8 @@ class CatalogueItems(APIView):
                 ],
             })
         paginator = Pages()
+        if newest:
+            paginator.page_size = 50
         items = paginator.paginate_queryset(query, request)
         return paginator.get_paginated_response(ItemOutput(items, many=True, context={'request': request}).data)
 
