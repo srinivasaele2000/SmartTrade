@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev tesseract-ocr poppler-utils libgl1 libglib2.0-0 \
+    libpq-dev tesseract-ocr tesseract-ocr-eng poppler-utils libgl1 libglib2.0-0 \
     libjpeg62-turbo zlib1g libwebp7 libgomp1 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 

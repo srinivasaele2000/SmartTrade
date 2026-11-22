@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import csv
 from io import BytesIO, StringIO
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,16 @@ import sys
 RAPID_OCR_SECONDS = 32
 OCR_PAGE_SECONDS = 44
 MAX_RENDER_SIDE = 2200
+MIN_NATIVE_TEXT = 30
+GLYPH_GARBAGE = re.compile(r'\(cid\s*:\s*[^)]+\)|[\uFFFD\uE000-\uF8FF]', re.I)
+
+
+def native_text_quality(text):
+    readable = GLYPH_GARBAGE.sub(' ', text)
+    count = sum(character.isalnum() for character in readable)
+    garbage = sum(len(match[0]) for match in GLYPH_GARBAGE.finditer(text))
+    return readable, count, garbage > 0 and garbage >= count
+
 
 
 @dataclass(frozen=True)
@@ -81,7 +92,7 @@ def read_page_tesseract(page, timeout):
     if image is None:
         return [], ''
     try:
-        result = subprocess.run([executable, 'stdin', 'stdout', '--psm', '6', 'tsv'],
+        result = subprocess.run([executable, 'stdin', 'stdout', '-l', 'eng', '--psm', '6', 'tsv'],
                                 input=image, capture_output=True,
                                 timeout=min(timeout, 25), check=True)
     except subprocess.TimeoutExpired:

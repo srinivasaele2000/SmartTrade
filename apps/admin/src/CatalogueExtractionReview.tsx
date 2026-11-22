@@ -15,7 +15,7 @@ type Row = Draft & {approved: boolean; association: string};
 type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
   items_extracted?: number; matrix_items?: number; wrapped_items?: number;
   pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
-    ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string}[];
+    ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string; message?: string}[];
   skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
@@ -527,13 +527,14 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         <div><dt>Matrix items</dt><dd>{diagnostics.matrix_items ?? 0}</dd></div>
         <div><dt>Wrapped items</dt><dd>{diagnostics.wrapped_items ?? 0}</dd></div>
       </dl>}
-      {!!diagnostics.pages?.length && <details>
+      {!!diagnostics.pages?.length && <details open={diagnostics.items_extracted === 0 ? true : undefined}>
         <summary>Page diagnostics</summary>
         <ul>{diagnostics.pages.map(page => <li key={page.page}>
           Page {page.page} · {page.items} items · {page.thumbnails} thumbnails · {page.matrix_items} matrix items
           {page.ocr && ` · OCR attempted with ${page.ocr === 'rapidocr' ? 'RapidOCR' : 'Tesseract'}`}
           {page.reason && ` · ${page.reason.replaceAll('_', ' ')}`}
           {page.ocr_note && ` · ${page.ocr_note}`}
+          {page.message && <p>{page.message}</p>}
         </li>)}</ul>
       </details>}
       {!!diagnostics.warnings?.length && <details>

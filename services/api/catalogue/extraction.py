@@ -194,7 +194,11 @@ class StaffExtraction(APIView):
             return Response({'detail': 'The source PDF file is missing.'}, status=404)
         except CataloguePDFError as error:
             self.record_failure(document, diagnostics, str(error))
-            raise serializers.ValidationError({'file': str(error)}) from error
+            details = {'file': str(error)}
+            messages = [page['message'] for page in diagnostics.get('pages', []) if page.get('message')]
+            if messages:
+                details['pages'] = messages[:8]
+            raise serializers.ValidationError(details) from error
 
         if progressive and adjacent and previous.get('range_end') == batch.get('range_end'):
             for key in ('pages', 'skipped_pages', 'warnings'):

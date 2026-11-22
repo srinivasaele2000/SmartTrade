@@ -318,6 +318,17 @@ test('canonical options preselect an inferred category and publish its canonical
   assert.equal(payload.rows[0].category_id, 41);
 });
 
+test('a zero-item extraction displays its page diagnostic in an open panel', async () => {
+  const message = 'Page 2: 412 readable characters, 0 price/code pairs matched. Sample text: Switches';
+  const get = review(undefined, async () => ({rows: [], categories: [], diagnostics: {
+    status: 'no_items', items_extracted: 0,
+    pages: [{page: 2, items: 0, thumbnails: 0, matrix_items: 0, ocr: null, reason: 'no_priced_rows', message}],
+  }}));
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  assert.equal(get(message).children, message);
+  assert.match(JSON.stringify(get('Extraction diagnostics').children), /"open":true/);
+});
+
 test('category fallback follows all pages when a review has drafts but no options', async () => {
   const row = {id: 31, category: 'Second category', product_code: 'PIPE2', status: 'DRAFT', image_url: null};
   const calls = [];

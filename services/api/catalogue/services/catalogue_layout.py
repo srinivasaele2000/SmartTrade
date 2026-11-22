@@ -57,8 +57,8 @@ def code_value(value):
 ALIASES = {
     'name': ('name', 'item name', 'product', 'product name', 'description', 'product description', 'particulars', 'item description'),
     'code': ('code', 'item code', 'catalogue no', 'catalog no', 'cat no', 'cat number', 'cat no item code', 'item code cat no', 'product code', 'part no',
-             'part number', 'item no', 'sku', 'ref no', 'model', 'material code'),
-    'price': ('mrp', 'mrp rs', 'price', 'rate', 'unit price', 'list price', 'price per unit', 'mrp inr', 'lp', 'lp rs', 'rate rs', 'mrp per unit'),
+             'part number', 'item no', 'sku', 'ref no', 'model', 'material code', 'model no', 'model number', 'ref number', 'part code'),
+    'price': ('mrp', 'mrp rs', 'price', 'rate', 'unit price', 'list price', 'price per unit', 'mrp inr', 'lp', 'lp rs', 'rate rs', 'mrp per unit', 'mrp unit', 'list price rs', 'list price inr'),
     'hsn': ('hsn', 'hsn code', 'hsn sac', 'hsn sac code', 'sac'),
     'size_cm': ('size cm', 'size in cm', 'cm'),
     'size_inch': ('size inch', 'size in inch', 'size inches', 'inches', 'inch'),
@@ -406,6 +406,93 @@ def layout_rows(boxes, width, parse_price, *, context=None):
         for header in headers for column in header
     ) or any(HSN.search(line_text(line)) for line in lines)
     return rows, len({(row.bounds[0], row.section) for row in rows}), advanced
+
+
+CARD_PRICE = re.compile(
+    r'(?P<price>(?:(?:MRP(?:\s*/\s*unit)?|list\s+price|LP|rate|price)\s*[:.=]?\s*'
+    r'(?:₹|Rs\.?|INR)?\s*|(?:₹|Rs\.?|INR)\s*)\d[\d,]*(?:\.\d+)?(?:\s*/\s*-)?'
+    r'|\d[\d,]*(?:\.\d+)?\s*/\s*-)\s*$', re.I,
+)
+CARD_CODE = re.compile(
+    r'\b(?:cat(?:alogue)?\.?\s*(?:no\.?|number)|(?:item|part|product|model)\s*(?:code|no\.?|number)'
+    r'|ref\.?\s*no\.?|SKU|code)\s*[:.#-]?\s*(?P<sku>[A-Za-z0-9][A-Za-z0-9./_-]*)\s*$', re.I,
+)
+
+
+def brochure_rows(boxes, width, parse_price, photo_bounds):
+    """Read repeated, independently priced product cards without crossing columns."""
+    segments = []
+    for line in lines_of(boxes):
+        chunk = []
+        for box in line:
+            if chunk and box.x0 - chunk[-1].x1 > max(20, 2 * (box.bottom - box.top)):
+                segments.append(chunk)
+                chunk = []
+            chunk.append(box)
+        if chunk:
+            segments.append(chunk)
+
+    prices = []
+    for line in segments:
+        if match := CARD_PRICE.search(line_text(line)):
+            amount = parse_price(match['price'])
+            if amount is not None:
+                prices.append((line, amount, match.start()))
+    if len(prices) < 2:
+        return []
+
+    def centers(positions):
+        columns = []
+        for position in sorted(positions):
+            if not columns or position - columns[-1][0] > width * .08:
+                columns.append([])
+            columns[-1].append(position)
+        return [sum(column) / len(column) for column in columns]
+
+    price_centers = centers(line[0].x0 for line, _, _ in prices)
+    image_centers = centers((left + right) / 2 for left, _, right, _ in photo_bounds)
+    anchors = image_centers if 2 <= len(image_centers) == len(price_centers) <= 4 else price_centers
+    if not 2 <= len(anchors) <= 4:
+        return []
+    if anchors == price_centers:
+        # Printed prices are often left-aligned with the captions.
+        padding = min(width * .05, anchors[0])
+        boundaries = [0, *(anchor - padding for anchor in anchors[1:]), width]
+    else:
+        boundaries = [0, *((left + right) / 2 for left, right in zip(anchors, anchors[1:])), width]
+    rows = []
+    for left, right in zip(boundaries, boundaries[1:]):
+        band = [line for line in segments if left <= line[0].x0 < right and line[-1].x1 <= right + 2]
+        previous_bottom = 0
+        for line, amount, price_start in sorted(prices, key=lambda entry: entry[0][0].center):
+            if line not in band:
+                continue
+            bottom = max(box.bottom for box in line)
+            top = max(previous_bottom, bottom - 180)
+            previous_bottom = bottom
+            nearby = [line_text(part) for part in band if top < part[0].center < line[0].center]
+            if price_start:
+                nearby.append(line_text(line)[:price_start].rstrip(' |:–-'))
+            identified = []
+            for index, text in enumerate(nearby):
+                match = CARD_CODE.search(text)
+                raw = code_value(match['sku'] if match else text)
+                if not SKU.fullmatch(raw) or DIMENSION.fullmatch(raw):
+                    continue
+                if match or (len(raw) >= 4 and any(character.isalpha() for character in raw)):
+                    identified.append((index, raw, text[:match.start()].strip(' |:–-') if match else ''))
+            if len(identified) != 1:
+                continue
+            code_index, code, prefix = identified[0]
+            nearby[code_index] = prefix
+            name = ' '.join(text for text in nearby[-6:] if text and not NOISE.match(text)
+                            and not HSN.match(text) and any(character.isalpha() for character in text))
+            if not name or not any(character.isalpha() for character in name):
+                continue
+            rows.append(LayoutRow({'name': name}, code, amount, '', '', '', '',
+                                  (left, top, right, bottom), len(rows)))
+    # A single incidental match is not evidence of a repeating card layout.
+    return rows if len(rows) >= 2 else []
 
 
 def skip_reason(boxes):

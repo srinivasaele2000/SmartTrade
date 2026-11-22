@@ -16,17 +16,20 @@ from pdfplumber.utils.exceptions import PdfminerException
 from pdfminer.pdftypes import PDFException
 from PIL import Image
 
-from .catalogue_layout import DIMENSION, FACT_COLUMNS, NOISE, SKU, code_value, layout_rows, native_boxes, skip_reason
-from .catalogue_ocr import OCR_PAGE_SECONDS, RAPID_OCR_SECONDS, OCRPageTimeout, TextBox, read_page, read_page_tesseract
+from .catalogue_layout import DIMENSION, FACT_COLUMNS, NOISE, SKU, brochure_rows, code_value, layout_rows, native_boxes, skip_reason
+from .catalogue_ocr import (
+    MIN_NATIVE_TEXT, OCR_PAGE_SECONDS, RAPID_OCR_SECONDS, OCRPageTimeout, TextBox,
+    native_text_quality, read_page, read_page_tesseract,
+)
 from .scanned_thumbnails import caption_key, crop_photo, crop_photos, matching_caption
 
 
 HEADERS = {
     'name': {'item', 'name', 'item name', 'product', 'product name', 'description', 'product description'},
-    'product_code': {'code', 'item code', 'product code', 'sku', 'cat no', 'catalogue no', 'catalogue number', 'ref no', 'reference', 'model'},
+    'product_code': {'code', 'item code', 'product code', 'sku', 'cat no', 'catalogue no', 'catalogue number', 'ref no', 'reference', 'model', 'model no', 'model number', 'part no', 'part number', 'ref number'},
     'hsn_sac_code': {'hsn', 'sac', 'hsn code', 'hsn sac', 'hsn sac code'},
     'price_per_unit': {'price', 'unit price', 'price per unit', 'list price', 'mrp', 'rate', 'mrp rs',
-                       'list price rs', 'unit price rs', 'unit sale price rs per number'},
+                       'list price rs', 'unit price rs', 'lp', 'lp rs', 'mrp unit', 'mrp per unit', 'unit sale price rs per number'},
     'category': {'category', 'sub category', 'segment', 'sub business'},
     'rating': {'rating', 'ampere', 'amperes', 'amp rating', 'current rating'},
     'module': {'module', 'modules', 'module size', 'no of modules'},
@@ -51,7 +54,6 @@ CATEGORY_PREFIX_REGEX = re.compile(
 MAX_CATALOGUE_PDF_PAGES = 250
 MAX_ROWS = 500
 EXTRACTION_BUDGET_SECONDS = 140
-MIN_NATIVE_TEXT = 20
 
 
 class CataloguePDFError(ValueError):
@@ -144,7 +146,7 @@ def thumbnail(document, page, image):
 
 
 def price(value):
-    cleaned = re.sub(r'^(?:(?:MRP|LP)\b[\s.:]*|₹\s*|INR\s*|Rs\.?\s*)+', '', value.strip(), flags=re.I)
+    cleaned = re.sub(r'^(?:(?:MRP(?:\s*/\s*unit)?|list\s+price|rate|price|LP)\b[\s.:]*|₹\s*|INR\s*|Rs\.?\s*)+', '', value.strip(), flags=re.I)
     cleaned = re.sub(r'\s*/\s*-\s*$', '', cleaned).strip()
     if not re.fullmatch(r'(?:\d+|\d{1,3}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+)(?:\.\d{1,4})?', cleaned):
         return None
@@ -247,6 +249,22 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
         candidates.append(Candidate(page_number, name, row.code, row.hsn, row.amount,
                                     (row.category or banner)[:120], photo, row.pack,
                                     row.series, facts, row.matrix, row.wrapped))
+    return candidates
+
+
+def brochure_candidates(document, page, boxes, images, page_number, family_hint):
+    rows = brochure_rows(boxes, page.rect.width, price, [image['bbox'] for image in images])
+    candidates = []
+    for row in rows:
+        name, category = row_name(row.cells, '', family_hint)
+        if not name:
+            continue
+        photo = thumbnail(document, page, matching_image(row.bounds, images))
+        if photo is None:
+            photo = crop_photo(page, row.bounds, boxes)
+        name = ' '.join(name.split())
+        candidates.append(Candidate(page_number, name, row.code, '', row.amount, category, photo,
+                                    specifications=product_specifications(name, row.cells)))
     return candidates
 
 
@@ -397,6 +415,8 @@ def extract_ocr_page(document, page, page_number, family_hint, images, deadline,
                 stats['pages'][-1]['ocr_note'] = warning
                 stats['warnings'].append(f'Page {page_number}: {warning}')
             has_text |= bool(boxes)
+        if boxes:
+            stats['pages'][-1]['ocr_sample'] = [' '.join(box.text.split())[:96] for box in boxes[:4]]
         if reason := skip_reason(boxes):
             stats['skipped_pages'].append({'page': page_number, 'reason': reason})
             return [], has_text
@@ -408,6 +428,8 @@ def extract_ocr_page(document, page, page_number, family_hint, images, deadline,
             candidates = ocr_rows(document, page, boxes, page_number, family_hint, images=images)
             if not candidates and rows:
                 candidates = layout_candidates(document, page, rows, boxes, images, page_number, family_hint)
+        if not candidates:
+            candidates = brochure_candidates(document, page, boxes, images, page_number, family_hint)
         if candidates:
             context.update(attempt_context)
             stats['product_sections'] += sections or 1
@@ -440,6 +462,25 @@ def finish_page(result, start, stats, context):
                 thumbnails=sum(bool(item.image) for item in unique.values()))
     if stats['skipped_pages'] and stats['skipped_pages'][-1]['page'] == page['page']:
         page['reason'] = stats['skipped_pages'][-1]['reason']
+    sample = page.pop('native_sample', [])
+    ocr_sample = page.pop('ocr_sample', [])
+    if not unique:
+        reason = page.get('reason', '')
+        if reason == 'table_of_contents':
+            explanation = 'Skipped table of contents.'
+        elif reason == 'prices_on_request':
+            explanation = 'Skipped items marked price on request.'
+        elif page['ocr']:
+            explanation = 'OCR found no rows with a product description, code and price.'
+        elif reason == 'blank':
+            explanation = 'Page is blank.'
+        else:
+            explanation = f"{page['native_chars']} readable characters, 0 price/code pairs matched."
+        excerpts = ocr_sample or sample
+        page['message'] = f"Page {page['page']}: {explanation}"
+        if excerpts:
+            page['message'] += ' Sample text: ' + ' | '.join(excerpts)
+
     stats['matrix_items'] += page['matrix_items']
     stats['wrapped_items'] += page['wrapped_items']
     stats['items_extracted'] = len(result)
@@ -488,16 +529,22 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
             stats['pages'].append({'page': page_number, 'ocr': None})
             stats['pages_scanned'] += 1
             native_text = raster_page.get_text()
-            has_text |= any(character.isalnum() for character in native_text)
+            readable, count, glyph_garbage = native_text_quality(native_text)
+            has_text |= bool(count and not glyph_garbage)
+            stats['pages'][-1].update(
+                native_chars=count,
+                native_sample=[' '.join(line.split())[:96] for line in readable.splitlines() if line.strip()][:4],
+            )
             boxes = native_boxes(raster_page)
-            if reason := skip_reason(boxes):
+            if not glyph_garbage and (reason := skip_reason(boxes)):
                 stats['skipped_pages'].append({'page': page_number, 'reason': reason})
                 finish_page(result, page_start, stats, context)
                 page.close()
                 continue
             images = product_images(raster_page, repeated)
-            if sum(character.isalnum() for character in native_text) < MIN_NATIVE_TEXT and any(
-                    kind != 'fill-text' for kind, _ in raster_page.get_bboxlog()):
+            if glyph_garbage or (count < MIN_NATIVE_TEXT and any(
+                    kind in {'fill-image', 'fill-path', 'stroke-path', 'fill-shade'}
+                    for kind, _ in raster_page.get_bboxlog())):
                 used_ocr = True
                 candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats, context)
                 has_text |= ocr_text
@@ -580,6 +627,10 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
             if len(result) == page_start and rows:
                 result.extend(layout_candidates(document, raster_page, rows, boxes, images, page_number, family_hint))
                 stats['product_sections'] += sections
+            if len(result) == page_start:
+                cards = brochure_candidates(document, raster_page, boxes, images, page_number, family_hint)
+                result.extend(cards)
+                stats['product_sections'] += bool(cards)
             if len(result) == page_start and has_outlined_or_scanned_content(raster_page):
                 used_ocr = True
                 candidates, ocr_text = extract_ocr_page(document, raster_page, page_number, family_hint, images, deadline, stats, context)

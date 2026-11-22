@@ -1036,3 +1036,72 @@ class CatalogueExtractionTests(TestCase):
         self.assertEqual(self.document.resolved_brand.name, 'Unlisted Pipeworks')
         self.assertEqual(Product.objects.get(code=draft.product_code).brand_category.brand_id,
                          self.document.resolved_brand_id)
+
+    def test_visual_brochure_keeps_product_columns_and_photos_separate(self):
+        stream = BytesIO()
+        pdf = canvas.Canvas(stream, pagesize=(600, 800))
+        for row, y in enumerate((580, 340)):
+            for column, (x, color) in enumerate(((55, 'red'), (345, 'blue'))):
+                pdf.drawImage(ImageReader(Image.new('RGB', (40, 40), color)), x + 20, y + 45, 80, 80)
+                pdf.drawString(x, y + 35, ('6A 1 Way Switch 1M', '16A Socket 2M')[column])
+                pdf.drawString(x, y + 18, f'Cat. No. ES-{row}{column}')
+                pdf.drawString(x, y, (f'Rs {125 + row}', f'{225 + row}/-')[column])
+        pdf.save()
+        stats = {}
+        rows = extract_items(stream.getvalue(), family_hint='E SQUARE', diagnostics=stats)
+        items = {row.product_code: row for row in rows}
+        self.assertEqual(set(items), {'ES-00', 'ES-01', 'ES-10', 'ES-11'})
+        for code, name, amount, color, module in (
+            ('ES-00', '6A 1 Way Switch 1M', 125, (255, 0, 0), '1M'),
+            ('ES-01', '16A Socket 2M', 225, (0, 0, 255), '2M'),
+            ('ES-10', '6A 1 Way Switch 1M', 126, (255, 0, 0), '1M'),
+            ('ES-11', '16A Socket 2M', 226, (0, 0, 255), '2M'),
+        ):
+            item = items[code]
+            self.assertEqual(item.name, f'E SQUARE {name}')
+            self.assertEqual(item.price_per_unit, amount)
+            self.assertEqual(item.specifications['Module'], module)
+            with Image.open(BytesIO(item.image)) as photo:
+                self.assertEqual(photo.getpixel((photo.width // 2, photo.height // 2)), color)
+        self.assertEqual(stats['pages'][0]['thumbnails'], 4)
+
+    def test_switchgear_headers_and_cid_text_trigger_ocr(self):
+        from catalogue.services.catalogue_layout import native_boxes
+
+        with pymupdf.open() as document:
+            page = document.new_page()
+            for y, labels in (
+                (65, ('Cat. No.', 'Description', 'Mod', 'List Price')),
+                (95, ('ES-11', '6A 1 Way Switch', '1M', '125')),
+                (125, ('ES-22', '16A Socket', '2M', '135')),
+            ):
+                for x, label in zip((40, 155, 365, 445), labels):
+                    page.insert_text((x, y), label)
+            boxes = native_boxes(page)
+            native_pdf = document.tobytes()
+        with pymupdf.open() as document:
+            page = document.new_page()
+            page.insert_text((45, 50), '(cid:150) (cid:154) (cid:160) (cid:165) (cid:170)')
+            outlined_pdf = document.tobytes()
+        stats = {}
+        with patch('catalogue.services.pdf_item_extractor.read_page', return_value=boxes) as ocr:
+            native = extract_items(native_pdf)
+            ocr.assert_not_called()
+            outlined = extract_items(outlined_pdf, diagnostics=stats)
+            ocr.assert_called_once()
+        for items in (native, outlined):
+            self.assertEqual([(item.product_code, item.price_per_unit, item.specifications['Module']) for item in items],
+                             [('ES-11', 125, '1M'), ('ES-22', 135, '2M')])
+        self.assertEqual(stats['pages'][0]['native_chars'], 0)
+        self.assertEqual(stats['pages'][0]['ocr'], 'rapidocr')
+
+    def test_zero_items_diagnostic_reports_readable_characters_and_sample(self):
+        with pymupdf.open() as document:
+            page = document.new_page()
+            page.insert_text((45, 50), 'Decorative electrical range and specifications')
+            content = document.tobytes()
+        stats = {}
+        self.assertEqual(extract_items(content, diagnostics=stats), [])
+        self.assertRegex(stats['pages'][0]['message'], r'^Page 1: \d+ readable characters, 0 price/code pairs matched\.')
+        self.assertIn('Sample text: Decorative electrical range and specifications', stats['pages'][0]['message'])
+        self.assertEqual(stats['items_extracted'], 0)
