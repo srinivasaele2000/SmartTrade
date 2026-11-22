@@ -1,3 +1,4 @@
+import {businessLabel, businessDetail} from './businessCopy';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import CatalogueTools from './CatalogueTools';
@@ -52,7 +53,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
     try {
       const options = await requestApi<TagOption[]>(baseUrl, '/catalogue/items/options/?canonical=1', token);
       setTagOptions(options);
-      if (!options.length) setTagError('No eligible brand and category combinations are available.');
+      if (!options.length) setTagError('No brands are linked to a catalogue category yet.');
     }
     catch (failure) {setTagError(failure instanceof Error ? failure.message : 'Could not load brand and category options.');}
     finally {setSaving(false);}
@@ -80,10 +81,10 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
     setSaving(true); setNotice(''); setError('');
     try {
       const result = await request<Product>(`/products/${selected.id}/moderation`, { action, reason: reason.trim() });
-      if (result.id !== selected.id || result.moderation_state !== ({HIDE:'HIDDEN',SUSPEND:'SUSPENDED',RESTORE:'VISIBLE'} as Record<string,string>)[action]) throw new Error('Moderation could not be confirmed. Refresh before retrying.');
-      setNotice(`Moderation recorded for ${selected.name}. Company eligibility still governs public visibility.`);
+      if (result.id !== selected.id || result.moderation_state !== ({HIDE:'HIDDEN',SUSPEND:'SUSPENDED',RESTORE:'VISIBLE'} as Record<string,string>)[action]) throw new Error('Could not confirm the visibility change. Refresh before retrying.');
+      setNotice(`Visibility updated for ${selected.name}.`);
       setSelected(null); setReason(''); await load();
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not save moderation.'); }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not save the visibility change.'); }
     finally { setSaving(false); }
   }
 
@@ -96,7 +97,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
 
   return <section id="catalogue" className="queue-section" aria-labelledby="catalogue-title">
     {permissions.includes('MODERATE_PRODUCTS') && <CreateProductItem baseUrl={baseUrl} token={token} />}
-    <div className="section-heading"><h2 id="catalogue-title">Company catalogue moderation</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh catalogue</button></div>
+    <div className="section-heading"><h2 id="catalogue-title">Review company products</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh catalogue</button></div>
     <p>Company-owned products and catalogue prices. Dealer stock and selling prices are separate.</p>
     <form onSubmit={event => { event.preventDefault(); setPage(1); setTaggedIds([]); setQuery(search.trim()); }} className="decision-buttons">
       <label htmlFor="catalogue-search">Search product names</label><input id="catalogue-search" disabled={saving} value={search} onChange={event => setSearch(event.target.value)} /><button className="button button-quiet" disabled={saving}>Search</button>
@@ -130,18 +131,18 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
             setTaggedIds(previous => checked ? [...previous, product.id] : previous.filter(id => id !== product.id));
           }} /> Select for tagging</label>}
       <h3>{product.name} · {product.code}</h3><p>{product.company_name} / {product.brand_name} / {product.category_name}</p>
-      <p className="record-meta">Publication: <span className="status-pill" data-status={product.state}>{product.state}</span> Moderation: <span className="status-pill" data-status={product.moderation_state}>{product.moderation_state}</span></p>
+      <p className="record-meta">Publication: <span className="status-pill" data-status={product.state}>{businessLabel(product.state)}</span> Visibility: <span className="status-pill" data-status={product.moderation_state}>{businessLabel(product.moderation_state)}</span></p>
       <p>{product.catalogue_price === null ? 'Catalogue price not provided' : inr(product.catalogue_price)} · Unit: {product.unit}</p>
       <p className="request-reason">{product.description || 'No description provided.'}</p>
-      <details><summary>Product specifications</summary><pre>{JSON.stringify(product.specifications,null,2)}</pre></details><ul>{product.variants.map(variant => <li key={variant.id}>{variant.sku}: {variant.name} ({variant.active ? 'active' : 'inactive'}) · {JSON.stringify(variant.attributes)}</li>)}</ul>
+      <details><summary>Product specifications</summary><p>{businessDetail(product.specifications)}</p></details><ul>{product.variants.map(variant => <li key={variant.id}>Item code {variant.sku}: {variant.name} ({variant.active ? 'active' : 'inactive'}) · {businessDetail(variant.attributes)}</li>)}</ul>
       <button className="button button-quiet" disabled={saving} onClick={() => { setSelected(product); setReason(''); }}>Review product</button>
     </article>)}
     {!loading && !error && <div className="decision-buttons"><button className="button button-quiet" disabled={page === 1 || saving} onClick={() => setPage(page - 1)}>Previous</button><span>Page {page} · {data.count} matching products</span><button className="button button-quiet" disabled={page * 20 >= data.count || saving} onClick={() => setPage(page + 1)}>Next</button></div>}
     {selected && <form className="detail-card" onSubmit={moderate}>
-      <h3>Moderate {selected.name}</h3><label htmlFor="moderation-action">Action</label>
-      <select id="moderation-action" value={action} disabled={saving} onChange={event => setAction(event.target.value)}><option value="HIDE">Hide</option><option value="SUSPEND">Suspend product</option><option value="RESTORE">Restore product visibility eligibility</option></select>
+      <h3>Change visibility for {selected.name}</h3><label htmlFor="moderation-action">Action</label>
+      <select id="moderation-action" value={action} disabled={saving} onChange={event => setAction(event.target.value)}><option value="HIDE">Hide</option><option value="SUSPEND">Suspend product</option><option value="RESTORE">Restore visibility</option></select>
       <label htmlFor="moderation-reason">Reason (required)</label><textarea id="moderation-reason" rows={3} required maxLength={4000} value={reason} disabled={saving} onChange={event => setReason(event.target.value)} />
-      <div className="decision-buttons"><button className="button button-primary" disabled={saving || !reason.trim()}>Record moderation</button><button className="button button-quiet" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
+      <div className="decision-buttons"><button className="button button-primary" disabled={saving || !reason.trim()}>Save visibility change</button><button className="button button-quiet" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
     </form>}
     {selected && permissions.includes('MODERATE_PRODUCTS') && (
       <section aria-label="Official product media" key={selected.id}>
@@ -158,7 +159,7 @@ export default function Catalogue({ token, baseUrl, permissions = [] }: { token:
         })}
       </section>
     )}
-    <form className="detail-card" onSubmit={createCategory}><h3>Create catalogue category</h3><p>Requires MANAGE_TAXONOMY permission.</p><label htmlFor="new-category">Category name</label><input id="new-category" required maxLength={120} disabled={saving} value={category} onChange={event => setCategory(event.target.value)} /><button className="button button-primary" disabled={saving || !category.trim()}>Create category</button>{categoryMessage && <p className={`action-message ${categoryMessage.kind}`} role={categoryMessage.kind === 'error' ? 'alert' : 'status'}>{categoryMessage.text}</p>}</form>
+    <form className="detail-card" onSubmit={createCategory}><h3>Create catalogue category</h3><p>Create a category to organise related products.</p><label htmlFor="new-category">Category name</label><input id="new-category" required maxLength={120} disabled={saving} value={category} onChange={event => setCategory(event.target.value)} /><button className="button button-primary" disabled={saving || !category.trim()}>Create category</button>{categoryMessage && <p className={`action-message ${categoryMessage.kind}`} role={categoryMessage.kind === 'error' ? 'alert' : 'status'}>{categoryMessage.text}</p>}</form>
     <CatalogueTools token={token} baseUrl={baseUrl} permissions={permissions} />
   </section>;
 }

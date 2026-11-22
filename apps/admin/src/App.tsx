@@ -1,3 +1,4 @@
+import {businessLabel} from './businessCopy';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReviewRequests from "./ReviewRequests";
 import Catalogue from "./Catalogue";
@@ -123,7 +124,7 @@ function App() {
   useEffect(() => onSessionExpired(token => {
     if (token !== accessToken) return;
     setAccessToken(null); setRefreshToken(null); setAccount(null); setCases([]); setSelectedId(null);
-    setSessionMessage('Your staff session expired or was revoked. Sign in again.');
+    setSessionMessage('Your session expired. Sign in again to continue.');
   }), [accessToken]);
 
   useEffect(() => {
@@ -154,14 +155,14 @@ function App() {
           method: "POST", body: JSON.stringify({ refresh: refreshToken }),
         });
         if (!cancelled) {
-          if (!payload.access) throw new Error('Refresh returned no access token.');
+          if (!payload.access) throw new Error('Could not renew your session. Sign in again.');
           setAccessToken(payload.access);
           if (payload.refresh) setRefreshToken(payload.refresh);
         }
       } catch {
         if (!cancelled) {
           setAccessToken(null); setRefreshToken(null); setAccount(null);
-          setSessionMessage('Session refresh failed. Sign in again.');
+          setSessionMessage('Could not renew your session. Sign in again.');
         }
       }
     }, refreshDelay);
@@ -339,7 +340,7 @@ function App() {
             })}
           </div>)}
         </nav>
-        <p className="sidebar-note">Staff permissions are enforced by the API. Private documents are never served from public URLs.</p>
+        
       </aside>
 
       <main className="main-content" id="page-content">
@@ -353,9 +354,9 @@ function App() {
               <a className="action-link-btn" href={apkDownloadUrl} download>Download Android App (.apk)</a>
               <small>v{apkMetadata.version} · Updated {istDateTime(apkMetadata.updatedAt)}</small>
             </div>}
-            <span className={`connection-badge ${apiStatus}`} role="status">API {apiStatus === "checking" ? "checking…" : apiStatus}</span>
-            {apiStatus === 'unavailable' && <button className="button button-quiet" onClick={() => setHealthAttempt(value => value + 1)}>Retry API connection</button>}
-            {account && <span className="environment-badge" title={`Roles: ${account.staff_profile?.roles.join(', ') || 'none'}; permissions: ${account.staff_profile?.permissions.join(', ') || 'none'}`}>STAFF ACCOUNT {account.id}</span>}
+            <span className={`connection-badge ${apiStatus}`} role="status">{apiStatus === "checking" ? "Checking connection…" : apiStatus === "connected" ? "Connected" : "Connection unavailable"}</span>
+            {apiStatus === 'unavailable' && <button className="button button-quiet" onClick={() => setHealthAttempt(value => value + 1)}>Retry connection</button>}
+            {account && <span className="environment-badge">Signed in as staff · {account.id}</span>}
             {accessToken && <button className="btn-ghost" onClick={() => void signOut()}>Sign out</button>}
           </div>
         </header>
@@ -370,17 +371,17 @@ function App() {
         {sessionMessage && <p className="action-message error" role="status">{sessionMessage}</p>}
         {page === 'overview' ? <section id="overview" className="queue-section overview">
           <div className="overview-metrics" aria-label="Workspace status">
-            <div><span>API connection</span><strong>{apiStatus === 'checking' ? 'Checking…' : apiStatus === 'connected' ? 'Connected' : 'Unavailable'}</strong></div>
+            <div><span>Service connection</span><strong>{apiStatus === 'checking' ? 'Checking…' : apiStatus === 'connected' ? 'Connected' : 'Unavailable'}</strong></div>
             <div><span>Staff session</span><strong>{accessToken ? 'Signed in' : 'Signed out'}</strong></div>
             {canMessage && <div><span>Unread support messages</span><strong>{supportUnread}</strong></div>}
           </div>
           <h2>Administration workflows</h2>
-          <p>The API badge reports process health only. Staff access and permissions are checked separately; it does not indicate OTP configuration or database readiness.</p>
+          
           <div className="cards">{pages.filter(item => item.id !== 'overview').map(item => <a className="queue-card" key={item.id} href={`#${item.id}`}><strong>{item.label}</strong><p>{item.description}</p><span>{accessToken ? 'Open workflow · backend permissions apply' : 'Staff sign-in required'}</span></a>)}</div>
         </section> : !apiConfigured ? (
           <section className="state-panel error-panel" aria-live="polite">
-            <h2>API configuration required</h2>
-            <p>Set <code>VITE_API_BASE_URL</code> in the admin environment to the API base path, such as the local development API. Restart the Vite server after changing it.</p>
+            <h2>Connection setup required</h2>
+            <p>Ask your administrator to set up the service connection, then reload the page.</p>
           </section>
         ) : !accessToken ? (
           <section className="auth-panel" aria-labelledby="signin-title">
@@ -388,11 +389,11 @@ function App() {
               <span className="brand-mark" aria-hidden="true">ST</span>
               <p className="eyebrow">STAFF ACCESS</p>
               <h2 id="signin-title">Sign in to access {currentPage.label}</h2>
-              <p>Use an existing staff account and the configured OTP provider. This screen does not create staff accounts or bypass API permissions.</p>
-              {import.meta.env.DEV && devOtpEnabled ? <p role="status">LOCAL DEVELOPMENT OTP: no SMS is sent. Any non-empty code is accepted only for the configured development environment. Admin access still requires the designated active STAFF account and enabled development authentication.</p> : <p>Without a configured provider or explicitly enabled local development OTP mode, requests return AUTH_PROVIDER_UNAVAILABLE.</p>}
+              <p>Use the mobile number linked to your staff profile.</p>
+              {import.meta.env.DEV && devOtpEnabled ? <p role="status">Test sign-in is enabled. Enter any code to continue. You won’t receive an SMS.</p> : null}
             </div>
             <div className="auth-fields">
-            {import.meta.env.DEV && devAuthEnabled && <div className="state-panel"><h3>Local development authentication</h3><p>Uses only the server-designated existing staff account. No phone verification or permissions are granted.</p><button className="button button-quiet" type="button" disabled={loginBusy} onClick={() => void developmentLogin()}>Development Login</button></div>}
+            {import.meta.env.DEV && devAuthEnabled && <div className="state-panel"><h3>Test sign-in</h3><p>Use the staff profile set up for local testing.</p><button className="button button-quiet" type="button" disabled={loginBusy} onClick={() => void developmentLogin()}>Sign in for testing</button></div>}
             <form className="signin-form" onSubmit={otpRequested ? signIn : requestOtp}>
               <label htmlFor="staff-mobile">Staff mobile number (+91)</label>
               <div className="staff-mobile-field">
@@ -434,20 +435,20 @@ function App() {
               </div>
               {queueState === "loading" && <div className="state-panel"><span className="spinner" />Loading company reviews…</div>}
               {queueState === "error" && <div className="state-panel error-panel" role="alert"><h3>Verification queue unavailable</h3><p>{queueError}</p><button className="button button-quiet" onClick={() => void loadQueue(accessToken)}>Try again</button></div>}
-              {queueState === "ready" && cases.length === 0 && <div className="state-panel"><h3>No pending company reviews</h3><p>The API returned an empty verification queue.</p></div>}
+              {queueState === "ready" && cases.length === 0 && <div className="state-panel"><h3>No pending company reviews</h3><p>New company applications will appear here.</p></div>}
               {queueState === "ready" && cases.length > 0 && <div className="case-list">
                 {cases.map((item) => <button className={`case-row${selectedId === item.company_id ? " selected" : ""}`} disabled={claimBusy || decisionBusy} key={item.id} onClick={() => { setSelectedId(item.company_id); setActionMessage(null); setDecision(null); }}>
                   <span className="case-row-main"><strong>{item.legal_name}</strong><span>{item.company_email}</span><small>Submitted {formatDate(item.submitted_at)}</small></span>
-                  <span className="case-row-meta"><span className="status-pill" data-status={item.status}>{item.status}</span><small>{item.documents.length} document{item.documents.length === 1 ? "" : "s"}</small></span>
+                  <span className="case-row-meta"><span className="status-pill" data-status={item.status}>{businessLabel(item.status)}</span><small>{item.documents.length} document{item.documents.length === 1 ? "" : "s"}</small></span>
                 </button>)}
               </div>}
             </div>
 
             <div className="review-column">
-              {!selectedCase ? <div className="state-panel detail-placeholder"><h3>Select a company review</h3><p>Company registration details and the assigned review actions will appear here.</p></div> : <>
+              {!selectedCase ? <div className="state-panel detail-placeholder"><h3>Select a company review</h3><p>Choose an application to see its details and review options.</p></div> : <>
                 <div className="detail-heading">
                   <div><p className="eyebrow">COMPANY {selectedCase.company.id}</p><h2>{selectedCase.company.legal_name}</h2></div>
-                  <span className="status-pill" data-status={selectedCase.company.verification_state}>{selectedCase.company.verification_state}</span>
+                  <span className="status-pill" data-status={selectedCase.company.verification_state}>{businessLabel(selectedCase.company.verification_state)}</span>
                 </div>
                 <div className="detail-card">
                   <h3>Registration details</h3>
@@ -459,28 +460,29 @@ function App() {
                     <dt>Legacy tax registration reference</dt><dd>{selectedCase.company.tax_registration_number || "Not provided"}</dd>
                     <dt>Authorized person</dt><dd>{selectedCase.company.authorized_person_name || "Not provided"}</dd>
                     <dt>Company email</dt><dd>{selectedCase.company.company_email}</dd>
-                    <dt>Email verified</dt><dd>{selectedCase.company.email_verified_at ? formatDate(selectedCase.company.email_verified_at) : selectedCase.email_verification_mode === "development_simulated" ? "Local simulation only; ownership unverified" : "Not verified"}</dd>
+                    <dt>Email verified</dt><dd>{selectedCase.company.email_verified_at ? formatDate(selectedCase.company.email_verified_at) : selectedCase.email_verification_mode === "development_simulated" ? "Verified for testing only" : "Not verified"}</dd>
                     <dt>Address</dt><dd>{[selectedCase.company.address_line, selectedCase.company.area, selectedCase.company.district, selectedCase.company.pin_code, selectedCase.company.state_or_region].filter(Boolean).join(", ") || "Not provided"}</dd>
                     <dt>Website</dt><dd>{selectedCase.company.website ? <a className="action-link-btn" href={selectedCase.company.website} target="_blank" rel="noreferrer">{selectedCase.company.website}</a> : "Not provided"}</dd>
                     <dt>Activity</dt><dd>{selectedCase.company.activity_state}</dd>
                   </dl>
                 </div>
                 <div className="detail-card">
-                  <div className="section-heading compact-heading"><div><h3>Verification documents</h3><p>Files are fetched only through the authorized staff endpoint.</p></div></div>
-                  {selectedCase.documents.length === 0 ? <p className="muted">No document metadata was returned for this case.</p> : <ul className="document-list">
-                    {selectedCase.documents.map((item) => <li key={item.id}><span><strong>{item.document_type}</strong><small>{item.original_filename} · {(item.size_bytes / 1024).toFixed(0)} KB</small></span><button className="button button-quiet" disabled={documentBusy === item.id || selectedCase.assigned_reviewer_account_id !== account?.id} onClick={() => void downloadDocument(selectedCase, item)}>{documentBusy === item.id ? "Loading…" : "Download securely"}</button></li>)}
+                  <div className="section-heading compact-heading"><div><h3>Verification documents</h3><p>Claim the review to download its documents.</p></div></div>
+                  {selectedCase.documents.length === 0 ? <p className="muted">No documents were submitted with this application.</p> : <ul className="document-list">
+                    {selectedCase.documents.map((item) => <li key={item.id}><span><strong>{businessLabel(item.document_type)}</strong><small>{item.original_filename} · {(item.size_bytes / 1024).toFixed(0)} KB</small></span><button className="button button-quiet" disabled={documentBusy === item.id || selectedCase.assigned_reviewer_account_id !== account?.id} onClick={() => void downloadDocument(selectedCase, item)}>{documentBusy === item.id ? "Loading…" : "Download document"}</button></li>)}
                   </ul>}
                   <p className="permission-hint">Document downloads require this case to be assigned to you and the <code>VIEW_PRIVATE_DOCUMENTS</code> staff permission. Phase 8 device-local files never appear here; only files previously received by the backend are reviewable.</p>
                 </div>
                 <div className="detail-card review-actions">
-                  <div className="section-heading compact-heading"><div><h3>Review decision</h3><p>Approval or rejection requires a recorded reason.</p></div></div>
+                  <div className="section-heading compact-heading"><div><h3>Review decision</h3><p>Add a reason before you approve or reject this application.</p></div></div>
                   {selectedCase.assigned_reviewer_account_id === account?.id ? <>
                     {!decision ? <div className="decision-buttons"><button className="button button-primary" onClick={() => setDecision("APPROVE")}>Approve company</button><button className="button button-danger" onClick={() => setDecision("REJECT")}>Reject company</button></div> : <form onSubmit={(event) => void submitDecision(event)}>
+                      <p>{decision === "APPROVE" ? "The company will be marked as verified." : "The application will be marked as rejected. Your reason will be saved with the decision."}</p>
                       <label htmlFor="decision-reason">Reason for {decision === "APPROVE" ? "approval" : "rejection"}</label>
                       <textarea id="decision-reason" rows={4} maxLength={4000} disabled={decisionBusy} value={reason} onChange={(event) => setReason(event.target.value)} required />
-                      <div className="decision-buttons"><button className={`button ${decision === "APPROVE" ? "button-primary" : "button-danger"}`} disabled={decisionBusy || !reason.trim()} type="submit">{decisionBusy ? "Saving…" : `Confirm ${decision.toLowerCase()}`}</button><button className="button button-quiet" type="button" disabled={decisionBusy} onClick={() => { setDecision(null); setReason(""); }}>Cancel</button></div>
+                      <div className="decision-buttons"><button className={`button ${decision === "APPROVE" ? "button-primary" : "button-danger"}`} disabled={decisionBusy || !reason.trim()} type="submit">{decisionBusy ? "Saving…" : decision === "APPROVE" ? "Confirm approval" : "Confirm rejection"}</button><button className="button button-quiet" type="button" disabled={decisionBusy} onClick={() => { setDecision(null); setReason(""); }}>Cancel</button></div>
                     </form>}
-                  </> : <button className="button button-primary" disabled={claimBusy || Boolean(selectedCase.assigned_reviewer_account_id)} onClick={() => void claimReview(selectedCase)}>{claimBusy ? "Claiming…" : selectedCase.assigned_reviewer_account_id ? `Assigned to staff account ${selectedCase.assigned_reviewer_account_id}` : "Claim review"}</button>}
+                  </> : <button className="button button-primary" disabled={claimBusy || Boolean(selectedCase.assigned_reviewer_account_id)} onClick={() => void claimReview(selectedCase)}>{claimBusy ? "Assigning…" : selectedCase.assigned_reviewer_account_id ? `Assigned to reviewer ${selectedCase.assigned_reviewer_account_id}` : "Take this review"}</button>}
                 </div>
               </>}
             </div>

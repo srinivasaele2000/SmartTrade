@@ -1,3 +1,4 @@
+import {businessLabel} from './businessCopy';
 import {useEffect, useState, type FormEvent} from 'react';
 import {apiResponse, requestApi} from './api';
 import './dealer-banners.css';
@@ -187,12 +188,12 @@ export default function DealerBanners({base, token}: {base: string; token: strin
     <div className="promo-list">
       <h2>Saved banners</h2>
       {!rows && !error && <p>Loading banners…</p>}
-      {rows?.length === 0 && <p className="empty-state">No banners yet.</p>}
+      {rows?.length === 0 && <p className="empty-state">No promotional banners yet.</p>}
       {rows?.map((row, index) => <article key={row.id} className="promo-card">
         <BannerPreview base={base} token={token} card={row} imagePath={row.image_url} />
         <strong>{row.title || 'Image banner'}</strong>
         {row.banner_type === 'text' && <span className="promo-kind">Text Banner</span>}
-        <span className="promo-destination"><span className="status-pill" data-status={row.status}>{row.status}</span> {actions[row.target_type]}{row.target_brand_name || row.target_category_name ? ` · ${row.target_brand_name ?? row.target_category_name}` : ''}</span>
+        <span className="promo-destination"><span className="status-pill" data-status={row.status}>{businessLabel(row.status)}</span> {actions[row.target_type]}{row.target_brand_name || row.target_category_name ? ` · ${row.target_brand_name ?? row.target_category_name}` : ''}</span>
         <div className="promo-actions">
           <button disabled={busy || index === 0} onClick={() => move(index, -1)}>Move up</button>
           <button disabled={busy || index === rows.length - 1} onClick={() => move(index, 1)}>Move down</button>
@@ -206,12 +207,12 @@ export default function DealerBanners({base, token}: {base: string; token: strin
           <button className="btn-danger" disabled={busy} onClick={() => setDeleting(row)}>Delete</button>
         </div>
         {deleting?.id === row.id && <div role="alert" className="promo-actions">
-          <span>Delete “{row.title}” and its image?</span>
+          <span>Delete “{row.title}” and its image? Dealers will stop seeing this banner.</span>
           <button className="btn-danger" disabled={busy} onClick={() => void run(async () => {
             await requestApi(base, `${path}${row.id}/`, token, {method: 'DELETE'});
             setRows(current => current?.filter(item => item.id !== row.id)); setDeleting(undefined);
             if (editing?.id === row.id) reset();
-          })}>Confirm delete</button>
+          })}>Delete banner</button>
           <button className="btn-ghost" disabled={busy} onClick={() => setDeleting(undefined)}>Cancel delete</button>
         </div>}
       </article>)}

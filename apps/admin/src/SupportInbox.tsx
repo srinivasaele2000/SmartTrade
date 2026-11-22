@@ -1,3 +1,4 @@
+import {businessLabel} from './businessCopy';
 import {useEffect, useRef, useState} from 'react';
 import {apiResponse, requestApi} from './api';
 import './support-inbox.css';
@@ -130,12 +131,12 @@ export default function SupportInbox({base, token}: {base: string; token: string
       <section aria-label="Dealer conversations" className="support-threads">
         <input aria-label="Search conversations" placeholder="Search by dealer name or mobile…" value={search} onChange={e => {setSearch(e.target.value); setThreadPage(1);}} />
         {!list && !error && <p>Loading conversations…</p>}
-        {list?.results.length === 0 && <p className="empty-state">No conversations found.</p>}
+        {list?.results.length === 0 && <p className="empty-state">No conversations match your search.</p>}
         {list?.results.map(thread => <button key={thread.id} disabled={busy || loadingOlder} className="support-thread" aria-pressed={thread.id === selected} onClick={() => {
           if (selected === thread.id) return;
           setSelected(thread.id); setConversation(undefined); setOlder([]); setMore(false); setBody(''); setFile(undefined); setError('');
         }}>
-          <strong>{thread.business_name || 'Dealer'} · {thread.verification_status}</strong>
+          <strong>{thread.business_name || 'Dealer'} · {businessLabel(thread.verification_status)}</strong>
           <span>{[thread.owner_name, thread.phone, thread.city].filter(Boolean).join(' · ')}</span>
           <span>{thread.last_message_preview} {thread.admin_unread_count > 0 && <b className="support-badge">{thread.admin_unread_count}</b>}</span>
           <small>{date(thread.last_message_at)}</small>

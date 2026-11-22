@@ -333,3 +333,10 @@ footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border
 .extraction-badge.warning { background: #fffbeb; color: #854d0e; }
 .extraction-diagnostics details + details { margin-top: 8px; }
 .extraction-toolbar label small { display: block; color: var(--muted); }
+
+.record-meta:has(.status-pill), .case-row-meta:has(.status-pill) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

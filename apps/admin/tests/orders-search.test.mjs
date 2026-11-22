@@ -1,3 +1,4 @@
+import * as copy from '../src/businessCopy.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -39,7 +40,7 @@ test('order filters compose across pages and changing the query resets paginatio
     './india': {inr: String, istDateTime: String},
   };
   const module = {exports: {}};
-  new Function('require', 'module', 'exports', compiled)(name => imports[name], module, module.exports);
+  new Function('require', 'module', 'exports', compiled)(name => name === './businessCopy' ? copy : imports[name], module, module.exports);
   function render() {
     index = 0;
     const elements = [];

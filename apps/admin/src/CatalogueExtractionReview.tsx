@@ -299,7 +299,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
         setLoaded(true);
       })
       .catch(failure => {
-        if (active) setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/)[0] : 'Could not read the selected pages. Try again.');
+        if (active) setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/i)[0] : 'Could not read the selected pages. Try again.');
       })
       .finally(() => {if (active) setBusy(false);});
     return () => {active = false;};
@@ -376,7 +376,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       }
       setExtracted(true);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/)[0] : 'Could not read the selected pages. Try again.');
+      setError(failure instanceof Error ? failure.message.split(/ pages: Page \d+:/i)[0] : 'Could not read the selected pages. Try again.');
       if (remaining) {
         setBatchStatus(`Saved progress: ${pagesDone} pages processed, ${added} draft items added.`);
         setRange(remaining);
@@ -643,7 +643,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
             disabled={busy || !eligibleCount}
             title={!eligibleCount && pending.length ? 'All draft product codes are already in the catalogue.' : undefined}
             ref={input => {if (input) input.indeterminate = partiallySelected;}} onChange={toggleAll} />
-        </th>{['Page', 'Image', 'Name', 'Code', 'HSN / SAC', 'Unit price (₹)', 'Category'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+        </th>{['Page', 'Image', 'Name', 'Item code', 'HSN / SAC', 'Unit price (₹)', 'Category'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
         <tbody>{rows.map(row => {
           const editable = row.status === 'DRAFT' && !busy;
           const photo = photoRequests[row.id];

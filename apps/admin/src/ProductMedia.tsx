@@ -84,7 +84,7 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
       : <p className="empty-state">Product image placeholder</p>)}
     {attachment
       ? <p>{attachment.filename} · {Math.ceil(attachment.size / 1024)} KB · {istDateTime(attachment.uploaded_at)}</p>
-      : <p>No file uploaded.</p>}
+      : <p>No file has been added.</p>}
     <label>
       {attachment ? 'Select replacement' : 'Select file'} ({config.limit} MB max)
       <input ref={picker} type="file" accept={config.types.join(',')} disabled={busy || checkingFile}
@@ -114,11 +114,11 @@ export function ProductMediaCard({baseUrl, token, productId, kind, attachment, o
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           })}>Download PDF</button>}
         <button className="button button-danger" type="button" disabled={busy} onClick={() => {
-          if (!window.confirm('Remove this catalogue attachment?')) return;
+          if (!window.confirm('Remove this file from the catalogue item? It will no longer be available on the item page.')) return;
           void run(async () => {
             await requestApi(baseUrl, path, token, {method: 'DELETE'});
             onChange(null);
-            setNotice('File removed.');
+            setNotice('File removed from this item.');
           });
         }}>Remove file</button>
       </>}

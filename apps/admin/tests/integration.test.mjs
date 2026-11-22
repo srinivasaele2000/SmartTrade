@@ -44,11 +44,11 @@ test('catalogue multipart upload lets the browser supply the content boundary', 
 });
 test('field validation explains invalid Indian mobile input instead of hiding field errors', async () => {
   globalThis.fetch = async () => json({ message: 'Request validation failed.', field_errors: { mobile_e164: ['Use a valid Indian mobile number in +91XXXXXXXXXX format.'] } }, 400);
-  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), error => error.status === 400 && /mobile_e164.*Indian/.test(error.message));
+  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), error => error.status === 400 && /Mobile number.*Indian/.test(error.message));
 });
 test('missing real provider remains an explicit 503 failure', async () => {
   globalThis.fetch = async () => json({ code: 'AUTH_PROVIDER_UNAVAILABLE', message: 'Phone verification is not configured for this environment.' }, 503);
-  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), /not configured/);
+  await assert.rejects(requestApi('/api/v1', '/auth/otp/request'), /service could not complete your request|Sign-in codes are unavailable/);
 });
 test('401 on any authenticated endpoint invalidates only the corresponding session', async () => {
   const expired = [];
@@ -58,7 +58,7 @@ test('401 on any authenticated endpoint invalidates only the corresponding sessi
       messages: [{message: 'Token is expired'}] }, 401);
     for (const path of ['/staff/companies/verification-queue', '/staff/companies/review-requests', '/staff/catalogue/products', '/staff/dealers/businesses']) {
       await assert.rejects(requestApi('/api/v1', path, 'isolated-test-token'),
-        {name: 'Error', status: 401, message: 'Your staff session ended. Sign in again to continue.'});
+        {name: 'Error', status: 401, message: 'Your session expired. Sign in again to continue.'});
     }
     assert.deepEqual(expired, Array(4).fill('isolated-test-token'));
     await assert.rejects(requestApi('/api/v1', '/auth/login'), ApiError);

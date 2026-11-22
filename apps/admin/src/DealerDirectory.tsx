@@ -113,7 +113,7 @@ export default function DealerDirectory({baseUrl, token, permissions}: {baseUrl:
       : !page.data.results.length ? <p className="empty-state">{search || business ? 'No dealers match these filters.' : 'No dealers have registered.'}</p>
       : <div className="onboarding-table"><table>
         <caption>Dealer registrations</caption>
-        <thead><tr>{['Firm and owner', 'Contact', 'GSTIN and trade license', 'Business type and sub-business', 'Registered address', 'Onboarding and verification', 'Worker contacts'].map(value => <th key={value} scope="col">{value}</th>)}</tr></thead>
+        <thead><tr>{['Firm and owner', 'Contact', 'GSTIN and trade license', 'Business type and sub-business', 'Registered address', 'Application and verification', 'Worker contacts'].map(value => <th key={value} scope="col">{value}</th>)}</tr></thead>
         <tbody>{page.data.results.map(dealer => <tr key={dealer.id}>
           <th scope="row"><button onClick={() => setSelected(dealer)}>{dealer.firm_name || 'Unnamed dealer'}</button>
             <div>{dealer.owner_name || 'Owner not provided'}</div></th>
@@ -121,7 +121,7 @@ export default function DealerDirectory({baseUrl, token, permissions}: {baseUrl:
           <td>{dealer.gstin || 'GSTIN not provided'}<div>{dealer.trade_license || 'Trade license not provided'}</div></td>
           <td>{businessTypes[dealer.business_type]}<div>{subBusiness(dealer)}</div></td>
           <td>{addressLabel(dealer.address) || 'Address not provided'}</td>
-          <td><span className="status-pill" data-status={dealer.verification_status}>{statusLabel(dealer.verification_status)}</span><div>{dealer.contacts_submitted_at ? 'Worker batch submitted' : 'Worker batch pending'}</div></td>
+          <td><span className="status-pill" data-status={dealer.verification_status}>{statusLabel(dealer.verification_status)}</span><div>{dealer.contacts_submitted_at ? 'Worker contacts submitted' : 'Waiting for worker contacts'}</div></td>
           <td>{dealer.worker_contacts_count} / 10 on record
             <div><button onClick={() => setSelected(dealer)}>View details</button></div></td>
         </tr>)}</tbody>

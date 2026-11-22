@@ -140,7 +140,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     });
   }
 
-  if (!allowed) return <p>Your staff role cannot manage the catalogue vault.</p>;
+  if (!allowed) return <p>You need permission to manage catalogue files.</p>;
   return <section className="queue-section" aria-label="Catalogue vault">
     <h2>Upload brand catalogue</h2>
     <form onSubmit={upload} className="detail-card form-grid">
@@ -161,7 +161,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
           onChange={event => {setSelection(event.target.files?.[0]); setInspection('');}} /></label>
         <button className="btn-secondary" type="button" disabled={busy || !selection ||
           !(selection.type === 'application/pdf' || (!selection.type && /\.pdf$/i.test(selection.name)))}
-          onClick={() => void autoFill()}>{inspecting ? 'Inspecting PDF…' : 'Auto-fill from PDF'}</button>
+          onClick={() => void autoFill()}>{inspecting ? 'Reading PDF…' : 'Auto-fill from PDF'}</button>
       </div>
       {inspection && <small className="cell-meta" role="status">{inspection}</small>}
       <p>Max {pdfLimitMb} MB PDF. JPEG, PNG or WebP up to {imageLimitMb} MB and 4096 × 4096 pixels.</p>
@@ -214,7 +214,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     </nav>}
     {extraction && <CatalogueExtractionReview baseUrl={baseUrl} token={token} documentKey={extraction.key}
       title={extraction.title} brandName={extraction.brand_name} pageCount={extraction.page_count} onBrandProvisioned={page.reload} close={() => setExtraction(null)} onCommit={(count, discarded) => {
-        setNotice(`${count} catalogue items published. ${discarded} drafts discarded.`);
+        setNotice(`${count} catalogue items published. ${discarded} drafts removed.`);
         page.reload();
       }} />}
     {edit && <dialog ref={dialog} className="contacts-dialog" aria-labelledby="edit-catalogue-title"
@@ -257,7 +257,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       <h3 id="remove-catalogue-title">{remove.action === 'delete' ? 'Permanently delete catalogue PDF?' : 'Archive catalogue?'}</h3>
       {remove.action === 'delete'
         ? <p>Delete “{remove.item.title}” and its unapproved extraction drafts and thumbnails? This cannot be undone.</p>
-        : <p>Remove “{remove.item.title}” from the public vault? Staff can still inspect the archived file.</p>}
+        : <p>Remove “{remove.item.title}” from the public vault? Staff can still view and download the archived file.</p>}
       {error && <p className="action-message error" role="alert">{error}</p>}
       <div className="decision-buttons">
         <button type="button" className={remove.action === 'delete' ? 'btn-danger' : 'btn-warning'}

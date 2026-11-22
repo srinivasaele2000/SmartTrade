@@ -1,3 +1,4 @@
+import {businessLabel} from './businessCopy';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ensureList, requestApi } from './api';
 import { restoreCompanyActivity } from './company-actions';
@@ -41,7 +42,7 @@ export default function ReviewRequests({ baseUrl, token, canRestore = false }: {
     setSaving(true); setError(''); setNotice('');
     try {
       await request(`/${selected}/resolve`, { reason: reason.trim() });
-      setNotice('Resolution recorded. Company and account access states were not changed.');
+      setNotice('Request resolved.');
       setSelected(null); setReason(''); await load();
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not save resolution.'); }
     finally { setSaving(false); }
@@ -52,27 +53,27 @@ export default function ReviewRequests({ baseUrl, token, canRestore = false }: {
     setSaving(true); setError(''); setNotice('');
     try {
       await restoreCompanyActivity(baseUrl, token, companyId, reason);
-      setNotice('Company activity restored. Verification and account blocking were not changed.');
+      setNotice('Company restored.');
       await load();
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Restoration failed.'); }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not restore the company. Try again.'); }
     finally { setSaving(false); }
   }
 
   return <section id="review-requests" className="queue-section" aria-labelledby="review-request-title">
-    <div className="section-heading"><h2 id="review-request-title">Restricted company review requests</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh requests</button></div>
-    <p>Respond to rejected or suspended companies. A resolution records handling only; it does not approve or restore a company.</p>
+    <div className="section-heading"><h2 id="review-request-title">Approval requests</h2><button className="button button-quiet" disabled={loading || saving} onClick={() => void load()}>Refresh requests</button></div>
+    <p>Review requests from rejected or suspended companies. To restore a suspended company, use the separate restore action.</p>
     {notice && <p role="status" className="action-message success">{notice}</p>}
     {error && <div role="alert" className="action-message error"><p>{error}</p><button className="button button-quiet" disabled={saving} onClick={() => void load()}>Retry review requests</button></div>}
     {loading ? <p role="status">Loading review requests…</p> : !error && items.length === 0 ? <div className="state-panel">No open company review requests.</div> : !error && items.map(item => <article className="detail-card" key={item.id}>
       <h3>{item.company_name}</h3>
-      <p className="record-meta">Company {item.company_id} <span className="status-pill" data-status={item.verification_state}>{item.verification_state}</span> <span className="status-pill" data-status={item.activity_state}>{item.activity_state}</span></p>
+      <p className="record-meta">Company {item.company_id} <span className="status-pill" data-status={item.verification_state}>{businessLabel(item.verification_state)}</span> <span className="status-pill" data-status={item.activity_state}>{businessLabel(item.activity_state)}</span></p>
       <p>Submitted {istDateTime(item.submitted_at)}</p>
       <p className="request-reason">{item.reason}</p>
       {selected === item.id ? <form onSubmit={resolve}>
-        <label htmlFor={`resolution-${item.id}`}>Resolution reason</label>
+        <label htmlFor={`resolution-${item.id}`}>Reason for resolving the request</label>
         <textarea id={`resolution-${item.id}`} value={reason} rows={3} maxLength={4000} required disabled={saving} onChange={event => setReason(event.target.value)} />
-        {canRestore && item.activity_state === 'SUSPENDED' && <p><button type="button" className="button button-quiet" disabled={saving || !reason.trim()} onClick={() => void restore(item.company_id)}>Restore company activity</button> Requires RESTORE_COMPANY permission; does not resolve this request or unblock an account.</p>}
-        <div className="decision-buttons"><button className="btn-primary" disabled={saving || !reason.trim()}>{saving ? 'Saving…' : 'Record resolution'}</button><button className="btn-ghost" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
+        {canRestore && item.activity_state === 'SUSPENDED' && <p><button type="button" className="button button-quiet" disabled={saving || !reason.trim()} onClick={() => void restore(item.company_id)}>Restore company</button></p>}
+        <div className="decision-buttons"><button className="btn-primary" disabled={saving || !reason.trim()}>{saving ? 'Saving…' : 'Resolve request'}</button><button className="btn-ghost" type="button" disabled={saving} onClick={() => setSelected(null)}>Cancel</button></div>
       </form> : <button className="button button-quiet" disabled={saving} onClick={() => { setSelected(item.id); setReason(''); setNotice(''); }}>Review request</button>}
     </article>)}
   </section>;

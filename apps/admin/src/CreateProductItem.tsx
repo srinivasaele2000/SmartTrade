@@ -113,7 +113,7 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
     <summary>Create catalogue item</summary>
     {optionsError && <><p role="alert">{optionsError}</p><button onClick={() => retry(value => value + 1)}>Retry brand and category options</button></>}
     {!options && !optionsError && <p role="status">Loading brands and categories…</p>}
-    {options?.length === 0 && <p>No eligible brand and category pairs are available.</p>}
+    {options?.length === 0 && <p>Link a brand to a catalogue category before adding an item.</p>}
     <form onSubmit={create}>
       <label>Product name <input name="name" required maxLength={200} /></label>
       <label>Product code <input name="product_code" required maxLength={100} /></label>
@@ -145,12 +145,12 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
     </div>
     {page.error ? <><p role="alert">{page.error}</p><button onClick={page.reload}>Retry items</button></>
       : !results ? <p role="status">Loading catalogue items…</p>
-      : results.length === 0 ? <p>{searching ? 'No items match this search.' : 'No priced catalogue items.'}</p>
+      : results.length === 0 ? <p>{searching ? 'No items match this search.' : 'No catalogue items with prices yet.'}</p>
       : <div className="catalogue-items-scroll" tabIndex={0} role="region" aria-label="Catalogue items table">
         <table className="catalogue-items-table" aria-labelledby="catalogue-items-title">
         <colgroup>{['image', 'name', 'code', 'hsn', 'price', 'category', 'actions'].map(column =>
           <col key={column} className={`catalogue-items-col-${column}`} />)}</colgroup>
-        <thead><tr>{['Image', 'Item', 'Code', 'HSN / SAC', 'Unit price', 'Category', 'Actions'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+        <thead><tr>{['Image', 'Item', 'Item code', 'HSN / SAC', 'Unit price', 'Category', 'Actions'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
         <tbody>{results.map(item => <tr key={item.id}>
           <td>{item.image_url ? <img className="catalogue-item-thumbnail" src={item.image_url} alt="" />
             : <span className="catalogue-item-placeholder" aria-label="No image">▧</span>}</td>
@@ -196,11 +196,11 @@ export default function CreateProductItem({baseUrl, token}: {baseUrl: string; to
           {action.item.image_url && <img width="96" height="96" style={{objectFit: 'contain'}}
             src={action.item.image_url} alt="Current product image" />}
           <label>Change Image (optional) <input name="image" type="file" accept=".jpg,.jpeg,.png,.webp" /></label>
-        </> : <p>Are you sure you want to delete {action.item.name}? This will remove it from the dealer discovery catalog.</p>}
+        </> : <p>Remove “{action.item.name}” from the dealer catalogue? Existing estimates and bills keep their item details.</p>}
         {error && <p role="alert">{error}</p>}
         <div className="decision-buttons">
           <button className={action.type === 'delete' ? 'button catalogue-item-delete' : 'btn-primary'} disabled={busy}>
-            {action.type === 'edit' ? 'Save Changes' : 'Confirm Delete'}
+            {action.type === 'edit' ? 'Save Changes' : 'Remove item'}
           </button>
           <button className="btn-ghost" type="button" disabled={busy} onClick={closeAction}>Cancel</button>
         </div>

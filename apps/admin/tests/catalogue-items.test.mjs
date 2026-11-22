@@ -97,5 +97,5 @@ test('catalogue navigation and page header use the Catalogue items label', () =>
   assert.equal(page.label, 'Catalogue items');
   assert.equal(page.title, 'Catalogue items');
   assert.equal(pages.find(entry => entry.id === 'catalogues').label, 'Catalogue vault');
-  assert.equal(pages.find(entry => entry.id === 'banners').label, 'Banners');
+  assert.equal(pages.find(entry => entry.id === 'banners').label, 'Promotional banners');
 });

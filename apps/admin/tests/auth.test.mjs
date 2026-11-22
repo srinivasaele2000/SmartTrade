@@ -24,8 +24,8 @@ test('development OTP discovery is local-only and responses clearly label simula
     return json({ enabled: true });
   };
   assert.equal(await developmentOtpAvailable('/api/v1', true, '127.0.0.1'), true);
-  assert.match(otpAcknowledgementMessage({ status: 'accepted', authentication_mode: 'development_otp' }), /no SMS.*non-empty.*unverified/);
-  assert.match(otpAcknowledgementMessage({ status: 'accepted' }), /configured provider/);
+  assert.match(otpAcknowledgementMessage({ status: 'accepted', authentication_mode: 'development_otp' }), /no SMS.*any code/);
+  assert.match(otpAcknowledgementMessage({ status: 'accepted' }), /receive a sign-in code/);
   globalThis.fetch = async () => json({}, 404);
   assert.equal(await developmentOtpAvailable('/api/v1', true, 'localhost'), false);
 });
@@ -58,7 +58,7 @@ test('session loads real staff profile without inventing privileges', async () =
 });
 
 test('invalid tokens, inactive staff and nonstaff never establish a session', async () => {
-  await assert.rejects(loadStaffSession('/api/v1', { access: '', refresh: '', expires_in: 0 }), /Invalid/);
+  await assert.rejects(loadStaffSession('/api/v1', { access: '', refresh: '', expires_in: 0 }), /Could not confirm your sign-in/);
   for (const account of [{ account_type: 'COMPANY' }, { account_type: 'STAFF', staff_profile: { state: 'DISABLED' } }]) {
     globalThis.fetch = async () => json({ account });
     await assert.rejects(loadStaffSession('/api/v1', { access: 'isolated-access', refresh: 'isolated-refresh', expires_in: 300 }), /active staff/);

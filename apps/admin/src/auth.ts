@@ -15,9 +15,9 @@ export async function developmentAvailable(base: string, developmentBuild: boole
 }
 
 export async function loadStaffSession(base: string, payload: LoginResponse) {
-  if (!payload.refresh || !payload.access || !Number.isFinite(payload.expires_in) || payload.expires_in <= 0) throw new Error('Invalid authentication response.');
+  if (!payload.refresh || !payload.access || !Number.isFinite(payload.expires_in) || payload.expires_in <= 0) throw new Error('Could not confirm your sign-in. Try again.');
   const me = await requestApi<{ account: StaffAccount }>(base, '/auth/me', payload.access);
-  if (me.account.account_type !== 'STAFF' || me.account.staff_profile?.state !== 'ACTIVE') throw new Error('An active staff identity is required.');
+  if (me.account.account_type !== 'STAFF' || me.account.staff_profile?.state !== 'ACTIVE') throw new Error('Sign in with an active staff profile.');
   return { ...payload, account: me.account, refreshDelay: Math.max(1000, (payload.expires_in - 30) * 1000) };
 }
 
@@ -29,6 +29,6 @@ export async function developmentOtpAvailable(base: string, developmentBuild: bo
 export type OtpAcknowledgement = { status: string; authentication_mode?: string };
 export function otpAcknowledgementMessage(response: OtpAcknowledgement): string {
   return response.authentication_mode === 'development_otp'
-    ? 'LOCAL DEVELOPMENT ONLY: no SMS was sent. Enter any non-empty code. Phone ownership remains unverified; staff restrictions still apply.'
-    : 'If this staff account is eligible, the configured provider has accepted the request.';
+    ? 'Test sign-in: no SMS was sent. Enter any code to continue.'
+    : 'If your number is registered for staff access, you’ll receive a sign-in code.';
 }

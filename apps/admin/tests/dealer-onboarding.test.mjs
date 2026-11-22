@@ -1,3 +1,4 @@
+import * as copy from '../src/businessCopy.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -26,25 +27,25 @@ function render(canReviewContacts) {
     'react/jsx-runtime': requireAdmin('react/jsx-runtime'), './api': api, './india': india,
   };
   const module = {exports: {}};
-  new Function('require', 'module', 'exports', compiled)(key => imports[key], module, module.exports);
+  new Function('require', 'module', 'exports', compiled)(key => key === './businessCopy' ? copy : imports[key], module, module.exports);
   return renderToStaticMarkup(React.createElement(module.exports.default, {id: 9, canReviewContacts, baseUrl: '/api/v1', token: 'fixture'}));
 }
 
 test('staff review renders private contact access only with the dedicated permission', () => {
   const without = render(false);
   assert.match(without, /Registered address fixture/);
-  assert.match(without, /Map to existing brand/);
-  assert.doesNotMatch(without, /Load private contacts/);
-  assert.match(render(true), /Load private contacts/);
+  assert.match(without, /Link to existing brand/);
+  assert.doesNotMatch(without, /View shared worker contacts/);
+  assert.match(render(true), /View shared worker contacts/);
 });
 
 test('onboarding review identifies the submitting business and exposes both review flows', () => {
   const html = render(false);
-  assert.match(html, /Onboarding review · business 9/);
+  assert.match(html, /Dealer application · business 9/);
   assert.match(html, /Review fixture/);
   assert.match(html, /Dealer submitted context/);
-  for (const label of ['Approve for follow-up', 'Reject', 'Map to existing brand', 'Business 13 · GSTIN',
-    'Record distinct businesses', 'Flag for follow-up', 'Recent review history']) {
+  for (const label of ['Approve for follow-up', 'Reject', 'Link to existing brand', 'Business 13 · GSTIN',
+    'Mark as separate businesses', 'Flag for follow-up', 'Recent review history']) {
     assert.ok(html.includes(label), label);
   }
 });
