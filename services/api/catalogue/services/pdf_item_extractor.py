@@ -21,7 +21,7 @@ from .catalogue_ocr import (
     MIN_NATIVE_TEXT, OCR_PAGE_SECONDS, RAPID_OCR_SECONDS, OCRPageTimeout, TextBox,
     native_text_quality, read_page, read_page_tesseract,
 )
-from .scanned_thumbnails import caption_key, crop_photo, crop_photos, matching_caption
+from .scanned_thumbnails import caption_key, crop_photo, crop_photos, left_gallery_photos, matching_caption
 
 
 HEADERS = {
@@ -54,6 +54,7 @@ CATEGORY_PREFIX_REGEX = re.compile(
 MAX_CATALOGUE_PDF_PAGES = 250
 MAX_ROWS = 500
 EXTRACTION_BUDGET_SECONDS = 140
+JOINED_OCR_WORDS = re.compile(r'(?<=[a-z])(?=[A-Z0-9])')
 
 
 class CataloguePDFError(ValueError):
@@ -176,10 +177,16 @@ def product_specifications(description, cells):
     return facts
 
 
-def layout_candidates(document, page, rows, boxes, images, page_number, family_hint):
+def layout_candidates(document, page, rows, boxes, images, page_number, family_hint, *, ocr=False):
     candidates = []
     photo_cache = {}
     column_crops = {}
+    gallery_lefts = {row.bounds[0] for row in rows
+                     if row.finish_prices and row.bounds[0] >= page.rect.width * .25}
+    gallery_photos = {
+        left: left_gallery_photos(page, boxes, [row.code for row in rows if row.bounds[0] == left], left)
+        for left in gallery_lefts
+    }
 
     def image_bytes(image):
         if image is None:
@@ -191,6 +198,8 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
     for row in rows:
         cells = row.cells
         description = cells.get('name', '')
+        if ocr:
+            description = JOINED_OCR_WORDS.sub(' ', description)
         if row.group and not family_prefix_pattern(row.group).match(description):
             description = ' '.join(filter(None, (row.group, description)))
         size = cells.get('size', '')
@@ -215,7 +224,9 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
         row_band = (horizontal[0], top - 5, horizontal[1], bottom + 5)
         column_images = [image for image in images if
                          horizontal[0] <= (image['bbox'][0] + image['bbox'][2]) / 2 <= horizontal[1]]
-        photo = image_bytes(matching_image(row_band, column_images))
+        photo = gallery_photos.get(left, {}).get(row.code)
+        if photo is None:
+            photo = image_bytes(matching_image(row_band, column_images))
         if photo is None and row.image_bounds:
             center = (top + bottom) / 2
             spanning = [image for image in column_images if image['bbox'][1] <= center <= image['bbox'][3]]
@@ -243,7 +254,7 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
                               and max(above, first - 108) <= image['bbox'][1] and image['bbox'][3] <= last + 8]
             if len(section_images) == 1:
                 photo = image_bytes(section_images[0])
-        facts = product_specifications(name, cells)
+        facts = {**product_specifications(name, cells), **row.finish_prices}
         if row.length:
             facts['Variant'] = row.length
         candidates.append(Candidate(page_number, name, row.code, row.hsn, row.amount,
@@ -422,12 +433,12 @@ def extract_ocr_page(document, page, page_number, family_hint, images, deadline,
             return [], has_text
         attempt_context = dict(context)
         rows, sections, advanced = layout_rows(boxes, page.rect.width, price, context=attempt_context)
-        candidates = (layout_candidates(document, page, rows, boxes, images, page_number, family_hint)
+        candidates = (layout_candidates(document, page, rows, boxes, images, page_number, family_hint, ocr=True)
                       if advanced or fallback else [])
         if not candidates and not fallback:
             candidates = ocr_rows(document, page, boxes, page_number, family_hint, images=images)
             if not candidates and rows:
-                candidates = layout_candidates(document, page, rows, boxes, images, page_number, family_hint)
+                candidates = layout_candidates(document, page, rows, boxes, images, page_number, family_hint, ocr=True)
         if not candidates:
             candidates = brochure_candidates(document, page, boxes, images, page_number, family_hint)
         if candidates:
@@ -748,7 +759,7 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
         bounds = (left, bands[0][0] - 22, right, bands[-1][1] + 22)
         column_photos[(left, right)] = crop_photos(page, bounds, boxes)
     for index, (values, amount, top, bottom, image_bounds) in enumerate(pending):
-        values['name'] = re.sub(r'(?<=[a-z])(?=[A-Z0-9])', ' ', values['name'])
+        values['name'] = JOINED_OCR_WORDS.sub(' ', values['name'])
         name, category = row_name(values, '', family_hint)
         if not name:
             continue

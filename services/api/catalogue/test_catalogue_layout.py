@@ -9,7 +9,7 @@ import pymupdf
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-from .services.catalogue_ocr import MAX_RENDER_SIDE, OCRPageTimeout, TextBox, read_page, read_page_tesseract
+from .services.catalogue_ocr import TESSERACT_RENDER_SIDE, OCRPageTimeout, TextBox, read_page, read_page_tesseract
 from .services.pdf_item_extractor import extract_items
 
 
@@ -128,9 +128,10 @@ class LayoutExtractionTests(SimpleTestCase):
                 engine.return_value.stdout = tsv
                 boxes, warning = read_page_tesseract(page, 10)
                 self.assertEqual(warning, '')
-                dpi = min(275, int(72 * (MAX_RENDER_SIDE - 2) / max(page.rect.width, page.rect.height)))
+                dpi = min(275, int(72 * (TESSERACT_RENDER_SIDE - 2) / max(page.rect.width, page.rect.height)))
                 self.assertAlmostEqual(boxes[0].top, 20 * 72 / dpi)
-                self.assertLessEqual(max(Image.open(BytesIO(engine.call_args.kwargs['input'])).size), MAX_RENDER_SIDE)
+                self.assertGreaterEqual(dpi, 250)
+                self.assertLessEqual(max(Image.open(BytesIO(engine.call_args.kwargs['input'])).size), TESSERACT_RENDER_SIDE)
                 self.assertEqual(engine.call_args.args[0][-3:], ['--psm', '6', 'tsv'])
         boxes = [TextBox(x, y, x + 30, y + 9, value) for x, y, value in (
             (20, 20, 'Elbow - HSN CODE: 39172390'), (20, 40, 'Size'),

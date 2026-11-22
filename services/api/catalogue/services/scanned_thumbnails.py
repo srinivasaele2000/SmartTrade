@@ -6,6 +6,9 @@ import re
 import pymupdf as fitz
 from PIL import Image
 
+from .catalogue_layout import lines_of
+from .catalogue_ocr import TextBox
+
 
 def caption_key(text):
     return re.sub(r'[^A-Z0-9]', '', text.upper()).replace('O', '0')
@@ -26,6 +29,46 @@ def matching_caption(code, captions):
                 if re.search(r'\d{2,}$', base) and len(base) >= 4:
                     matches.update(captions.get(base, ()))
     return next(iter(matches)) if len(matches) == 1 else None
+
+
+def left_gallery_photos(page, boxes, codes, table_left):
+    """Find the photo above each SKU caption, independently of table row height."""
+    captions = {}
+    for line in lines_of(box for box in boxes if box.x1 <= table_left):
+        for index, box in enumerate(line):
+            text = box.text.strip()
+            if re.fullmatch(r'[0-9OILS]{3}', text, re.I) and index + 1 < len(line):
+                suffix = line[index + 1]
+                if (re.fullmatch(r'[0-9OILS]{3}', suffix.text.strip(), re.I)
+                        and -2 <= suffix.x0 - box.x1 <= max(5, (box.bottom - box.top) * .9)):
+                    box = TextBox(box.x0, min(box.top, suffix.top), suffix.x1,
+                                  max(box.bottom, suffix.bottom), text + suffix.text.strip())
+                    text = box.text
+            if re.fullmatch(r'[0-9OILS]{3}\s*[0-9OILS]{3}|(?=[A-Z0-9./_-]*[0-9])[A-Z][A-Z0-9./_-]{3,}', text, re.I):
+                captions.setdefault(caption_key(text), set()).add(box)
+
+    matches = {code: match for code in set(codes) if (match := matching_caption(code, captions))}
+    gallery = {box for values in captions.values() for box in values}
+    photos = {}
+    for code, caption in matches.items():
+        center = (caption.x0 + caption.x1) / 2
+        width = max(35, caption.x1 - caption.x0)
+        left, right = max(page.rect.x0, center - width), min(table_left, center + width)
+        above = max(page.rect.y0, caption.top - 110)
+        for neighbor in gallery - {caption}:
+            other = (neighbor.x0 + neighbor.x1) / 2
+            if abs(neighbor.center - caption.center) <= 8:
+                if other < center:
+                    left = max(left, (other + center) / 2)
+                elif other > center:
+                    right = min(right, (other + center) / 2)
+            elif neighbor.bottom < caption.top and abs(other - center) < width / 2:
+                above = max(above, neighbor.bottom + 2)
+        components = crop_photos(page, (left, above, right, caption.top - 1), boxes)
+        if components:
+            # Prefer the closest component above the caption, using area for ties.
+            photos[code] = max(components, key=lambda component: (component[1], component[2]))[3]
+    return photos
 
 
 def crop_photo(page, bounds, text_boxes):

@@ -24,6 +24,7 @@ from .media import storage, validate_file, validate_image
 from .views import eligible_products
 from .tagging import category_hint, is_legacy_category, normalized_name
 from .models import BrandCategory, Category, CatalogueAudit, CatalogueDocument, DraftCatalogueItem, Product, ProductMedia
+from .services.catalogue_layout import SPACED_SKU, code_value
 
 
 def document_associations(brand):
@@ -92,6 +93,9 @@ class DraftOutput(serializers.ModelSerializer):
 
 class PublishItemFields(ItemFields):
     hsn_sac_code = serializers.RegexField(r'^[0-9]{4,8}$', required=False, allow_blank=True, default='')
+
+    def validate_product_code(self, value):
+        return code_value(value) if SPACED_SKU.fullmatch(value) else value
 
 
 class DraftPackSize(serializers.Serializer):
@@ -213,8 +217,9 @@ class StaffExtraction(APIView):
             with transaction.atomic():
                 document = get_object_or_404(CatalogueDocument.objects.select_for_update(), pk=document.pk, is_active=True)
                 drafts = document.draft_items.filter(status=DraftCatalogueItem.Status.DRAFT)
-                reviewed = set(document.draft_items.exclude(status=DraftCatalogueItem.Status.DRAFT)
-                               .values_list('page', 'product_code'))
+                reviewed = {(page, code_value(code)) for page, code in
+                            document.draft_items.exclude(status=DraftCatalogueItem.Status.DRAFT)
+                            .values_list('page', 'product_code')}
                 image_storage = DraftCatalogueItem._meta.get_field('image').storage
                 existing = set()
                 draft_count = 0
@@ -229,7 +234,7 @@ class StaffExtraction(APIView):
                 )
                 if append:
                     pairs = list(drafts.values_list('product_code', 'name'))
-                    existing = set(pairs)
+                    existing = {(code_value(code), name) for code, name in pairs}
                     draft_count = len(pairs)
                 else:
                     for image in drafts.exclude(image='').values_list('image', flat=True):

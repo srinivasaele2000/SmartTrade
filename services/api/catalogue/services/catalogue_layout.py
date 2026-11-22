@@ -9,6 +9,7 @@ from .catalogue_ocr import TextBox
 
 
 HSN = re.compile(r'\bHSN(?:\s*/\s*SAC)?(?:\s+CODE|\s+NO\.?)?\s*[:.-]?\s*(\d{4,8})\b', re.I)
+SPACED_SKU = re.compile(r'[0-9]{3}\s+[0-9]{3}\Z')
 SKU = re.compile(r'(?=.*\d)[A-Za-z0-9][A-Za-z0-9./_-]{0,99}\Z')
 NOISE = re.compile(
     r'^\s*(?:table of contents\b|contents\s*$|index\s*$|page\s+\d+\b|'
@@ -32,6 +33,7 @@ PACK_CONTEXT = re.compile(
     r'\.?\s*[:=–-]?\s*(?P<value>\d+(?:\s*(?:pcs\.?|units?))?)(?!\w)', re.I,
 )
 SECTION = re.compile(r'^\s*(?:series|section|sub[ -]?category)\s*[:–-]\s*(.+)', re.I)
+SWITCHGEAR_SERIES = re.compile(r'^E[\s‐‑–-]*(?:Square|Soft|Flat)\b.*\bSwitch(?:es)?\b', re.I)
 DETAIL_COLUMNS = {'name', 'size', 'size_cm', 'size_inch', 'turn', 'knob', 'module', 'rating', 'way',
                   'electrical_details', 'pole', 'wattage', 'finish', 'standard'}
 FACT_COLUMNS = {
@@ -51,13 +53,16 @@ def column_variant(text):
 
 
 def code_value(value):
+    if SPACED_SKU.fullmatch(value.strip()):
+        return ''.join(value.split())
     return re.sub(r'\s*([/-])\s*', r'\1', value.strip().replace('–', '-').replace('‑', '-'))
 
 
 ALIASES = {
-    'name': ('name', 'item name', 'product', 'product name', 'description', 'product description', 'particulars', 'item description'),
+    'name': ('name', 'item', 'item name', 'product', 'product name', 'description', 'product description', 'particulars', 'item description'),
     'code': ('code', 'item code', 'catalogue no', 'catalog no', 'cat no', 'cat number', 'cat no item code', 'item code cat no', 'product code', 'part no',
-             'part number', 'item no', 'sku', 'ref no', 'model', 'material code', 'model no', 'model number', 'ref number', 'part code'),
+             'part number', 'item no', 'sku', 'ref no', 'model', 'material code', 'model no', 'model number', 'ref number', 'part code',
+             'pro code', 'prod code'),
     'price': ('mrp', 'mrp rs', 'price', 'rate', 'unit price', 'list price', 'price per unit', 'mrp inr', 'lp', 'lp rs', 'rate rs', 'mrp per unit', 'mrp unit', 'list price rs', 'list price inr'),
     'hsn': ('hsn', 'hsn code', 'hsn sac', 'hsn sac code', 'sac'),
     'size_cm': ('size cm', 'size in cm', 'cm'),
@@ -66,6 +71,9 @@ ALIASES = {
     'pack': ('std pkg', 'std pk', 'std pack', 'std packing', 'std package', 'standard packing', 'std qty',
              'pack', 'pack size', 'packing'),
     'box': ('box qty', 'box quantity', 'master pack', 'master carton'),
+    'combined_pack': ('std mst pkg', 'std mst pack', 'std master pkg'),
+    'neo_white_mrp': ('neo white', 'neo white mrp', 'neo white mrp rs'),
+    'grey_black_mrp': ('grey black', 'grey black mrp', 'grey black mrp rs', 'gray black', 'gray black mrp', 'gray black mrp rs'),
     'turn': ('turn', 'turns'),
     'knob': ('knob', 'knob type'),
     'module': ('mod', 'mods', 'module', 'modules', 'module size'),
@@ -80,7 +88,9 @@ ALIASES = {
     'image': ('image', 'photo', 'picture'),
 }
 HEADER_KEYS = {alias: key for key, aliases in ALIASES.items() for alias in aliases}
+COMPACT_HEADERS = {alias.replace(' ', ''): key for alias, key in HEADER_KEYS.items()}
 DESCRIPTORS = {'name', 'size', 'size_cm', 'size_inch'}
+FINISH_MRPS = {'neo_white_mrp', 'grey_black_mrp'}
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,7 @@ class LayoutRow:
     series: str = ''
     matrix: bool = False
     wrapped: bool = False
+    finish_prices: dict = field(default_factory=dict)
 
 
 def native_boxes(page):
@@ -132,10 +143,23 @@ def line_text(line):
 
 
 def header_key(text):
-    return re.sub(r'[^a-z0-9]+', ' ', text.casefold()).strip()
+    key = re.sub(r'[^a-z0-9]+', ' ', text.casefold()).strip()
+    return re.sub(r'\bm\s+r\s+p\b', 'mrp', key)
 
 
 def header_columns(line):
+    separated = []
+    for box in line:
+        compact = header_key(box.text).replace(' ', '')
+        # RapidOCR may return the last MRP and packing headers as one box.
+        merged = re.fullmatch(r'((?:grey|gray)blackmrp(?:rs)?)(std(?:mst|master)(?:pkg|pack))', compact)
+        if merged:
+            boundary = box.x0 + (box.x1 - box.x0) * len(merged[1]) / len(compact)
+            separated.extend((replace(box, x1=boundary, text=merged[1]),
+                              replace(box, x0=boundary, text=merged[2])))
+        else:
+            separated.append(box)
+    line = separated
     columns = []
     index = 0
     while index < len(line):
@@ -144,7 +168,8 @@ def header_columns(line):
             if end > index + 1 and line[end - 1].x0 - line[end - 2].x1 > 7:
                 break
             text = line_text(line[index:end])
-            key = HEADER_KEYS.get(header_key(text))
+            normalized = header_key(text)
+            key = HEADER_KEYS.get(normalized) or COMPACT_HEADERS.get(normalized.replace(' ', ''))
             qualifier = ''
             if not key:
                 variant = LENGTH.search(text) or DIMENSION.search(text)
@@ -165,6 +190,8 @@ def header_columns(line):
 
 def header_groups(line):
     columns = header_columns(line)
+    if FINISH_MRPS <= {column.key for column in columns} and sum(column.key == 'code' for column in columns) == 1:
+        columns = [column for column in columns if column.key != 'price']
     groups = []
     start = 0
     has_code = has_price = False
@@ -174,15 +201,16 @@ def header_groups(line):
         tail = columns[index + 1:]
         new_descriptor = column.key in DESCRIPTORS and any(item.key == 'code' for item in tail)
         code_first = column.key == 'code' and not column.length and any(
-            item.key in DESCRIPTORS for item in takewhile(lambda item: item.key != 'price', tail))
+            item.key in DESCRIPTORS for item in takewhile(lambda item: item.key not in {'price', 'neo_white_mrp'}, tail))
         if has_code and has_price and (new_descriptor or code_first):
             groups.append(columns[start:index])
             start = index
             has_code = has_price = False
         has_code |= column.key == 'code'
-        has_price |= column.key == 'price'
+        has_price |= column.key in {'price', 'neo_white_mrp'}
     groups.append(columns[start:])
-    return [group for group in groups if {'code', 'price'} <= {column.key for column in group}]
+    return [group for group in groups if any(column.key == 'code' for column in group)
+            and any(column.key in {'price', 'neo_white_mrp'} for column in group)]
 
 
 def horizontal_bands(headers, width):
@@ -213,7 +241,7 @@ def values_at(line, columns):
 
 def matrix_pairs(columns):
     return list(zip((i for i, column in enumerate(columns) if column.key == 'code'),
-                    (i for i, column in enumerate(columns) if column.key == 'price')))
+                    (i for i, column in enumerate(columns) if column.key in {'price', 'neo_white_mrp'})))
 
 
 def apply_matrix_headers(columns, labels):
@@ -259,10 +287,11 @@ def parse_band(lines, left, right, parse_price, inherited):
         heading = SECTION.match(text)
         pack_matches = list(PACK_CONTEXT.finditer(text))
         hsn_match = HSN.search(text)
-        if heading or ((hsn_match or pack_matches) and not headings):
+        switchgear_heading = SWITCHGEAR_SERIES.match(text)
+        if heading or switchgear_heading or ((hsn_match or pack_matches) and not headings):
             title = PACK_CONTEXT.sub('', HSN.sub('', heading[1] if heading else text)).strip(' -–—:|,')
             if title:
-                group = '' if heading else title
+                group = '' if heading or switchgear_heading else title
                 series, hsn, default_pack = title, '', {}
             elif context and hsn_match:
                 group = context
@@ -324,7 +353,8 @@ def parse_band(lines, left, right, parse_price, inherited):
                 continue
         header_bottom = None
         pairs = matrix_pairs(columns)
-        cells = {column.key: value for column, value in zip(columns, values) if value and column.key not in {'code', 'price'}}
+        cells = {column.key: value for column, value in zip(columns, values)
+                 if value and column.key not in {'code', 'price', 'neo_white_mrp', 'grey_black_mrp'}}
         variants = []
         for code_index, price_index in pairs:
             code = code_value(values[code_index])
@@ -344,12 +374,23 @@ def parse_band(lines, left, right, parse_price, inherited):
                             if image_column is not None and image_column + 1 < len(columns) else None)
             pack = {**default_pack, **{label: cells[key] for key, label in
                                        [('pack', 'standard'), ('box', 'box_quantity')] if key in cells}}
+            if combined_pack := re.fullmatch(r'(\d+)\s*/\s*(\d+)', cells.get('combined_pack', '')):
+                pack.update(standard=combined_pack[1], box_quantity=combined_pack[2])
+            secondary = parse_price(next((value for column, value in zip(columns, values)
+                                          if column.key == 'grey_black_mrp'), ''))
+            finish_prices = {'MRP finish': 'Neo White'} if any(column.key == 'neo_white_mrp' for column in columns) else {}
+            if finish_prices and cells.get('name'):
+                cells['name'] = re.sub(r'(\d+\s*A(?:\s*X)?)\s*(?=\d+\s*way)', r'\1 ', cells['name'], flags=re.I)
+                cells['name'] = re.sub(r'\b(\d+)\s*way\s*(?=switch)', r'\1 Way ', cells['name'], flags=re.I)
+            if secondary is not None:
+                finish_prices['Grey/Black MRP'] = str(secondary)
             if re.fullmatch(r'\d{4,8}', cells.get('hsn', '')):
                 hsn = cells['hsn']
             for code, amount, length in variants:
                 row = LayoutRow(cells.copy(), code, amount, group, hsn, cells.get('category', category),
                                 length, (left, top, right, bottom), section, image_bounds, pack,
-                                cells.get('category') or series or category, len(pairs) > 1, wrapped)
+                                cells.get('category') or series or category, len(pairs) > 1, wrapped,
+                                finish_prices.copy())
                 output.append(row)
                 previous.append(row)
         elif (previous and -3 <= top - previous[0].bounds[3] <= 8 and cells
@@ -379,8 +420,33 @@ def parse_band(lines, left, right, parse_price, inherited):
                     'category': category, 'series': series, 'hsn': hsn, 'pack': default_pack}
 
 
+def join_finish_headers(lines):
+    """Merge stacked finish labels with the neighboring code/item header baseline."""
+    joined = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        keys = {column.key for column in header_columns(line)}
+        if index + 1 < len(lines) and (keys & (FINISH_MRPS | {'code', 'name'})):
+            next_line = lines[index + 1]
+            next_keys = {column.key for column in header_columns(next_line)}
+            required = FINISH_MRPS | {'code', 'name'}
+            if (required <= keys | next_keys and not required <= keys and not required <= next_keys
+                    and next_line[0].center - line[0].center <= 20
+                    and not (keys & next_keys & {'code', 'name'})):
+                # MRP-only words on the other baseline overlap the finish
+                # label boxes. Preserve the recognized column positions.
+                columns = sorted(header_columns(line) + header_columns(next_line), key=lambda column: column.left)
+                line = [TextBox(column.left, line[0].top, column.right, next_line[0].bottom, ALIASES[column.key][0])
+                        for column in columns if column.key != 'price']
+                index += 1
+        joined.append(line)
+        index += 1
+    return joined
+
+
 def layout_rows(boxes, width, parse_price, *, context=None):
-    lines = lines_of(boxes)
+    lines = join_finish_headers(lines_of(boxes))
     headers = [group for line in lines if not NOISE.match(line_text(line)) for group in header_groups(line)]
     inherited = context.get('bands', []) if context and abs(context.get('width', 0) - width) < 2 else []
     if not headers and not inherited:
@@ -388,6 +454,12 @@ def layout_rows(boxes, width, parse_price, *, context=None):
             context.clear()
         return [], 0, False
     bands = horizontal_bands(headers, width) if headers else [(band['left'], band['right']) for band in inherited]
+    if headers and len(bands) == 1 and any(FINISH_MRPS <= {column.key for column in header} for header in headers):
+        code_left = min(column.left for header in headers for column in header if column.key == 'code')
+        if code_left >= width * .30:
+            # Keep gallery captions out of the code column even when the
+            # photo label shares a baseline with the corresponding table row.
+            bands = [(code_left - 12, width)]
     rows = []
     next_bands = []
     for left, right in bands:
@@ -402,7 +474,7 @@ def layout_rows(boxes, width, parse_price, *, context=None):
         context.update(width=width, bands=next_bands)
     advanced = len(bands) > 1 or bool(inherited) or any(row.matrix or row.wrapped or row.series for row in rows) or any(
         column.key in {'size', 'size_cm', 'size_inch', 'turn', 'knob', 'pack', 'box', 'way', 'electrical_details',
-                       'pole', 'wattage', 'finish', 'standard', 'image'} or column.length
+                       'pole', 'wattage', 'finish', 'standard', 'image', 'combined_pack'} | FINISH_MRPS or column.length
         for header in headers for column in header
     ) or any(HSN.search(line_text(line)) for line in lines)
     return rows, len({(row.bounds[0], row.section) for row in rows}), advanced

@@ -98,6 +98,98 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_split_page_ocr_persists_finish_mrps_pack_sizes_and_caption_photos(self):
+        from catalogue.services.catalogue_ocr import TextBox
+        from catalogue.services.catalogue_layout import native_boxes
+
+        codes = ('901101', '901102', '901104', '901105', '901114', '901115', '901116', 'EF1001', 'EF1002')
+        colors = ((210, 25, 30), (28, 160, 35), (26, 53, 202), (25, 153, 160), (140, 40, 145),
+                  (230, 105, 27), (124, 68, 38), (71, 82, 99), (110, 48, 140))
+        families = ('E-Square', 'E-Soft', 'E-Flat')
+        titles = tuple(f'{family} 10AX/20A. Switches 240V~(1M)' for family in families)
+        with pymupdf.open() as source:
+            page = source.new_page(width=840, height=650)
+            for index in (5, 2, 0, 7, 3, 6, 1, 8, 4):
+                x = 35 + 110 * ((5 * index) % 9 % 3)
+                y = 132 + 155 * ((5 * index) % 9 // 3)
+                page.draw_rect((x, y - 67, x + 49, y - 14), color=None,
+                               fill=tuple(channel / 255 for channel in colors[index]))
+                code = codes[index]
+                caption = code[:3] + ' ' + code[3:] if code.isdigit() else code
+                page.insert_text((x + 3, y), caption, fontsize=9)
+            for section, title in enumerate(titles):
+                top = 63 + section * 155
+                page.insert_text((389, top), title, fontsize=12)
+                for x, label in ((389, ('Pro. Code', 'Pro Code', 'Prod. Code')[section]), (464, 'Item'),
+                                 (598, 'Neo White'), (684, ('Grey/Black', 'Grey / Black', 'Grey/Black')[section]),
+                                 (760, ('Std./Mst. Pkg.', 'Std/Mst Pkg', 'Std. / Mst. Pkg.')[section])):
+                    y = top + (27 if section == 1 and x in (598, 684) else 38)
+                    if section != 1:
+                        label += ' M. R. P.' if x == 598 else ' M.R.P.' if x == 684 else ''
+                    page.insert_text((x, y), label, fontsize=8)
+                if section == 1:
+                    page.insert_text((625, top + 38), 'M. R. P.', fontsize=8)
+                    page.insert_text((695, top + 38), 'M.R.P.', fontsize=8)
+                for offset in range(3):
+                    index = section * 3 + offset
+                    code = codes[index]
+                    if code.isdigit() and index % 2 == 0:
+                        code = code[:3] + ' ' + code[3:]
+                    for x, value in ((389, code), (464, '10 AX 1 Way Switch'),
+                                     (625, f'{113 + index}.00'), (692, f'{124 + index}.00'),
+                                     (765, '10 / 1200')):
+                        page.insert_text((x, top + 69 + offset * 20), value, fontsize=9)
+            boxes = native_boxes(page)
+            scan = page.get_pixmap(dpi=150).tobytes('png')
+        # OCR can omit a gap within a label or merge neighboring headers.
+        for x, bottom, text in ((680, 101, 'Grey/Black M.R.P.Std./Mst.Pkg.'),
+                                (598, 245, 'NeoWhite')):
+            parts = [box for box in boxes if abs(box.bottom - bottom) < 4 and box.x0 >= x
+                     and (x != 598 or box.x1 < 680)]
+            self.assertGreater(len(parts), 1)
+            boxes = [box for box in boxes if box not in parts]
+            boxes.append(TextBox(min(box.x0 for box in parts), min(box.top for box in parts),
+                                 max(box.x1 for box in parts), max(box.bottom for box in parts), text))
+        with pymupdf.open() as scanned:
+            for _ in range(18):
+                page = scanned.new_page(width=840, height=650)
+            page.insert_image(page.rect, stream=scan)
+            self.document.file.save('E-Square.pdf', ContentFile(scanned.tobytes()))
+
+        with patch('catalogue.services.pdf_item_extractor.read_page', return_value=[]), patch(
+            'catalogue.services.pdf_item_extractor.read_page_tesseract', return_value=(boxes, ''),
+        ) as tesseract:
+            response = self.client.post(self.base + 'extract/', {'start_page': 18, 'end_page': 18}, format='json')
+        tesseract.assert_called_once()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['diagnostics']['pages'][0]['thumbnails'], len(codes), response.data['diagnostics'])
+        drafts = {draft.product_code: draft for draft in self.document.draft_items.all()}
+        self.assertEqual(set(drafts), set(codes))
+        for index, code in enumerate(codes):
+            draft = drafts[code]
+            with self.subTest(code=code):
+                self.assertEqual(draft.page, 18)
+                self.assertIn('1 Way Switch', draft.name)
+                self.assertEqual(draft.price_per_unit, 113 + index)
+                self.assertEqual(draft.sub_category, titles[index // 3])
+                self.assertEqual(draft.pack_size, {'standard': '10', 'box_quantity': '1200'})
+                self.assertEqual(draft.specifications['MRP finish'], 'Neo White')
+                self.assertEqual(draft.specifications['Grey/Black MRP'], f'{124 + index}.00')
+                with draft.image.open() as image, Image.open(image) as photo:
+                    pixel = photo.getpixel((photo.width // 2, photo.height // 2))
+                    self.assertTrue(all(abs(actual - expected) <= 1 for actual, expected in zip(pixel, colors[index])), pixel)
+
+        first = drafts['901101']
+        response = self.client.post(self.base + 'drafts/commit/', {'rows': [{
+            'id': first.pk, 'approved': True, 'name': first.name, 'product_code': '901  101',
+            'price_per_unit': str(first.price_per_unit), 'category_id': self.association.category_id,
+        }]}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        item = Product.objects.get(code='901101')
+        self.assertEqual(item.specifications['Grey/Black MRP'], '124.00')
+        self.assertEqual(item.specifications['Pack size'], first.pack_size)
+        self.assertEqual(item.specifications['Sub-category'], titles[0])
+
     def test_scanned_merged_image_spans_three_variant_rows(self):
         from catalogue.services.catalogue_ocr import TextBox
         from catalogue.services.pdf_item_extractor import ocr_rows

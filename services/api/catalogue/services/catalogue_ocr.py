@@ -12,6 +12,7 @@ import sys
 RAPID_OCR_SECONDS = 32
 OCR_PAGE_SECONDS = 44
 MAX_RENDER_SIDE = 2200
+TESSERACT_RENDER_SIDE = 3400
 MIN_NATIVE_TEXT = 30
 GLYPH_GARBAGE = re.compile(r'\(cid\s*:\s*[^)]+\)|[\uFFFD\uE000-\uF8FF]', re.I)
 
@@ -41,11 +42,11 @@ class OCRPageTimeout(TimeoutError):
     """A single OCR attempt exceeded its time budget."""
 
 
-def render_page(page, dpi):
+def render_page(page, dpi, *, max_side=MAX_RENDER_SIDE):
     import pymupdf
     from PIL import Image, ImageOps
 
-    dpi = min(dpi, int(72 * (MAX_RENDER_SIDE - 2) / max(page.rect.width, page.rect.height)))
+    dpi = min(dpi, int(72 * (max_side - 2) / max(page.rect.width, page.rect.height)))
     if dpi < 1:
         return None, dpi
     pixmap = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
@@ -88,7 +89,7 @@ def read_page_tesseract(page, timeout):
         return [], 'Tesseract is unavailable on this host.'
     if timeout <= 0:
         return [], 'Tesseract was skipped because the extraction time budget was reached.'
-    image, dpi = render_page(page, 275)
+    image, dpi = render_page(page, 275, max_side=TESSERACT_RENDER_SIDE)
     if image is None:
         return [], ''
     try:
