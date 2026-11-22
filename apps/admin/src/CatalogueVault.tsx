@@ -6,8 +6,9 @@ import {useAdminPage} from './useAdminPage';
 import CatalogueExtractionReview from './CatalogueExtractionReview';
 
 type Document = {key: string; business_type: CatalogueBusinessType; sub_category: string; brand_name: string; title: string;
-  filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean; brand_ready?: boolean};
+  filename: string; content_type: string; file_size_bytes: number; created_at: string; is_active: boolean; brand_ready?: boolean; page_count?: number | null};
 const path = '/admin/catalogues/';
+type Inspection = {brand_name: string; catalogue_title: string; business_type: string; sub_business: string; page_count: number};
 const pdfLimitMb = 100;
 const imageLimitMb = 2;
 
@@ -23,6 +24,11 @@ export function validateVaultFileSize(file: Pick<File, 'type' | 'name' | 'size'>
 }
 
 export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: string; token: string; allowed: boolean}) {
+  const [selection, setSelection] = useState<File>();
+  const [brand, setBrand] = useState('');
+  const [title, setTitle] = useState('');
+  const [inspecting, setInspecting] = useState(false);
+  const [inspection, setInspection] = useState('');
   const [business, setBusiness] = useState('');
   const [subCategory, setSubCategory] = useState('');
   const [filterBusiness, setFilterBusiness] = useState('');
@@ -58,8 +64,31 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
     finally {setBusy(false);}
   }
 
+  async function autoFill() {
+    if (!selection || busy || inspecting) return;
+    setInspecting(true);
+    setInspection('');
+    await run(async () => {
+      validateVaultFileSize(selection);
+      const body = new FormData();
+      body.append('file', selection);
+      const result = await requestApi<Inspection>(baseUrl, '/catalogue/vault/inspect-file/', token, {
+        method: 'POST', body, signal: AbortSignal.timeout(45000),
+      });
+      if (result.business_type) {
+        setBusiness(result.business_type);
+        setSubCategory(result.sub_business);
+      }
+      if (result.brand_name) setBrand(result.brand_name);
+      if (result.catalogue_title) setTitle(result.catalogue_title);
+      setInspection(`Detected ${result.page_count} pages · Auto-filled from PDF. Review the suggested fields before uploading.`);
+    });
+    setInspecting(false);
+  }
+
   function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || inspecting) return;
     const form = event.currentTarget;
     const body = new FormData(form);
     void run(async () => {
@@ -67,6 +96,10 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       if (file instanceof File) validateVaultFileSize(file);
       const saved = await requestApi<Document>(baseUrl, path, token, {method: 'POST', body});
       form.reset();
+      setSelection(undefined);
+      setBrand('');
+      setTitle('');
+      setInspection('');
       setBusiness('');
       setSubCategory('');
       setNotice('Catalogue uploaded.' + pdfBrandNotice(saved));
@@ -111,19 +144,26 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
   return <section className="queue-section" aria-label="Catalogue vault">
     <h2>Upload brand catalogue</h2>
     <form onSubmit={upload} className="detail-card form-grid">
-      <label>Business type <select name="business_type" required value={business}
+      <label>Business type <select name="business_type" disabled={inspecting} required value={business}
         onChange={event => {setBusiness(event.target.value); setSubCategory('');}}>
         <option value="" disabled>Select business type</option>
         {Object.entries(catalogueBusinessTypes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
-      <label>Sub-Business <select name="sub_category" value={subCategory} disabled={!uploadOptions.length}
+      <label>Sub-Business <select name="sub_category" value={subCategory} disabled={inspecting || !uploadOptions.length}
         onChange={event => setSubCategory(event.target.value)}>
         <option value="">Uncategorized</option>
         {uploadOptions.map(({key, label}) => <option key={key} value={key}>{label}</option>)}
       </select></label>
-      <label>Brand name <input name="brand_name" maxLength={200} required /></label>
-      <label>Catalogue title <input name="title" maxLength={200} required /></label>
-      <label>Catalogue file <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" required /></label>
+      <label>Brand name <input name="brand_name" maxLength={200} value={brand} onChange={event => setBrand(event.target.value)} disabled={inspecting} required /></label>
+      <label>Catalogue title <input name="title" maxLength={200} value={title} onChange={event => setTitle(event.target.value)} disabled={inspecting} required /></label>
+      <div className="decision-buttons">
+        <label>Catalogue file <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={inspecting} required
+          onChange={event => {setSelection(event.target.files?.[0]); setInspection('');}} /></label>
+        <button className="btn-secondary" type="button" disabled={busy || !selection ||
+          !(selection.type === 'application/pdf' || (!selection.type && /\.pdf$/i.test(selection.name)))}
+          onClick={() => void autoFill()}>{inspecting ? 'Inspecting PDF…' : 'Auto-fill from PDF'}</button>
+      </div>
+      {inspection && <small className="cell-meta" role="status">{inspection}</small>}
       <p>Max {pdfLimitMb} MB PDF. JPEG, PNG or WebP up to {imageLimitMb} MB and 4096 × 4096 pixels.</p>
       <button className="btn-primary" disabled={busy}>Upload catalogue</button>
     </form>
@@ -154,7 +194,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
         <tbody>{page.data.results.map(item => <tr key={item.key}>
           <td>{item.title}</td><td>{item.brand_name}</td><td>{catalogueBusinessTypes[item.business_type]}</td>
           <td>{SUB_BUSINESS_TAXONOMY[item.business_type]?.find(option => option.key === item.sub_category)?.label || 'Uncategorized'}</td>
-          <td><span className="cell-filename" title={item.filename}>{item.filename}</span> <small className="cell-meta">{indianNumber(item.file_size_bytes)} bytes</small></td><td className="cell-meta">{istDateTime(item.created_at)}</td>
+          <td><span className="cell-filename" title={item.filename}>{item.filename}</span> <small className="cell-meta">{indianNumber(item.file_size_bytes)} bytes{item.page_count ? ` · ${item.page_count} pages` : ''}</small></td><td className="cell-meta">{istDateTime(item.created_at)}</td>
           <td><span className="status-pill" data-status={item.is_active ? 'active' : 'archived'}>{item.is_active ? 'Active' : 'Archived'}</span></td>
           <td><div className="table-actions"><button disabled={busy} onClick={() => {setError(''); setEdit(item);}}>Edit</button>
           <button disabled={busy} onClick={() => void run(async () => {
@@ -173,7 +213,7 @@ export default function CatalogueVault({baseUrl, token, allowed}: {baseUrl: stri
       <button disabled={!page.data.next} onClick={() => page.setNumber(page.number + 1)}>Next</button>
     </nav>}
     {extraction && <CatalogueExtractionReview baseUrl={baseUrl} token={token} documentKey={extraction.key}
-      title={extraction.title} brandName={extraction.brand_name} onBrandProvisioned={page.reload} close={() => setExtraction(null)} onCommit={(count, discarded) => {
+      title={extraction.title} brandName={extraction.brand_name} pageCount={extraction.page_count} onBrandProvisioned={page.reload} close={() => setExtraction(null)} onCommit={(count, discarded) => {
         setNotice(`${count} catalogue items published. ${discarded} drafts discarded.`);
         page.reload();
       }} />}

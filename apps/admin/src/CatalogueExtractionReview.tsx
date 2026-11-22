@@ -19,7 +19,7 @@ type Diagnostics = {caption_skus_found?: number; cropped_thumbnails_attached?: n
   skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
-type Review = {summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
+type Review = {page_count?: number | null; summary?: ReviewSummary; existing_codes?: string[]; rows: Draft[]; categories: Category[]; canonical_categories?: CanonicalCategory[]; default_category?: string; brand_resolved?: boolean;
   brand_name?: string; resolved_brand?: ReviewBrand | null; available_brands?: ReviewBrand[];
   diagnostics?: Diagnostics;
   batch?: {start_page: number; end_page: number; processed_through: number; added: number; replaced?: boolean}};
@@ -42,7 +42,7 @@ function loadNextPreview() {
 
 export function extractionPayload(input: string, append: boolean) {
   const range = input.trim();
-  if (!range) return {append};
+  if (!range) throw new Error('Enter a page range before extracting.');
   const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(range);
   const start = Number(match?.[1]);
   const end = Number(match?.[2] ?? match?.[1]);
@@ -141,8 +141,8 @@ function Thumbnail({baseUrl, token, path}: {baseUrl: string; token: string; path
     : <span className="catalogue-item-placeholder">{failed ? 'Preview unavailable' : 'Loading preview…'}</span>;
 }
 
-export default function CatalogueExtractionReview({baseUrl, token, documentKey, title, brandName, close, onCommit, onBrandProvisioned}: {
-  baseUrl: string; token: string; documentKey: string; title: string; brandName?: string; onBrandProvisioned?: () => void; close: () => void;
+export default function CatalogueExtractionReview({baseUrl, token, documentKey, title, brandName, pageCount, close, onCommit, onBrandProvisioned}: {
+  baseUrl: string; token: string; documentKey: string; title: string; brandName?: string; pageCount?: number | null; onBrandProvisioned?: () => void; close: () => void;
   onCommit: (count: number, discarded: number) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -199,7 +199,20 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     }
   }
 
+  const [totalPages, setTotalPages] = useState(pageCount);
+  const rangeExample = totalPages ? `1-${totalPages}` : '6-10';
+  let rangeError = '';
+  try {
+    const pages = extractionPayload(range, append);
+    if (!totalPages || pages.end_page > totalPages) {
+      rangeError = totalPages ? `Enter a range within pages 1–${totalPages}.` : 'The PDF page count is unavailable.';
+    }
+  } catch (failure) {
+    rangeError = failure instanceof Error ? failure.message : 'Enter a valid page range.';
+  }
+
   function applyReview(result: Review, preserveEdits: boolean) {
+    if (result.page_count !== undefined) setTotalPages(result.page_count);
     const options = result.canonical_categories?.map(category => ({
       id: category.id, category__name: category.name, canonical: true,
     })) ?? result.categories;
@@ -263,6 +276,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     let pagesDone = 0;
     let added = 0;
     try {
+      if (rangeError) throw new Error(rangeError);
       const payload = extractionPayload(range, append);
       const run = {cancelled: false};
       extraction.current = run;
@@ -274,7 +288,7 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       setPageProgress(undefined);
       setDiagnostics(undefined);
 
-      if (payload.start_page === undefined || payload.end_page === undefined) {
+      if (payload.start_page === payload.end_page) {
         const result = await requestExtraction(baseUrl, path + 'extract/', token, JSON.stringify(payload));
         const batch = result.batch;
         const partial = batch && batch.processed_through < batch.end_page;
@@ -489,11 +503,15 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       <p>{title}</p>
     </header>
     <form className="extraction-toolbar" aria-label="Extract catalogue batch" onSubmit={extractBatch}>
-      <label>Page range <input value={range} placeholder="All pages (e.g. 6-10)" disabled={busy}
+      <label>Page range <input value={range} aria-label="Page range" required aria-describedby="extraction-range-help" placeholder={`e.g. ${rangeExample}`} disabled={busy}
         onChange={event => setRange(event.target.value)} /></label>{' '}
       <label><input type="checkbox" checked={append} disabled={busy} onChange={event => setAppend(event.target.checked)} />
         Append to existing drafts</label>{' '}
-      <button className="btn-primary" disabled={!loaded || busy || !!photoUpdates.length}>Extract batch</button>
+      <small id="extraction-range-help" aria-label="Page range limits">
+        {totalPages ? `Total: ${totalPages} pages` : 'Total page count unavailable'}
+        {' · '}{range.trim() && rangeError ? rangeError : `Enter a page range (e.g. ${rangeExample}) before extracting.`}
+      </small>
+      <button className="btn-primary" disabled={!loaded || busy || !!photoUpdates.length || !!rangeError}>Extract batch</button>
       {extracting && <button type="button" className="btn-ghost" disabled={cancelPending} onClick={() => {
         if (!extraction.current) return;
         extraction.current.cancelled = true;

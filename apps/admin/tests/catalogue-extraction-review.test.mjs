@@ -23,7 +23,7 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
     {id: 4, product_code: 'invalid', association: '99', status: 'DRAFT'},
     {id: 5, product_code: 'reviewed', association: '7', status: 'APPROVED'},
   ]).map(row => ({name: 'Fixture product', price_per_unit: '10.00', ...row, approved: false, image_url: null}));
-  const state = [rows, categories, false, '', {}, 0, '', false, true];
+  const state = [rows, categories, false, '', {}, 0, options.range ?? '1', false, true];
   if (options.summary) state[16] = options.summary;
   if (options.existingCodes) state[17] = options.existingCodes;
   const effects = [];
@@ -51,7 +51,7 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
     effects.length = 0;
     hook = 0;
     refHook = 0;
-    const tree = module.exports.default({baseUrl: '/api/v1', token: 'test', documentKey: 'test', title: 'Example', onCommit});
+    const tree = module.exports.default({baseUrl: '/api/v1', token: 'test', documentKey: 'test', title: 'Example', pageCount: 67, onCommit});
     if (options.dialog) refs[0].current = options.dialog;
     function find(node) {
       if (Array.isArray(node)) return node.map(find).find(Boolean);
@@ -65,12 +65,25 @@ function review(categories = [{id: 7, category__name: 'Switches', brand__company
   return Object.assign(get, {runLastEffect: () => effects.at(-1)(), payload: module.exports.extractionPayload});
 }
 
-test('page range parses blank, single pages and inclusive ranges', () => {
+test('page range requires input and parses single pages and inclusive ranges', () => {
   const {payload} = review();
   assert.deepEqual(payload('6-10', true), {start_page: 6, end_page: 10, append: true});
   assert.deepEqual(payload('6', false), {start_page: 6, end_page: 6, append: false});
-  assert.deepEqual(payload('  ', true), {append: true});
+  assert.throws(() => payload('  ', true), /Enter a page range/);
   for (const range of ['10-5', 'abc', '0', '6-']) assert.throws(() => payload(range, false), /ascending range/);
+});
+
+test('page count bounds extraction and the range starts empty', async () => {
+  const get = review(undefined, undefined, undefined, undefined, {range: ''});
+  assert.equal(get('Page range').required, true);
+  assert.equal(get('Page range').placeholder, 'e.g. 1-67');
+  assert.match(JSON.stringify(get('Page range limits').children), /Total: 67 pages/);
+  assert.equal(get('Extract batch').disabled, true);
+  get('Page range').onChange({target: {value: '18-68'}});
+  assert.equal(get('Extract batch').disabled, true);
+  await get('Extract catalogue batch').onSubmit({preventDefault() {}});
+  get('Page range').onChange({target: {value: '18-67'}});
+  assert.equal(get('Extract batch').disabled, false);
 });
 
 test('extract batch validates the range then posts sequential three-page chunks', async () => {
@@ -80,10 +93,10 @@ test('extract batch validates the range then posts sequential three-page chunks'
     const {start_page, end_page, append} = requests.at(-1).body;
     return {rows: [], categories: [], batch: {start_page, end_page, processed_through: end_page, added: 0, replaced: !append}};
   });
-  get('All pages (e.g. 6-10)').onChange({target: {value: '10-5'}});
+  get('Page range').onChange({target: {value: '10-5'}});
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   assert.equal(requests.length, 0);
-  get('All pages (e.g. 6-10)').onChange({target: {value: '6-10'}});
+  get('Page range').onChange({target: {value: '6-10'}});
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   assert.deepEqual(requests, [
     {path: '/admin/catalogues/test/extract/', method: 'POST', body: {start_page: 6, end_page: 8, range_end: 10, append: false}},
@@ -108,7 +121,7 @@ test('completed rows render before the next chunk finishes and cancel keeps the 
       processed_through: body.end_page, added: 1, replaced: requests.length === 1,
     }};
   });
-  get('All pages (e.g. 6-10)').onChange({target: {value: '50-70'}});
+  get('Page range').onChange({target: {value: '50-67'}});
   const running = get('Extract catalogue batch').onSubmit({preventDefault() {}});
   await secondStarted;
   assert.ok(get('Approve new-sku'));
@@ -116,7 +129,7 @@ test('completed rows render before the next chunk finishes and cancel keeps the 
   finishSecond();
   await running;
   assert.equal(requests.length, 2);
-  assert.equal(get('All pages (e.g. 6-10)').value, '56-70');
+  assert.equal(get('Page range').value, '56-67');
   assert.equal(get('append').checked, true);
 });
 
@@ -130,7 +143,7 @@ test('a blank first chunk defers replacement and partial chunks retry only unpro
       processed_through: second ? body.start_page : body.end_page, added: second ? 1 : 0, replaced: second,
     }};
   });
-  get('All pages (e.g. 6-10)').onChange({target: {value: '50-56'}});
+  get('Page range').onChange({target: {value: '50-56'}});
   await get('Extract catalogue batch').onSubmit({preventDefault() {}});
   assert.deepEqual(requests.map(({start_page, end_page, append, replace_on_items}) =>
     [start_page, end_page, append, replace_on_items]), [

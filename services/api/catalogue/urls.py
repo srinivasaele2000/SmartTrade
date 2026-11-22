@@ -9,6 +9,7 @@ urlpatterns = [
     path('catalogue/items/options/', items.ItemOptions.as_view()),
     path('catalogues/', vault.PublicCatalogueVault.as_view()),
     path('catalogues/<uuid:key>/file/', vault.PublicCatalogueFile.as_view(), name='vault-public-file'),
+    path('catalogue/vault/inspect-file/', vault.StaffInspectCatalogueFile.as_view()),
     path('admin/catalogues/', vault.StaffCatalogueVault.as_view()),
     path('admin/catalogues/<uuid:key>/extract/', extraction.StaffExtraction.as_view()),
     path('admin/catalogues/<uuid:key>/drafts/commit/', extraction.CommitDrafts.as_view()),

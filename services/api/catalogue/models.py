@@ -107,6 +107,7 @@ class CatalogueDocument(models.Model):
     filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=32)
     file_size_bytes = models.PositiveIntegerField()
+    page_count = models.PositiveIntegerField(null=True, blank=True)
     last_extraction = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)

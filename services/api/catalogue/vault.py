@@ -17,12 +17,17 @@ from companies.permissions import HasStaffPermission
 from .brands import BrandProvisioningBlocked, brand_metadata, get_or_provision_verified_brand
 from .media import IMAGE_TYPES, validate_file
 from .models import CatalogueDocument, DraftCatalogueItem, ProductMedia
+from .pdf_inspection import inspect_pdf, open_pdf, stored_page_count
 from .taxonomy import ALL_SUB_CATEGORIES, CATALOGUE_BUSINESS_KEYS, SUB_CATEGORIES
 from .views import Pages, audit
 
 
 class DocumentMetadata(serializers.ModelSerializer):
     download_url = serializers.SerializerMethodField()
+    page_count = serializers.SerializerMethodField()
+
+    def get_page_count(self, item):
+        return stored_page_count(item)
 
     def get_download_url(self, item):
         route = 'vault-staff-file' if self.context.get('staff') else 'vault-public-file'
@@ -31,7 +36,7 @@ class DocumentMetadata(serializers.ModelSerializer):
     class Meta:
         model = CatalogueDocument
         fields = ['key', 'business_type', 'sub_category', 'brand_name', 'title', 'filename', 'content_type',
-                  'file_size_bytes', 'created_at', 'is_active', 'download_url']
+                  'file_size_bytes', 'page_count', 'created_at', 'is_active', 'download_url']
 
 
 class DocumentEdit(serializers.ModelSerializer):
@@ -65,6 +70,15 @@ class DocumentInput(DocumentEdit):
         attrs['filename'] = PurePath(upload.name).stem[:251] + suffix[upload.content_type]
         attrs['content_type'] = upload.content_type
         attrs['file_size_bytes'] = upload.size
+        if kind == ProductMedia.Kind.PDF:
+            try:
+                with open_pdf(upload) as pdf:
+                    attrs['page_count'] = pdf.page_count or None
+            except serializers.ValidationError:
+                # Keep accepting PDFs for storage even if inspection is unavailable.
+                pass
+            finally:
+                upload.seek(0)
         upload.name = attrs['filename']
         return attrs
 
@@ -181,6 +195,15 @@ class StaffCatalogueVault(APIView):
             raise
         return Response({**DocumentMetadata(item, context={'staff': True}).data,
                          'brand_ready': bool(item.resolved_brand_id)}, status=201)
+
+
+class StaffInspectCatalogueFile(StaffCatalogueVault):
+    http_method_names = ['post', 'options']
+
+    def post(self, request):
+        upload = serializers.FileField().run_validation(request.data.get('file', serializers.empty))
+        validate_file(upload, ProductMedia.Kind.PDF)
+        return Response(inspect_pdf(upload))
 
 
 class StaffCatalogueDocument(StaffCatalogueVault):

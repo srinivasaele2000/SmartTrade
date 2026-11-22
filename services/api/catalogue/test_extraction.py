@@ -98,6 +98,46 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_vault_metadata_inspection_uses_ocr_for_scanned_cover(self):
+        from catalogue.services.catalogue_ocr import TextBox
+
+        with pymupdf.open() as pdf:
+            pdf.new_page()
+            contents = pdf.tobytes()
+        with patch('catalogue.pdf_inspection.read_page_tesseract', return_value=(
+            [TextBox(10, 10, 150, 30, 'Fixture CPVC Pipes & Fittings')], '',
+        )) as ocr:
+            response = self.client.post('/api/v1/catalogue/vault/inspect-file/', {'file': SimpleUploadedFile(
+                'scan.pdf', contents, content_type='application/pdf',
+            )}, format='multipart')
+        ocr.assert_called_once()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['catalogue_title'], 'CPVC')
+        self.assertEqual(response.data['business_type'], 'PLUMBING')
+        self.assertEqual(response.data['sub_business'], 'PIPES_FITTINGS')
+
+    def test_vault_inspects_pdf_without_importing_and_caches_existing_page_count(self):
+        path = '/api/v1/catalogue/vault/inspect-file/'
+        with pymupdf.open() as pdf:
+            for _ in range(4):
+                page = pdf.new_page()
+                page.insert_text((40, 40), 'Fixture E-Square Switches Catalogue')
+            pdf.set_metadata({'title': 'Fixture E-Square', 'author': 'Fixture'})
+            contents = pdf.tobytes()
+        before = CatalogueDocument.objects.count()
+        response = self.client.post(path, {'file': SimpleUploadedFile(
+            'Fixture_E-Square.pdf', contents, content_type='application/pdf',
+        )}, format='multipart')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {'brand_name': 'Fixture', 'catalogue_title': 'E-Square',
+                                         'business_type': 'ELECTRICAL', 'sub_business': 'SWITCHES_SOCKETS',
+                                         'page_count': 4})
+        self.assertEqual(CatalogueDocument.objects.count(), before)
+        self.assertEqual(APIClient().post(path).status_code, 401)
+        self.assertEqual(self.client.get(self.base + 'extract/').data['page_count'], 1)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.page_count, 1)
+
     def test_flattened_gallery_attaches_split_caption_photos_to_existing_drafts(self):
         from catalogue.services.catalogue_ocr import TextBox
 

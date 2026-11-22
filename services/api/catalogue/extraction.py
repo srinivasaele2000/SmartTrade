@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 from companies.permissions import HasStaffPermission
 from .brands import brand_metadata, eligible_brands, get_or_provision_verified_brand, resolve_document_brand
 from .items import ItemFields, ItemOutput, catalogue_product, lock_product_codes
+from .pdf_inspection import stored_page_count
 from .media import storage, validate_file, validate_image
 from .views import eligible_products
 from .tagging import category_hint, is_legacy_category, normalized_name
@@ -326,7 +327,7 @@ class StaffExtraction(APIView):
         return Response({'rows': rows, 'categories': options, 'canonical_categories': canonical,
                          'default_category': category_hint(document=document), 'brand_resolved': brand is not None,
                          'resolved_brand': brand_metadata(brand) if brand else None,
-                         'brand_name': document.brand_name,
+                         'brand_name': document.brand_name, 'page_count': stored_page_count(document),
                          'available_brands': [brand_metadata(option) for option in brands],
                          'diagnostics': document.last_extraction,
                          'summary': {
