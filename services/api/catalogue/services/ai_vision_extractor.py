@@ -1,5 +1,6 @@
 """Optional page-at-a-time structured catalogue extraction via vision APIs."""
 from base64 import b64encode
+from collections import Counter
 from io import BytesIO
 import json
 import os
@@ -13,7 +14,7 @@ import pymupdf
 from PIL import Image
 
 from .catalogue_layout import SKU, code_value
-from .pdf_item_extractor import Candidate, MAX_ROWS, family_prefix_pattern, price
+from .pdf_item_extractor import Candidate, family_prefix_pattern, price
 
 PROMPT = """
 Extract priced items from this Indian electrical, plumbing or hardware catalogue page.
@@ -27,7 +28,7 @@ Use the section heading as sub_category, e.g. CPVC PIPES SDR - 11 CLASS - 1, ELB
 COUPLER or UNION. Use empty strings for unknown text. For image_box use [ymin, xmin,
 ymax, xmax] integer coordinates from 0 to 1000 relative to the entire displayed page.
 Box the product photograph only. Repeat its box for every SKU sharing a section photo.
-Use [] when there is no matching photo. Return each distinct SKU once and omit unpriced rows.
+Use [] when there is no matching photo. Keep separate printed variants even when their codes repeat. Omit unpriced rows.
 """.strip()
 
 ROW_PROPERTIES = {key: {'type': 'string'} for key in (
@@ -156,30 +157,81 @@ def crop_image(image, box):
     return output.getvalue()
 
 
-def parse_items(payload, image, number, brand):
-    page_hsn = payload['page_hsn'].strip()
+MAX_ROWS = 150  # Per Vision page. The shared extraction batch has its own limit.
+COLUMN_HEADERS = {'size', 'productcode', 'itemcode', 'stdpkg', 'standardpacking', 'mrp', 'price', 'rate',
+                  'description', 'itemdescription', 'hsn', 'hsncode', 'packsize'}
+
+
+class InvalidVisionRows(ValueError):
+    """A page whose rows cannot be used, with a safe diagnostic reason."""
+
+
+def row_text(row, field):
+    value = row.get(field)
+    return value.strip() if isinstance(value, str) else ''
+
+
+def normalized_hsn(value):
+    digits = re.sub(r'[^0-9]', '', value)
+    return digits if 4 <= len(digits) <= 8 else ''
+
+
+def parse_items(payload, image, number, brand, diagnostics=None):
     rows = payload['items']
-    if not isinstance(rows, list) or len(rows) > MAX_ROWS:
-        raise ValueError('Invalid row count')
-    photos, candidates, codes = {}, [], set()
+    if not isinstance(rows, list):
+        raise InvalidVisionRows('invalid_rows')
+    if len(rows) > MAX_ROWS:
+        raise InvalidVisionRows('too_many_rows')
+    page_hsn = normalized_hsn(row_text(payload, 'page_hsn'))
+    skipped = Counter()
+    validated = []
     for row in rows:
-        name = ' '.join(row['name'].split())
-        code = code_value(row['product_code'])
-        amount = price(row['price_per_unit'])
-        section = row['sub_category'].strip()
-        hsn = row['hsn_sac_code'].strip() or page_hsn
-        if (not name or re.fullmatch(r'size|product code|std\.? pkg\.?|m\.?\s*r\.?\s*p\.?', name, re.I)
-                or not SKU.fullmatch(code) or amount is None or code.upper() in codes
-                or (hsn and not re.fullmatch(r'[0-9]{4,8}', hsn))):
-            raise ValueError('Invalid catalogue row')
-        codes.add(code.upper())
+        if not isinstance(row, dict):
+            skipped['invalid_row'] += 1
+            continue
+        name = ' '.join(row_text(row, 'name').split())
+        code = code_value(row_text(row, 'product_code'))
+        raw_price = row_text(row, 'price_per_unit')
+        amount = price(raw_price)
+        if not name:
+            skipped['missing_name'] += 1
+        elif re.sub(r'[^a-z0-9]', '', name.casefold()) in COLUMN_HEADERS:
+            skipped['header_name'] += 1
+        elif not SKU.fullmatch(code):
+            skipped['invalid_sku'] += 1
+        elif amount is None:
+            skipped['invalid_price' if raw_price else 'missing_price'] += 1
+        else:
+            validated.append((row, name, code, amount))
+    if diagnostics is not None:
+        diagnostics['vision_rows_skipped'] = sum(skipped.values())
+        diagnostics['vision_row_skip_reasons'] = dict(skipped)
+    if rows and not validated:
+        raise InvalidVisionRows('no_valid_rows:' + skipped.most_common(1)[0][0])
+
+    # Preserve all printed SKUs before assigning suffixes to repeated codes.
+    reserved = {code.upper() for _, _, code, _ in validated}
+    photos, candidates, used = {}, [], set()
+    for row, name, code, amount in validated:
+        original = code
+        suffix = 2
+        while code.upper() in used or (code != original and code.upper() in reserved):
+            ending = f'-{suffix}'
+            code = original[:100 - len(ending)] + ending
+            suffix += 1
+        used.add(code.upper())
         if brand and not family_prefix_pattern(brand).match(name):
             name = f'{brand} {name}'
-        box = tuple(row['image_box'])
-        if box not in photos:
-            photos[box] = crop_image(image, row['image_box'])
-        candidates.append(Candidate(number, name[:200], code, hsn, amount, '', photos[box],
-                                    sub_category=section[:120], from_vision=True))
+        box = row.get('image_box')
+        thumbnail = None
+        if isinstance(box, list) and len(box) == 4 and all(type(part) is int for part in box):
+            key = tuple(box)
+            if key not in photos:
+                photos[key] = crop_image(image, box)
+            thumbnail = photos[key]
+        hsn = normalized_hsn(row_text(row, 'hsn_sac_code')) or page_hsn
+        candidates.append(Candidate(number, name[:200], code, hsn, amount, '', thumbnail,
+                                    sub_category=row_text(row, 'sub_category')[:120], from_vision=True))
     return candidates
 
 
@@ -206,7 +258,7 @@ def configured_page_extractor(brand, title, *, timeout=None):
                     return []
                 payload, tokens = request_page(provider, key, model, encoded.getvalue(), prompt, min(timeout, remaining))
                 diagnostics.update(tokens)
-                candidates = parse_items(payload, image, number, brand)
+                candidates = parse_items(payload, image, number, brand, diagnostics)
         except HTTPError as exc:
             diagnostics['vision_fallback'] = 'http_429_rate_limit' if exc.code == 429 else f'http_{exc.code}'
             exc.close()
@@ -217,6 +269,9 @@ def configured_page_extractor(brand, title, *, timeout=None):
             return []
         except (json.JSONDecodeError, UnicodeDecodeError):
             diagnostics['vision_fallback'] = 'invalid_json'
+            return []
+        except InvalidVisionRows as exc:
+            diagnostics.update(vision_error='invalid_response', vision_fallback=str(exc))
             return []
         except IncompleteVisionResponse:
             diagnostics['vision_fallback'] = 'incomplete_response'

@@ -98,6 +98,52 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_dense_vision_page_keeps_valid_rows_and_counts_skipped_rows(self):
+        from catalogue.services.ai_vision_extractor import parse_items
+
+        rows = [{'name': 'CPVC fitting', 'product_code': f'PIPE{i}', 'price_per_unit': '25',
+                 'hsn_sac_code': '39-17' if i % 2 else '??'}
+                for i in range(45)]
+        rows += [{'name': 'Unpriced fitting', 'product_code': 'PIPE999'},
+                 {'name': 'Fitting', 'product_code': 'invalid sku!', 'price_per_unit': '25'},
+                 {'name': 'M.R.P.', 'product_code': 'PIPE998', 'price_per_unit': '25'}]
+        diagnostics = {}
+        with Image.new('RGB', (20, 20)) as image:
+            result = parse_items({'page_hsn': '39.17', 'items': rows}, image, 1, 'VAHANI', diagnostics)
+        self.assertEqual([item.product_code for item in result], [f'PIPE{i}' for i in range(45)])
+        self.assertTrue(all(item.hsn_sac_code == '3917' for item in result))
+        self.assertEqual(diagnostics['vision_rows_skipped'], 3)
+        self.assertEqual(diagnostics['vision_row_skip_reasons'],
+                         {'missing_price': 1, 'invalid_sku': 1, 'header_name': 1})
+
+    def test_duplicate_vision_skus_keep_variants_and_reserve_printed_suffixes(self):
+        from catalogue.services.ai_vision_extractor import parse_items
+
+        rows = [{'name': f'Pipe {index} m', 'product_code': code, 'price_per_unit': str(index * 10)}
+                for index, code in enumerate(('CPVC20', 'cpvc20', 'CPVC20-2'), 1)]
+        with Image.new('RGB', (20, 20)) as image:
+            result = parse_items({'items': rows}, image, 1, 'VAHANI')
+        self.assertEqual([(item.product_code, item.price_per_unit) for item in result],
+                         [('CPVC20', 10), ('cpvc20-3', 20), ('CPVC20-2', 30)])
+
+    def test_invalid_vision_page_reports_validation_reason_before_local_fallback(self):
+        fixtures = (
+            ('no_valid_rows:invalid_sku', [{'name': 'Pipe', 'product_code': 'bad!', 'price_per_unit': '20'}]),
+            ('no_valid_rows:missing_price', [{'name': 'Pipe', 'product_code': 'CPVC20'}]),
+            ('too_many_rows', [{}] * 151),
+        )
+        for reason, rows in fixtures:
+            with self.subTest(reason=reason), patch.dict('os.environ', {
+                'CATALOGUE_AI_PROVIDER': 'gemini', 'GEMINI_API_KEY': 'fixture-key',
+            }, clear=True), patch('catalogue.services.ai_vision_extractor.request_page',
+                                 return_value=({'items': rows}, {})):
+                response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            page = response.data['diagnostics']['pages'][0]
+            self.assertEqual((page['mode'], page['vision_error'], page['vision_fallback']),
+                             ('rule_based', 'invalid_response', reason))
+            self.assertEqual({row['product_code'] for row in response.data['rows']}, {'SW-001', 'SO-002'})
+
     def test_vision_providers_extract_plumbing_skus_and_shared_photos(self):
         import json
 
