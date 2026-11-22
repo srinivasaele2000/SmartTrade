@@ -184,11 +184,18 @@ class StaffExtraction(APIView):
         adjacent = previous.get('processed_through') == batch['start_page'] - 1
         layout_context = previous.get('layout_context') if adjacent else None
         try:
-            from .services.ai_vision_extractor import configured_page_extractor
-            from .services.pdf_item_extractor import MAX_CATALOGUE_PDF_BYTES, MAX_ROWS, CataloguePDFError, extract_items
+            from .services.ai_vision_extractor import (
+                LOCAL_FALLBACK_RESERVE_SECONDS, configured_page_extractor, vision_timeout_seconds,
+            )
+            from .services.pdf_item_extractor import (
+                EXTRACTION_BUDGET_SECONDS, MAX_CATALOGUE_PDF_BYTES, MAX_ROWS, CataloguePDFError, extract_items,
+            )
         except ImportError:
             self.record_failure(document, diagnostics, 'PDF extraction dependencies are unavailable.')
             return Response({'detail': 'PDF extraction dependencies are unavailable.'}, status=503)
+        vision_timeout = min(vision_timeout_seconds(), EXTRACTION_BUDGET_SECONDS - LOCAL_FALLBACK_RESERVE_SECONDS - 3)
+        vision_page = configured_page_extractor(document.brand_name, document.title, timeout=vision_timeout)
+        vision_budget = vision_timeout + LOCAL_FALLBACK_RESERVE_SECONDS + 3 if vision_page else 0
         try:
             with document.file.open('rb') as source:
                 family_hint = document_family_prefix(document)
@@ -196,7 +203,7 @@ class StaffExtraction(APIView):
                                            start_page=batch['start_page'], end_page=batch['end_page'],
                                            progress=progress, diagnostics=diagnostics,
                                            range_end=batch.get('range_end'), layout_context=layout_context,
-                                           vision_page=configured_page_extractor(document.brand_name, document.title))
+                                           vision_page=vision_page, vision_page_budget=vision_budget)
         except FileNotFoundError:
             self.record_failure(document, diagnostics, 'The source PDF file is missing.')
             return Response({'detail': 'The source PDF file is missing.'}, status=404)

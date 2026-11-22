@@ -43,6 +43,39 @@ SCHEMA = {
 }
 
 
+DEFAULT_TIMEOUT_SECONDS = 90
+LOCAL_FALLBACK_RESERVE_SECONDS = 45
+
+
+def vision_timeout_seconds():
+    try:
+        configured = int(os.getenv('CATALOGUE_AI_TIMEOUT_SECONDS', DEFAULT_TIMEOUT_SECONDS))
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return configured if configured > 0 else DEFAULT_TIMEOUT_SECONDS
+
+
+class IncompleteVisionResponse(ValueError):
+    pass
+
+
+def post_json(url, headers, body, timeout):
+    request = Request(url, json.dumps(body).encode(), headers, method='POST')
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read(2_000_000))
+
+
+def rejected_thinking_config(error):
+    if error.code != 400:
+        return False
+    try:
+        message = json.loads(error.read(8192))['error']['message'].lower()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+    return bool(re.search(r'thinking[ _]?(?:config|budget|level)|thinking.*(?:disabled|supported)', message))
+
+
+
 def provider_config():
     setting = os.getenv('CATALOGUE_AI_PROVIDER', '').strip().lower()
     for provider, default in (('openai', 'gpt-4o'), ('gemini', 'gemini-2.5-flash')):
@@ -55,6 +88,7 @@ def provider_config():
 
 def request_page(provider, key, model, image, prompt, timeout):
     data = b64encode(image).decode('ascii')
+    mime_type = 'image/jpeg' if image.startswith(b'\xff\xd8') else 'image/png'
     headers = {'Content-Type': 'application/json'}
     if provider == 'openai':
         url = 'https://api.openai.com/v1/chat/completions'
@@ -63,7 +97,7 @@ def request_page(provider, key, model, image, prompt, timeout):
             {'role': 'system', 'content': PROMPT},
             {'role': 'user', 'content': [
                 {'type': 'text', 'text': prompt},
-                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + data}},
+                {'type': 'image_url', 'image_url': {'url': f'data:{mime_type};base64,' + data}},
             ]},
         ], 'response_format': {'type': 'json_schema', 'json_schema': {
             'name': 'catalogue_page', 'strict': True, 'schema': SCHEMA,
@@ -72,24 +106,36 @@ def request_page(provider, key, model, image, prompt, timeout):
         url = 'https://generativelanguage.googleapis.com/v1beta/models/' + quote(model, safe='') + ':generateContent'
         headers['x-goog-api-key'] = key
         body = {'systemInstruction': {'parts': [{'text': PROMPT}]}, 'contents': [{'parts': [
-            {'text': prompt}, {'inlineData': {'mimeType': 'image/png', 'data': data}},
+            {'text': prompt}, {'inlineData': {'mimeType': mime_type, 'data': data}},
         ]}], 'generationConfig': {'responseMimeType': 'application/json', 'responseJsonSchema': SCHEMA,
                                  'maxOutputTokens': 12000}}
-    request = Request(url, json.dumps(body).encode(), headers, method='POST')
-    with urlopen(request, timeout=timeout) as response:
-        result = json.loads(response.read(2_000_000))
+    generation = body.get('generationConfig')
+    if generation is not None and re.match(r'gemini-(?:2\.[5-9]|[3-9])', model, re.I):
+        generation['thinkingConfig'] = {'thinkingBudget': 0}
+    deadline = monotonic() + timeout
+    try:
+        result = post_json(url, headers, body, timeout)
+    except HTTPError as error:
+        if not generation or 'thinkingConfig' not in generation or not rejected_thinking_config(error):
+            raise
+        error.close()
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError from None
+        del generation['thinkingConfig']
+        result = post_json(url, headers, body, remaining)
     if provider == 'openai':
         choice = result['choices'][0]
         usage = result.get('usage') or {}
         if choice['finish_reason'] != 'stop':
-            raise ValueError('Incomplete vision response')
+            raise IncompleteVisionResponse
         raw = choice['message']['content']
         tokens = (usage.get('prompt_tokens'), usage.get('completion_tokens'))
     else:
         choice = result['candidates'][0]
         usage = result.get('usageMetadata') or {}
         if choice['finishReason'] != 'STOP':
-            raise ValueError('Incomplete vision response')
+            raise IncompleteVisionResponse
         raw = ''.join(part['text'] for part in choice['content']['parts'] if not part.get('thought'))
         tokens = (usage.get('promptTokenCount'), usage.get('candidatesTokenCount'))
     return json.loads(raw), {name: count for name, count in zip(('input_tokens', 'output_tokens'), tokens)
@@ -137,33 +183,46 @@ def parse_items(payload, image, number, brand):
     return candidates
 
 
-def configured_page_extractor(brand, title):
+def configured_page_extractor(brand, title, *, timeout=None):
     config = provider_config()
     if not config:
         return None
     provider, key, model = config
+    timeout = vision_timeout_seconds() if timeout is None else timeout
     brand = ' '.join(brand.split())
     prompt = json.dumps({'brand_name': brand, 'catalogue_title': title}, ensure_ascii=False)
 
     def extract(page, number, deadline, diagnostics):
         diagnostics.update(vision_provider=provider, vision_model=model, mode='rule_based')
-        remaining = deadline - monotonic() - 45
-        if remaining <= 0:
-            diagnostics['vision_fallback'] = 'batch_time_budget'
-            return []
         try:
-            dpi = max(1, min(200, int(72 * 3000 / max(page.rect.width, page.rect.height))))
-            png = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB, alpha=False).tobytes('png')
-            payload, tokens = request_page(provider, key, model, png, prompt, min(23, remaining))
-            diagnostics.update(tokens)
-            with Image.open(BytesIO(png)) as image:
+            scale = min(200 / 72, 1799 / max(page.rect.width, page.rect.height))
+            rendered = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csRGB, alpha=False)
+            with Image.frombytes('RGB', (rendered.width, rendered.height), rendered.samples) as image:
+                encoded = BytesIO()
+                image.save(encoded, 'JPEG', quality=85, optimize=True)
+                remaining = deadline - monotonic() - LOCAL_FALLBACK_RESERVE_SECONDS
+                if remaining <= 0:
+                    diagnostics['vision_fallback'] = 'batch_time_budget'
+                    return []
+                payload, tokens = request_page(provider, key, model, encoded.getvalue(), prompt, min(timeout, remaining))
+                diagnostics.update(tokens)
                 candidates = parse_items(payload, image, number, brand)
         except HTTPError as exc:
-            diagnostics['vision_fallback'] = f'provider_http_{exc.code}'
+            diagnostics['vision_fallback'] = 'http_429_rate_limit' if exc.code == 429 else f'http_{exc.code}'
             exc.close()
             return []
-        except (URLError, OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, RuntimeError):
-            diagnostics['vision_fallback'] = 'provider_or_response_error'
+        except (TimeoutError, URLError, OSError) as exc:
+            cause = exc.reason if isinstance(exc, URLError) else exc
+            diagnostics['vision_fallback'] = 'timeout' if isinstance(cause, TimeoutError) else 'transport_error'
+            return []
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            diagnostics['vision_fallback'] = 'invalid_json'
+            return []
+        except IncompleteVisionResponse:
+            diagnostics['vision_fallback'] = 'incomplete_response'
+            return []
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError, RuntimeError):
+            diagnostics['vision_fallback'] = 'invalid_response'
             return []
         if candidates:
             diagnostics['mode'] = 'ai_vision'

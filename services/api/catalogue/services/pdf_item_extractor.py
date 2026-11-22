@@ -391,14 +391,14 @@ def row_name(values, section, family_hint):
     return name, category or embedded_category
 
 
-def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None, vision_page=None):
+def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None, vision_page=None, vision_page_budget=0):
     stats = diagnostics if diagnostics is not None else {}
     stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0, caption_skus_found=0,
                  skipped_pages=[], warnings=[], pages=[], matrix_items=0, wrapped_items=0)
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
         raise CataloguePDFError(f'The PDF exceeds the {CATALOGUE_PDF_LIMIT_MB} MB extraction limit.')
     try:
-        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page)
+        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page, vision_page_budget)
         if not result:
             stats['warnings'].append('No priced SKU rows were found. Check that the selected pages contain a readable price table.')
         elif missing_hsn := sum(not row.hsn_sac_code for row in result):
@@ -506,7 +506,7 @@ def finish_page(result, start, stats, context):
     stats['layout_context'] = {'page': page['page'], **context}
 
 
-def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page):
+def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page, vision_page_budget):
     deadline = monotonic() + EXTRACTION_BUDGET_SECONDS
     with ExitStack() as stack:
         document = stack.enter_context(fitz.open(stream=content, filetype='pdf'))
@@ -537,7 +537,9 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
                            for xref in {image[0] for image in document[index].get_images()})
         for page in plumber.pages:
             index = page.page_number - 1
-            if monotonic() >= deadline:
+            remaining = deadline - monotonic()
+            # Return a partial chunk so the next page gets a fresh provider budget.
+            if remaining <= 0 or (progress is not None and index >= start_page and remaining < vision_page_budget):
                 if progress is None or index < start_page:
                     raise CataloguePDFError('Extraction took too long. Try a smaller page range.')
                 progress.update(start_page=start_page, end_page=end_page, processed_through=index)

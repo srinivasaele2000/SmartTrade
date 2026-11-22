@@ -537,6 +537,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
     {diagnostics?.status && <section className="extraction-diagnostics" aria-label="Extraction diagnostics" aria-live="polite">
       {diagnostics.pages?.some(page => page.mode === 'ai_vision') && <span className="cell-meta">AI Vision</span>}
       {diagnostics.pages?.some(page => page.mode !== 'ai_vision') && <span className="cell-meta">Rule-based fallback</span>}
+      {[...new Set(diagnostics.pages?.flatMap(page => page.vision_fallback ? [page.vision_fallback] : []))].map(reason =>
+        <span key={reason} className="cell-meta" role="status">Vision fallback · {reason.replaceAll('_', ' ')}</span>)}
       {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
       {diagnostics.pages_scanned !== undefined && <dl className="extraction-metrics">
         <div><dt>Pages examined</dt><dd>{diagnostics.pages_scanned}</dd></div>

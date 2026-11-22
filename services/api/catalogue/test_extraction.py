@@ -133,7 +133,23 @@ class CatalogueExtractionTests(TestCase):
                 response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
                 self.assertEqual(response.status_code, 200, response.data)
                 request = http.call_args.args[0]
-                self.assertIn(schema_key, json.loads(request.data))
+                import base64
+
+                body = json.loads(request.data)
+                self.assertIn(schema_key, body)
+                self.assertEqual(http.call_args.kwargs['timeout'], 90)
+                if provider == 'gemini':
+                    self.assertEqual(body['generationConfig']['thinkingConfig'], {'thinkingBudget': 0})
+                    encoded = body['contents'][0]['parts'][1]['inlineData']
+                    self.assertEqual(encoded['mimeType'], 'image/jpeg')
+                    image_data = encoded['data']
+                else:
+                    url = body['messages'][1]['content'][1]['image_url']['url']
+                    self.assertTrue(url.startswith('data:image/jpeg;base64,'))
+                    image_data = url.split(',', 1)[1]
+                with Image.open(BytesIO(base64.b64decode(image_data))) as jpeg:
+                    self.assertEqual((jpeg.format, jpeg.mode), ('JPEG', 'RGB'))
+                    self.assertLessEqual(max(jpeg.size), 1800)
                 page_stats = response.data['diagnostics']['pages'][0]
                 self.assertEqual((page_stats['mode'], page_stats['vision_provider']), ('ai_vision', provider))
                 self.assertEqual((page_stats['input_tokens'], page_stats['output_tokens']), (320, 220))
@@ -153,6 +169,66 @@ class CatalogueExtractionTests(TestCase):
                 with Image.open(BytesIO(images[0])) as crop:
                     self.assertEqual(crop.getpixel((crop.width // 2, crop.height // 2)), (255, 0, 0))
 
+    def test_gemini_retries_rejected_thinking_config_and_preserves_png_mime(self):
+        import json
+        from urllib.error import HTTPError
+
+        from catalogue.services.ai_vision_extractor import request_page
+
+        image = BytesIO()
+        Image.new('RGB', (20, 20)).save(image, 'PNG')
+        error = HTTPError('https://example.test', 400, 'Bad Request', {}, BytesIO(
+            b'{"error":{"message":"thinkingBudget 0 is not supported for this model"}}',
+        ))
+        with patch('catalogue.services.ai_vision_extractor.urlopen') as http:
+            response = http.return_value
+            response.__enter__.return_value.read.return_value = json.dumps({
+                'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{}'}]}}],
+            }).encode()
+            http.side_effect = [error, response]
+            request_page('gemini', 'fixture-key', 'gemini-3-flash', image.getvalue(), 'fixture', 90)
+        first, second = http.call_args_list
+        bodies = [json.loads(call.args[0].data) for call in (first, second)]
+        self.assertEqual(bodies[0]['generationConfig']['thinkingConfig'], {'thinkingBudget': 0})
+        self.assertNotIn('thinkingConfig', bodies[1]['generationConfig'])
+        self.assertEqual(bodies[1]['contents'][0]['parts'][1]['inlineData']['mimeType'], 'image/png')
+        self.assertGreater(second.kwargs['timeout'], 0)
+        self.assertLessEqual(second.kwargs['timeout'], 90)
+
+    def test_vision_records_specific_failure_and_uses_local_rules(self):
+        from urllib.error import HTTPError, URLError
+
+        failures = (
+            ('timeout', TimeoutError('read timed out')),
+            ('timeout', URLError(TimeoutError('connection timed out'))),
+            ('http_429_rate_limit', HTTPError('https://example.test', 429, 'Rate limit', {}, None)),
+            ('http_400', HTTPError('https://example.test', 400, 'Bad Request', {}, BytesIO(b'{}'))),
+            ('invalid_json', None),
+        )
+        for reason, error in failures:
+            with self.subTest(reason=reason), patch.dict('os.environ', {
+                'CATALOGUE_AI_PROVIDER': 'gemini', 'GEMINI_API_KEY': 'fixture-key',
+                'CATALOGUE_AI_TIMEOUT_SECONDS': '50',
+            }, clear=True), patch('catalogue.services.ai_vision_extractor.urlopen', side_effect=error) as http:
+                http.return_value.__enter__.return_value.read.return_value = b'{invalid'
+                response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data['diagnostics']['pages'][0]['vision_fallback'], reason)
+                self.assertEqual(http.call_count, 1)
+                self.assertEqual(http.call_args.kwargs['timeout'], 50)
+
+    def test_chunk_yields_before_starting_vision_page_without_full_budget(self):
+        with pymupdf.open(stream=self.content, filetype='pdf') as pdf:
+            pdf.new_page()
+            content = pdf.tobytes()
+        progress = {}
+        extractor = lambda *_: []
+        with patch('catalogue.services.pdf_item_extractor.monotonic', side_effect=[0, 0, 10]):
+            rows = extract_items(content, end_page=2, range_end=2, progress=progress,
+                                 vision_page=extractor, vision_page_budget=138)
+        self.assertEqual({row.product_code for row in rows}, {'SW-001', 'SO-002'})
+        self.assertEqual(progress['processed_through'], 1)
+
     def test_vision_falls_back_on_missing_key_and_provider_failure(self):
         from urllib.error import URLError
 
@@ -166,7 +242,7 @@ class CatalogueExtractionTests(TestCase):
                 self.assertEqual(page_stats['mode'], 'rule_based')
                 self.assertEqual(http.call_count, int(bool(key)))
                 if key:
-                    self.assertEqual(page_stats['vision_fallback'], 'provider_or_response_error')
+                    self.assertEqual(page_stats['vision_fallback'], 'transport_error')
                 self.assertEqual({row['product_code'] for row in response.data['rows']}, {'SW-001', 'SO-002'})
 
     def test_vault_metadata_inspection_uses_ocr_for_scanned_cover(self):

@@ -22,6 +22,7 @@ services:
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
+      CATALOGUE_AI_TIMEOUT_SECONDS: ${CATALOGUE_AI_TIMEOUT_SECONDS:-90}
       CATALOGUE_AI_PROVIDER: ${CATALOGUE_AI_PROVIDER:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_CATALOGUE_MODEL: ${OPENAI_CATALOGUE_MODEL:-gpt-4o}
