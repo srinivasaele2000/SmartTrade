@@ -123,6 +123,46 @@ class CatalogueExtractionTests(TestCase):
         smaller = self.client.get(path, {**query, 'page_size': 25, 'page': 2}).data
         self.assertEqual([row['id'] for row in smaller['results']], expected[25:50])
 
+    def test_vision_accepts_size_codes_and_synthesizes_stable_skus(self):
+        from catalogue.services.ai_vision_extractor import parse_items
+
+        codes = ['1.5 Sq.mm', '2.5 SQMM', '3C x 4 Sq.mm', '1100V-1.5', '4C/16', '']
+        payload = {'items': [{'name': f'Copper cable {index}', 'price_per_unit': '25', 'product_code': code}
+                             for index, code in enumerate(codes)]}
+        diagnostics = {}
+        with Image.new('RGB', (20, 20)) as image:
+            first = parse_items(payload, image, 13, 'Fixture', diagnostics)
+            second = parse_items(payload, image, 13, 'Fixture')
+        self.assertEqual([row.product_code for row in first[:-1]], codes[:-1])
+        self.assertRegex(first[-1].product_code, r'^AUTO-P13-[0-9A-F]{12}$')
+        self.assertEqual(first[-1].product_code, second[-1].product_code)
+        self.assertEqual(diagnostics['vision_skus_generated'], 1)
+
+    def test_gemini_recovers_after_transient_503_with_budgeted_backoff(self):
+        from urllib.error import HTTPError
+
+        from catalogue.services.ai_vision_extractor import request_page
+
+        def unavailable():
+            return HTTPError('https://example.test', 503, 'Unavailable', {}, BytesIO())
+        success = {'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{"items": []}'}]}}]}
+        module = 'catalogue.services.ai_vision_extractor'
+        with patch(module + '.post_json', side_effect=[unavailable(), unavailable(), success]) as post, patch(
+            module + '.sleep',
+        ) as wait, patch(module + '.monotonic', side_effect=[0, 1, 3, 4, 9]):
+            result, _ = request_page('gemini', 'key', 'gemini-2.5-flash', b'fixture', 'prompt', 90)
+        self.assertEqual(result, {'items': []})
+        self.assertEqual([call.args[0] for call in wait.call_args_list], [2, 5])
+        self.assertEqual([call.args[-1] for call in post.call_args_list], [90, 87, 81])
+
+        with patch(module + '.post_json', side_effect=unavailable()) as post, patch(
+            module + '.sleep',
+        ) as wait, patch(module + '.monotonic', side_effect=[0, 87]):
+            with self.assertRaises(HTTPError):
+                request_page('gemini', 'key', 'gemini-2.5-flash', b'fixture', 'prompt', 90)
+        post.assert_called_once()
+        wait.assert_not_called()
+
     def test_dense_vision_page_keeps_valid_rows_and_counts_skipped_rows(self):
         from catalogue.services.ai_vision_extractor import parse_items
 
@@ -135,11 +175,13 @@ class CatalogueExtractionTests(TestCase):
         diagnostics = {}
         with Image.new('RGB', (20, 20)) as image:
             result = parse_items({'page_hsn': '39.17', 'items': rows}, image, 1, 'VAHANI', diagnostics)
-        self.assertEqual([item.product_code for item in result], [f'PIPE{i}' for i in range(45)])
+        self.assertEqual([item.product_code for item in result[:45]], [f'PIPE{i}' for i in range(45)])
+        self.assertTrue(result[45].product_code.startswith('AUTO-P1-'))
+        self.assertEqual(len(result), 46)
         self.assertTrue(all(item.hsn_sac_code == '3917' for item in result))
-        self.assertEqual(diagnostics['vision_rows_skipped'], 3)
+        self.assertEqual(diagnostics['vision_rows_skipped'], 2)
         self.assertEqual(diagnostics['vision_row_skip_reasons'],
-                         {'missing_price': 1, 'invalid_sku': 1, 'header_name': 1})
+                         {'missing_price': 1, 'header_name': 1})
 
     def test_duplicate_vision_skus_keep_variants_and_reserve_printed_suffixes(self):
         from catalogue.services.ai_vision_extractor import parse_items
@@ -153,7 +195,7 @@ class CatalogueExtractionTests(TestCase):
 
     def test_invalid_vision_page_reports_validation_reason_before_local_fallback(self):
         fixtures = (
-            ('no_valid_rows:invalid_sku', [{'name': 'Pipe', 'product_code': 'bad!', 'price_per_unit': '20'}]),
+            ('no_valid_rows:missing_name', [{'name': '', 'product_code': 'bad!', 'price_per_unit': '20'}]),
             ('no_valid_rows:missing_price', [{'name': 'Pipe', 'product_code': 'CPVC20'}]),
             ('too_many_rows', [{}] * 151),
         )
@@ -280,13 +322,15 @@ class CatalogueExtractionTests(TestCase):
             with self.subTest(reason=reason), patch.dict('os.environ', {
                 'CATALOGUE_AI_PROVIDER': 'gemini', 'GEMINI_API_KEY': 'fixture-key',
                 'CATALOGUE_AI_TIMEOUT_SECONDS': '50',
-            }, clear=True), patch('catalogue.services.ai_vision_extractor.urlopen', side_effect=error) as http:
+            }, clear=True), patch('catalogue.services.ai_vision_extractor.urlopen', side_effect=error) as http, patch(
+                'catalogue.services.ai_vision_extractor.sleep',
+            ):
                 http.return_value.__enter__.return_value.read.return_value = b'{invalid'
                 response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(response.data['diagnostics']['pages'][0]['vision_fallback'], reason)
-                self.assertEqual(http.call_count, 1)
-                self.assertEqual(http.call_args.kwargs['timeout'], 50)
+                self.assertEqual(http.call_count, 3 if reason == 'http_429_rate_limit' else 1)
+                self.assertEqual(http.call_args_list[0].kwargs['timeout'], 50)
 
     def test_chunk_yields_before_starting_vision_page_without_full_budget(self):
         with pymupdf.open(stream=self.content, filetype='pdf') as pdf:

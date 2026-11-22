@@ -1,11 +1,12 @@
 """Optional page-at-a-time structured catalogue extraction via vision APIs."""
 from base64 import b64encode
 from collections import Counter
+from hashlib import sha256
 from io import BytesIO
 import json
 import os
 import re
-from time import monotonic
+from time import monotonic, sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -13,7 +14,7 @@ from urllib.request import Request, urlopen
 import pymupdf
 from PIL import Image
 
-from .catalogue_layout import SKU, code_value
+from .catalogue_layout import code_value
 from .pdf_item_extractor import Candidate, family_prefix_pattern, price
 
 PROMPT = """
@@ -23,6 +24,7 @@ Use Brand + section banner + specific variant/size as the name. Never name items
 column headers such as Size, Product Code, Std. Pkg. or M.R.P. Split separate code/price
 pairs into individual rows, e.g. one SKU for 3 mtr SDR 11 and another for 5 mtr SDR 11.
 Copy the exact printed code and price, without currency symbols or inferred amounts.
+If there is no separate code, use the printed size as the code or leave it empty.
 Copy a page-wide HSN into page_hsn and section/row HSN overrides into hsn_sac_code.
 Use the section heading as sub_category, e.g. CPVC PIPES SDR - 11 CLASS - 1, ELBOW 90°,
 COUPLER or UNION. Use empty strings for unknown text. For image_box use [ymin, xmin,
@@ -114,17 +116,28 @@ def request_page(provider, key, model, image, prompt, timeout):
     if generation is not None and re.match(r'gemini-(?:2\.[5-9]|[3-9])', model, re.I):
         generation['thinkingConfig'] = {'thinkingBudget': 0}
     deadline = monotonic() + timeout
-    try:
-        result = post_json(url, headers, body, timeout)
-    except HTTPError as error:
-        if not generation or 'thinkingConfig' not in generation or not rejected_thinking_config(error):
-            raise
-        error.close()
-        remaining = deadline - monotonic()
+    retry_delays = iter((2, 5))
+    remaining = timeout
+    while True:
         if remaining <= 0:
-            raise TimeoutError from None
-        del generation['thinkingConfig']
-        result = post_json(url, headers, body, remaining)
+            raise TimeoutError
+        try:
+            result = post_json(url, headers, body, remaining)
+            break
+        except HTTPError as error:
+            if generation and 'thinkingConfig' in generation and rejected_thinking_config(error):
+                error.close()
+                del generation['thinkingConfig']
+                remaining = deadline - monotonic()
+                continue
+            if provider == 'gemini' and error.code in (429, 503):
+                delay = next(retry_delays, None)
+                if delay is not None and deadline - monotonic() >= delay + 2:
+                    error.close()
+                    sleep(delay)
+                    remaining = deadline - monotonic()
+                    continue
+            raise
     if provider == 'openai':
         choice = result['choices'][0]
         usage = result.get('usage') or {}
@@ -157,6 +170,7 @@ def crop_image(image, box):
     return output.getvalue()
 
 
+VISION_SKU = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._+/-]{1,39}\Z')
 MAX_ROWS = 150  # Per Vision page. The shared extraction batch has its own limit.
 COLUMN_HEADERS = {'size', 'productcode', 'itemcode', 'stdpkg', 'standardpacking', 'mrp', 'price', 'rate',
                   'description', 'itemdescription', 'hsn', 'hsncode', 'packsize'}
@@ -190,34 +204,38 @@ def parse_items(payload, image, number, brand, diagnostics=None):
             skipped['invalid_row'] += 1
             continue
         name = ' '.join(row_text(row, 'name').split())
-        code = code_value(row_text(row, 'product_code'))
+        code = code_value(' '.join(row_text(row, 'product_code').split()))
         raw_price = row_text(row, 'price_per_unit')
         amount = price(raw_price)
         if not name:
             skipped['missing_name'] += 1
         elif re.sub(r'[^a-z0-9]', '', name.casefold()) in COLUMN_HEADERS:
             skipped['header_name'] += 1
-        elif not SKU.fullmatch(code):
-            skipped['invalid_sku'] += 1
         elif amount is None:
             skipped['invalid_price' if raw_price else 'missing_price'] += 1
         else:
-            validated.append((row, name, code, amount))
+            validated.append((row, name, code if VISION_SKU.fullmatch(code) else '', amount))
     if diagnostics is not None:
         diagnostics['vision_rows_skipped'] = sum(skipped.values())
         diagnostics['vision_row_skip_reasons'] = dict(skipped)
+        diagnostics['vision_skus_generated'] = sum(not code for _, _, code, _ in validated)
     if rows and not validated:
         raise InvalidVisionRows('no_valid_rows:' + skipped.most_common(1)[0][0])
 
     # Preserve all printed SKUs before assigning suffixes to repeated codes.
-    reserved = {code.upper() for _, _, code, _ in validated}
+    reserved = {code.upper() for _, _, code, _ in validated if code}
     photos, candidates, used = {}, [], set()
     for row, name, code, amount in validated:
+        printed = code
+        if not code:
+            identity = ' '.join(f"{brand} {row_text(row, 'sub_category')} {name}".casefold().split())
+            digest = sha256(identity.encode()).hexdigest()[:12].upper()
+            code = f'AUTO-P{number}-{digest}'
         original = code
         suffix = 2
-        while code.upper() in used or (code != original and code.upper() in reserved):
+        while code.upper() in used or (code != printed and code.upper() in reserved):
             ending = f'-{suffix}'
-            code = original[:100 - len(ending)] + ending
+            code = original[:40 - len(ending)] + ending
             suffix += 1
         used.add(code.upper())
         if brand and not family_prefix_pattern(brand).match(name):

@@ -54,9 +54,11 @@ test('401 on any authenticated endpoint invalidates only the corresponding sessi
   const expired = [];
   const unsubscribe = onSessionExpired(token => expired.push(token));
   try {
-    globalThis.fetch = async () => json({ message: 'Invalid token.' }, 401);
+    globalThis.fetch = async () => json({ detail: 'Given token not valid for any token type',
+      messages: [{message: 'Token is expired'}] }, 401);
     for (const path of ['/staff/companies/verification-queue', '/staff/companies/review-requests', '/staff/catalogue/products', '/staff/dealers/businesses']) {
-      await assert.rejects(requestApi('/api/v1', path, 'isolated-test-token'), ApiError);
+      await assert.rejects(requestApi('/api/v1', path, 'isolated-test-token'),
+        {name: 'Error', status: 401, message: 'Your staff session ended. Sign in again to continue.'});
     }
     assert.deepEqual(expired, Array(4).fill('isolated-test-token'));
     await assert.rejects(requestApi('/api/v1', '/auth/login'), ApiError);

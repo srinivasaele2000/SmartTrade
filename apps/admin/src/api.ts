@@ -36,7 +36,10 @@ export async function apiResponse(base: string, path: string, token?: string, in
     throw new ApiError(0, 'Cannot reach the SmartTrade API. Check the local backend and proxy, then retry.');
   }
   if (!response.ok) {
-    if (response.status === 401 && token) expiredListeners.forEach(listener => listener(token));
+    if (response.status === 401 && token) {
+      expiredListeners.forEach(listener => listener(token));
+      throw new ApiError(401, 'Your staff session ended. Sign in again to continue.');
+    }
     const data = await response.json().catch(() => null);
     throw new ApiError(response.status, errorMessage(data, response.status), data?.field_errors);
   }
