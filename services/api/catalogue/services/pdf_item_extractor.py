@@ -75,6 +75,8 @@ class Candidate:
     specifications: dict = field(default_factory=dict)
     matrix: bool = False
     wrapped: bool = False
+    caption_matched: bool = False
+    gallery_crop: bool = False
 
 
 def matching_image(row, images):
@@ -182,7 +184,7 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
     photo_cache = {}
     column_crops = {}
     gallery_lefts = {row.bounds[0] for row in rows
-                     if row.finish_prices and row.bounds[0] >= page.rect.width * .25}
+                     if (ocr or row.finish_prices) and row.bounds[0] >= page.rect.width * .25}
     gallery_photos = {
         left: left_gallery_photos(page, boxes, [row.code for row in rows if row.bounds[0] == left], left)
         for left in gallery_lefts
@@ -224,7 +226,8 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
         row_band = (horizontal[0], top - 5, horizontal[1], bottom + 5)
         column_images = [image for image in images if
                          horizontal[0] <= (image['bbox'][0] + image['bbox'][2]) / 2 <= horizontal[1]]
-        photo = gallery_photos.get(left, {}).get(row.code)
+        photos, captions = gallery_photos.get(left, ({}, ()))
+        photo = photos.get(row.code)
         if photo is None:
             photo = image_bytes(matching_image(row_band, column_images))
         if photo is None and row.image_bounds:
@@ -259,7 +262,8 @@ def layout_candidates(document, page, rows, boxes, images, page_number, family_h
             facts['Variant'] = row.length
         candidates.append(Candidate(page_number, name, row.code, row.hsn, row.amount,
                                     (row.category or banner)[:120], photo, row.pack,
-                                    row.series, facts, row.matrix, row.wrapped))
+                                    row.series, facts, row.matrix, row.wrapped,
+                                    caption_matched=row.code in captions, gallery_crop=row.code in photos))
     return candidates
 
 
@@ -388,7 +392,7 @@ def row_name(values, section, family_hint):
 
 def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None):
     stats = diagnostics if diagnostics is not None else {}
-    stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0,
+    stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0, caption_skus_found=0,
                  skipped_pages=[], warnings=[], pages=[], matrix_items=0, wrapped_items=0)
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
         raise CataloguePDFError(f'The PDF exceeds the {CATALOGUE_PDF_LIMIT_MB} MB extraction limit.')
@@ -432,7 +436,7 @@ def extract_ocr_page(document, page, page_number, family_hint, images, deadline,
             stats['skipped_pages'].append({'page': page_number, 'reason': reason})
             return [], has_text
         attempt_context = dict(context)
-        rows, sections, advanced = layout_rows(boxes, page.rect.width, price, context=attempt_context)
+        rows, sections, advanced = layout_rows(boxes, page.rect.width, price, context=attempt_context, ocr=True)
         candidates = (layout_candidates(document, page, rows, boxes, images, page_number, family_hint, ocr=True)
                       if advanced or fallback else [])
         if not candidates and not fallback:
@@ -470,7 +474,10 @@ def finish_page(result, start, stats, context):
         context.clear()
     page.update(items=len(unique), matrix_items=sum(item.matrix for item in unique.values()),
                 wrapped_items=sum(item.wrapped for item in unique.values()),
-                thumbnails=sum(bool(item.image) for item in unique.values()))
+                thumbnails=sum(bool(item.image) for item in unique.values()),
+                caption_skus_found=len({item.product_code for item in unique.values() if item.caption_matched}),
+                gallery_crops=sum(item.gallery_crop for item in unique.values()))
+    stats['caption_skus_found'] += page['caption_skus_found']
     if stats['skipped_pages'] and stats['skipped_pages'][-1]['page'] == page['page']:
         page['reason'] = stats['skipped_pages'][-1]['reason']
     sample = page.pop('native_sample', [])
@@ -676,6 +683,7 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
     columns = []
     pending = []
     table_right = 0
+    table_left = page.rect.width
     for index, line in enumerate(lines):
         line.sort(key=lambda box: box.x0)
         if NOISE.match(' '.join(box.text for box in line)):
@@ -694,6 +702,7 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
         fields = {field for _, field in header}
         if {'name', 'product_code', 'price_per_unit'} <= fields:
             table_right = max(table_right, header[-1][0] + 32)
+            table_left = min(table_left, header[0][0] - 12)
             columns = [(left - 12 if offset == 0 else (header[offset - 1][0] + left) / 2, field)
                        for offset, (left, field) in enumerate(header)]
             continue
@@ -731,6 +740,11 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
     if images is None:
         images = product_images(page, Counter())
     result = []
+    left_photos, left_captions = ({}, ())
+    if table_left >= page.rect.width * .25:
+        left_photos, left_captions = left_gallery_photos(
+            page, boxes, [values['product_code'] for values, *_ in pending], table_left,
+        )
     captions = {}
     known_codes = {caption_key(values['product_code']) for values, *_ in pending}
     side_boxes = [box for box in boxes if box.x0 >= table_right]
@@ -763,8 +777,11 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
         name, category = row_name(values, '', family_hint)
         if not name:
             continue
-        image = matching_image((0, top - 4, page.rect.width, bottom + 4), images)
-        photo = thumbnail(document, page, image)
+        code = values['product_code']
+        photo = left_photos.get(code)
+        if photo is None:
+            image = matching_image((table_left if left_captions else 0, top - 4, page.rect.width, bottom + 4), images)
+            photo = thumbnail(document, page, image)
         if photo is None and image_bounds:
             center = (top + bottom) / 2
             spanning = [data for y0, y1, _, data in column_photos[image_bounds] if y0 <= center <= y1]
@@ -785,7 +802,8 @@ def ocr_rows(document, page, boxes, page_number, family_hint, *, images=None):
                 photo = crop_photo(page, (max(table_right, center - half_width), caption.top - 54,
                                          center + half_width, caption.top - 1), boxes)
         result.append(Candidate(page_number, name, values['product_code'][:100], values.get('hsn_sac_code', '')[:8],
-                                amount, (values.get('category') or category or '')[:120], photo))
+                                amount, (values.get('category') or category or '')[:120], photo,
+                                caption_matched=code in left_captions, gallery_crop=code in left_photos))
     return result
 
 

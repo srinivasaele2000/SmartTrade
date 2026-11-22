@@ -98,6 +98,49 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_flattened_gallery_attaches_split_caption_photos_to_existing_drafts(self):
+        from catalogue.services.catalogue_ocr import TextBox
+
+        codes = ('901101', '901102', '901103', '901104')
+        boxes = [TextBox(x, 55, x + 28, 64, text) for x, text in
+                 ((388, 'Pro. Code'), (475, 'Item'), (630, 'MRP'), (704, 'Std. Pkg.'))]
+        for index, code in enumerate(codes):
+            y = 95 + index * 30
+            boxes.extend(TextBox(x, y, x + 36, y + 9, text) for x, text in
+                         ((388, code), (475, 'Switch'), (630, '113'), (704, '10')))
+        photos = [(52, '101', 'silver'), (154, '102', 'red'), (256, '104', 'blue')]
+        image = Image.new('RGB', (790, 320), 'white')
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(image)
+        for x, suffix, color in photos:
+            draw.polygon([(x, 165), (x + 26, 155), (x + 29, 210), (x + 6, 220)] if suffix != '101'
+                         else [(x, 36), (x + 22, 25), (x + 31, 202), (x + 12, 217)], fill=color)
+            boxes.extend((TextBox(x, 228, x + 14, 236, '901'), TextBox(x + 24, 231, x + 39, 239, suffix)))
+        stream = BytesIO()
+        image.save(stream, format='PNG')
+        with pymupdf.open() as scan:
+            page = scan.new_page(width=790, height=320)
+            page.insert_image(page.rect, stream=stream.getvalue())
+            self.assertEqual(len(page.get_images()), 1)
+            self.document.file.save('flat.pdf', ContentFile(scan.tobytes()))
+        existing = self.document.draft_items.create(page=1, name='Staff edited', product_code='901 101')
+        with patch('catalogue.services.pdf_item_extractor.read_page', return_value=boxes):
+            response = self.client.post(self.base + 'extract/', {'append': True}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['diagnostics']['caption_skus_found'], 3)
+        self.assertEqual(response.data['diagnostics']['cropped_thumbnails_attached'], 3)
+        items = {item.product_code.replace(' ', ''): item for item in self.document.draft_items.all()}
+        self.assertEqual(self.document.draft_items.count(), 4)
+        self.assertEqual(set(items), set(codes))
+        self.assertEqual(items['901101'].pk, existing.pk)
+        self.assertEqual(items['901101'].name, 'Staff edited')
+        self.assertFalse(items['901103'].image)
+        for _, suffix, color in photos:
+            with items['901' + suffix].image.open() as file, Image.open(file) as crop:
+                self.assertEqual(crop.getpixel((crop.width // 2, crop.height // 2)), Image.new('RGB', (1, 1), color).getpixel((0, 0)))
+                if suffix == '101':
+                    self.assertGreater(crop.height, crop.width * 4)
+
     def test_split_page_ocr_persists_finish_mrps_pack_sizes_and_caption_photos(self):
         from catalogue.services.catalogue_ocr import TextBox
         from catalogue.services.catalogue_layout import native_boxes

@@ -445,7 +445,7 @@ def join_finish_headers(lines):
     return joined
 
 
-def layout_rows(boxes, width, parse_price, *, context=None):
+def layout_rows(boxes, width, parse_price, *, context=None, ocr=False):
     lines = join_finish_headers(lines_of(boxes))
     headers = [group for line in lines if not NOISE.match(line_text(line)) for group in header_groups(line)]
     inherited = context.get('bands', []) if context and abs(context.get('width', 0) - width) < 2 else []
@@ -454,7 +454,7 @@ def layout_rows(boxes, width, parse_price, *, context=None):
             context.clear()
         return [], 0, False
     bands = horizontal_bands(headers, width) if headers else [(band['left'], band['right']) for band in inherited]
-    if headers and len(bands) == 1 and any(FINISH_MRPS <= {column.key for column in header} for header in headers):
+    if headers and len(bands) == 1 and (ocr or any(FINISH_MRPS <= {column.key for column in header} for header in headers)):
         code_left = min(column.left for header in headers for column in header if column.key == 'code')
         if code_left >= width * .30:
             # Keep gallery captions out of the code column even when the
@@ -472,7 +472,7 @@ def layout_rows(boxes, width, parse_price, *, context=None):
             next_bands.append({'left': left, 'right': right, **state})
     if context is not None:
         context.update(width=width, bands=next_bands)
-    advanced = len(bands) > 1 or bool(inherited) or any(row.matrix or row.wrapped or row.series for row in rows) or any(
+    advanced = len(bands) > 1 or (ocr and any(left >= width * .25 for left, _ in bands)) or bool(inherited) or any(row.matrix or row.wrapped or row.series for row in rows) or any(
         column.key in {'size', 'size_cm', 'size_inch', 'turn', 'knob', 'pack', 'box', 'way', 'electrical_details',
                        'pole', 'wattage', 'finish', 'standard', 'image', 'combined_pack'} | FINISH_MRPS or column.length
         for header in headers for column in header

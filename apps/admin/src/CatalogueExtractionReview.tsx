@@ -12,7 +12,7 @@ type CanonicalCategory = {id: number; name: string};
 type Category = {id: number; category__name: string; brand__company__legal_name?: string; canonical?: boolean};
 const categoryKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 type Row = Draft & {approved: boolean; association: string};
-type Diagnostics = {status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
+type Diagnostics = {caption_skus_found?: number; cropped_thumbnails_attached?: number; status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
   items_extracted?: number; matrix_items?: number; wrapped_items?: number;
   pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
     ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string; message?: string}[];
@@ -520,6 +520,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
       {diagnostics.pages_scanned !== undefined && <dl className="extraction-metrics">
         <div><dt>Pages examined</dt><dd>{diagnostics.pages_scanned}</dd></div>
+        {diagnostics.caption_skus_found !== undefined && <div><dt>Gallery SKUs matched</dt><dd>{diagnostics.caption_skus_found}</dd></div>}
+        {diagnostics.cropped_thumbnails_attached !== undefined && <div><dt>Gallery thumbnails attached</dt><dd>{diagnostics.cropped_thumbnails_attached}</dd></div>}
         <div><dt>OCR pages</dt><dd>{diagnostics.ocr_pages ?? 0}</dd></div>
         <div><dt>Product sections</dt><dd>{diagnostics.product_sections ?? 0}</dd></div>
         <div><dt>Items extracted</dt><dd>{diagnostics.items_extracted ?? 0}</dd></div>

@@ -3,6 +3,7 @@ from io import BytesIO
 from pathlib import PurePath
 from uuid import uuid4
 import re
+from collections import Counter, defaultdict
 
 from PIL import Image, ImageOps
 from django.core.files.base import ContentFile
@@ -207,11 +208,13 @@ class StaffExtraction(APIView):
         if progressive and adjacent and previous.get('range_end') == batch.get('range_end'):
             for key in ('pages', 'skipped_pages', 'warnings'):
                 diagnostics[key] = previous.get(key, []) + diagnostics.get(key, [])
-            for key in ('pages_scanned', 'ocr_pages', 'product_sections', 'items_extracted', 'matrix_items', 'wrapped_items'):
+            for key in ('pages_scanned', 'ocr_pages', 'product_sections', 'items_extracted', 'matrix_items', 'wrapped_items',
+                        'caption_skus_found', 'cropped_thumbnails_attached'):
                 diagnostics[key] = previous.get(key, 0) + diagnostics.get(key, 0)
 
         saved = []
         added = 0
+        cropped_attached = 0
         replaced = False
         try:
             with transaction.atomic():
@@ -232,7 +235,12 @@ class StaffExtraction(APIView):
                 append = (batch['append'] and not batch['replace_on_items']) or not rows_to_save or (
                     not progressive and progress and progress['processed_through'] < progress['end_page']
                 )
+                draft_skus = defaultdict(list)
+                gallery_skus = Counter((candidate.page, candidate.product_code) for candidate, _, _ in rows_to_save
+                                       if candidate.gallery_crop)
                 if append:
+                    for item in drafts.filter(page__in={page for page, _ in gallery_skus}).select_for_update():
+                        draft_skus[(item.page, code_value(item.product_code))].append(item)
                     pairs = list(drafts.values_list('product_code', 'name'))
                     existing = {(code_value(code), name) for code, name in pairs}
                     draft_count = len(pairs)
@@ -249,6 +257,16 @@ class StaffExtraction(APIView):
                 }
                 for candidate, clean_name, banner in rows_to_save:
                     pair = (candidate.product_code, clean_name)
+                    key = (candidate.page, candidate.product_code)
+                    matches = draft_skus.get(key, [])
+                    if append and candidate.gallery_crop and gallery_skus[key] == 1 and len(matches) == 1:
+                        item = matches[0]
+                        if not item.image:
+                            item.image.save('thumbnail.png', ContentFile(candidate.image), save=False)
+                            saved.append(item.image)
+                            item.save(update_fields=['image'])
+                            cropped_attached += 1
+                        continue
                     if append and pair in existing:
                         continue
                     if draft_count >= MAX_ROWS:
@@ -267,7 +285,9 @@ class StaffExtraction(APIView):
                         saved.append(item.image)
                     item.save()
                     added += 1
+                    cropped_attached += int(candidate.gallery_crop)
                 rows = DraftOutput(document.draft_items.order_by('id'), many=True).data
+                diagnostics['cropped_thumbnails_attached'] = diagnostics.get('cropped_thumbnails_attached', 0) + cropped_attached
                 document.last_extraction = {**diagnostics, **progress, 'added': added,
                                             'status': 'partial' if progress and progress['processed_through'] < progress['end_page']
                                             else ('complete' if candidates else 'no_items'),
