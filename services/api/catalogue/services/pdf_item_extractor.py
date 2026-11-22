@@ -77,6 +77,7 @@ class Candidate:
     wrapped: bool = False
     caption_matched: bool = False
     gallery_crop: bool = False
+    from_vision: bool = False
 
 
 def matching_image(row, images):
@@ -390,14 +391,14 @@ def row_name(values, section, family_hint):
     return name, category or embedded_category
 
 
-def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None):
+def extract_items(content, *, family_hint='', start_page=1, end_page=None, progress=None, diagnostics=None, range_end=None, layout_context=None, vision_page=None):
     stats = diagnostics if diagnostics is not None else {}
     stats.update(pages_scanned=0, ocr_pages=0, product_sections=0, items_extracted=0, caption_skus_found=0,
                  skipped_pages=[], warnings=[], pages=[], matrix_items=0, wrapped_items=0)
     if len(content) > MAX_CATALOGUE_PDF_BYTES:
         raise CataloguePDFError(f'The PDF exceeds the {CATALOGUE_PDF_LIMIT_MB} MB extraction limit.')
     try:
-        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context)
+        result = _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page)
         if not result:
             stats['warnings'].append('No priced SKU rows were found. Check that the selected pages contain a readable price table.')
         elif missing_hsn := sum(not row.hsn_sac_code for row in result):
@@ -505,7 +506,7 @@ def finish_page(result, start, stats, context):
     stats['layout_context'] = {'page': page['page'], **context}
 
 
-def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context):
+def _extract_items(content, family_hint, start_page, end_page, progress, stats, range_end, layout_context, vision_page):
     deadline = monotonic() + EXTRACTION_BUDGET_SECONDS
     with ExitStack() as stack:
         document = stack.enter_context(fitz.open(stream=content, filetype='pdf'))
@@ -544,8 +545,18 @@ def _extract_items(content, family_hint, start_page, end_page, progress, stats, 
             raster_page = document[index]
             page_number = index + 1
             page_start = len(result)
-            stats['pages'].append({'page': page_number, 'ocr': None})
+            stats['pages'].append({'page': page_number, 'ocr': None, 'mode': 'rule_based'})
             stats['pages_scanned'] += 1
+            if vision_page:
+                vision_rows = vision_page(raster_page, page_number, deadline, stats['pages'][-1])
+                if vision_rows:
+                    result.extend(vision_rows)
+                    has_text = True
+                    context.clear()
+                    stats['product_sections'] += len({row.sub_category for row in vision_rows})
+                    finish_page(result, page_start, stats, context)
+                    page.close()
+                    continue
             native_text = raster_page.get_text()
             readable, count, glyph_garbage = native_text_quality(native_text)
             has_text |= bool(count and not glyph_garbage)

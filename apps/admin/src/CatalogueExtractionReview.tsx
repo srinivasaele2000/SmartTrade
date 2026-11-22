@@ -15,7 +15,7 @@ type Row = Draft & {approved: boolean; association: string};
 type Diagnostics = {caption_skus_found?: number; cropped_thumbnails_attached?: number; status?: string; pages_scanned?: number; ocr_pages?: number; product_sections?: number;
   items_extracted?: number; matrix_items?: number; wrapped_items?: number;
   pages?: {page: number; items: number; matrix_items: number; wrapped_items: number; thumbnails: number;
-    ocr: 'rapidocr' | 'tesseract' | null; ocr_note?: string; reason?: string; message?: string}[];
+    ocr: 'rapidocr' | 'tesseract' | null; mode?: string; vision_provider?: string; vision_fallback?: string; input_tokens?: number; output_tokens?: number; ocr_note?: string; reason?: string; message?: string}[];
   skipped_pages?: {page: number; reason: string}[]; warnings?: string[]; error?: string};
 type ReviewBrand = {id: number; name: string; company_id: number; company_name: string};
 type ReviewSummary = {pending: number; published_from_document: number; published_for_brand: number};
@@ -535,6 +535,8 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
       <span>{pageProgress.done} / {pageProgress.total} pages</span>
     </div>}
     {diagnostics?.status && <section className="extraction-diagnostics" aria-label="Extraction diagnostics" aria-live="polite">
+      {diagnostics.pages?.some(page => page.mode === 'ai_vision') && <span className="cell-meta">AI Vision</span>}
+      {diagnostics.pages?.some(page => page.mode !== 'ai_vision') && <span className="cell-meta">Rule-based fallback</span>}
       {diagnostics.error && <p role="alert">{diagnostics.error}</p>}
       {diagnostics.pages_scanned !== undefined && <dl className="extraction-metrics">
         <div><dt>Pages examined</dt><dd>{diagnostics.pages_scanned}</dd></div>
@@ -553,6 +555,10 @@ export default function CatalogueExtractionReview({baseUrl, token, documentKey, 
           Page {page.page} · {page.items} items · {page.thumbnails} thumbnails · {page.matrix_items} matrix items
           {page.ocr && ` · OCR attempted with ${page.ocr === 'rapidocr' ? 'RapidOCR' : 'Tesseract'}`}
           {page.reason && ` · ${page.reason.replaceAll('_', ' ')}`}
+          {page.vision_provider && ` · ${page.vision_provider} ${page.mode === 'ai_vision' ? 'Vision' : 'fallback'}`}
+          {page.vision_fallback && ` · ${page.vision_fallback.replaceAll('_', ' ')}`}
+          {page.input_tokens !== undefined && ` · ${page.input_tokens} input tokens`}
+          {page.output_tokens !== undefined && ` · ${page.output_tokens} output tokens`}
           {page.ocr_note && ` · ${page.ocr_note}`}
           {page.message && <p>{page.message}</p>}
         </li>)}</ul>

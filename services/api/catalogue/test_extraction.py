@@ -98,6 +98,77 @@ def side_panel_price_list():
 
 @override_settings(DEBUG=True)
 class CatalogueExtractionTests(TestCase):
+    def test_vision_providers_extract_plumbing_skus_and_shared_photos(self):
+        import json
+
+        self.document.brand_name = 'VAHANI'
+        self.document.title = 'CPVC price list'
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=400, height=400)
+            page.draw_rect((40, 40, 160, 160), color=None, fill=(1, 0, 0))
+            self.document.file.save('plumbing.pdf', ContentFile(pdf.tobytes()))
+        pipe = 'CPVC PIPES SDR - 11 CLASS - 1'
+        rows = [
+            ('11S1120300', 'CPVC Pipe SDR-11 Class-1 - 3/4" (20mm) 3 mtr', '322.00', pipe),
+            ('11S1120500', 'CPVC Pipe SDR-11 Class-1 - 3/4" (20mm) 5 mtr', '529.00', pipe),
+            ('ELBOW20', 'CPVC Elbow 90° - 3/4" (20mm)', '75', 'ELBOW 90°'),
+            ('COUPLER20', 'CPVC Coupler - 3/4" (20mm)', '35', 'COUPLER'),
+        ]
+        structured = json.dumps({'page_hsn': '3917', 'items': [
+            {'name': name, 'product_code': code, 'price_per_unit': amount, 'hsn_sac_code': '',
+             'sub_category': section, 'image_box': [100, 100, 400, 400] if section == pipe else []}
+            for code, name, amount, section in rows
+        ]})
+        fixtures = {
+            'openai': ({'choices': [{'finish_reason': 'stop', 'message': {'content': structured}}],
+                        'usage': {'prompt_tokens': 320, 'completion_tokens': 220}}, 'response_format'),
+            'gemini': ({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': structured}]}}],
+                        'usageMetadata': {'promptTokenCount': 320, 'candidatesTokenCount': 220}}, 'generationConfig'),
+        }
+        for provider, (payload, schema_key) in fixtures.items():
+            with self.subTest(provider=provider), patch.dict('os.environ', {
+                'CATALOGUE_AI_PROVIDER': provider, provider.upper() + '_API_KEY': 'fixture-key',
+            }, clear=True), patch('catalogue.services.ai_vision_extractor.urlopen') as http:
+                http.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+                response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
+                self.assertEqual(response.status_code, 200, response.data)
+                request = http.call_args.args[0]
+                self.assertIn(schema_key, json.loads(request.data))
+                page_stats = response.data['diagnostics']['pages'][0]
+                self.assertEqual((page_stats['mode'], page_stats['vision_provider']), ('ai_vision', provider))
+                self.assertEqual((page_stats['input_tokens'], page_stats['output_tokens']), (320, 220))
+                drafts = {item.product_code: item for item in self.document.draft_items.all()}
+                self.assertEqual(set(drafts), {row[0] for row in rows})
+                images = []
+                for code, name, amount, section in rows:
+                    draft = drafts[code]
+                    self.assertEqual((draft.name, draft.hsn_sac_code, draft.sub_category), (f'VAHANI {name}', '3917', section))
+                    self.assertEqual(draft.price_per_unit, price(amount))
+                    if section == pipe:
+                        with draft.image.open() as image:
+                            images.append(image.read())
+                    else:
+                        self.assertFalse(draft.image)
+                self.assertEqual(images[0], images[1])
+                with Image.open(BytesIO(images[0])) as crop:
+                    self.assertEqual(crop.getpixel((crop.width // 2, crop.height // 2)), (255, 0, 0))
+
+    def test_vision_falls_back_on_missing_key_and_provider_failure(self):
+        from urllib.error import URLError
+
+        for key in ('', 'fixture-key'):
+            with self.subTest(has_key=bool(key)), patch.dict('os.environ', {
+                'CATALOGUE_AI_PROVIDER': 'auto', 'OPENAI_API_KEY': key,
+            }, clear=True), patch('catalogue.services.ai_vision_extractor.urlopen', side_effect=URLError('offline')) as http:
+                response = self.client.post(self.base + 'extract/', {'start_page': 1, 'end_page': 1}, format='json')
+                self.assertEqual(response.status_code, 200, response.data)
+                page_stats = response.data['diagnostics']['pages'][0]
+                self.assertEqual(page_stats['mode'], 'rule_based')
+                self.assertEqual(http.call_count, int(bool(key)))
+                if key:
+                    self.assertEqual(page_stats['vision_fallback'], 'provider_or_response_error')
+                self.assertEqual({row['product_code'] for row in response.data['rows']}, {'SW-001', 'SO-002'})
+
     def test_vault_metadata_inspection_uses_ocr_for_scanned_cover(self):
         from catalogue.services.catalogue_ocr import TextBox
 

@@ -22,6 +22,11 @@ services:
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
+      CATALOGUE_AI_PROVIDER: ${CATALOGUE_AI_PROVIDER:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CATALOGUE_MODEL: ${OPENAI_CATALOGUE_MODEL:-gpt-4o}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_CATALOGUE_MODEL: ${GEMINI_CATALOGUE_MODEL:-gemini-2.5-flash}
       GUNICORN_TIMEOUT: "180"
       DJANGO_SETTINGS_MODULE: config.settings_prod
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env.prod}

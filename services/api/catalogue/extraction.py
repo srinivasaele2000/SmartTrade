@@ -184,6 +184,7 @@ class StaffExtraction(APIView):
         adjacent = previous.get('processed_through') == batch['start_page'] - 1
         layout_context = previous.get('layout_context') if adjacent else None
         try:
+            from .services.ai_vision_extractor import configured_page_extractor
             from .services.pdf_item_extractor import MAX_CATALOGUE_PDF_BYTES, MAX_ROWS, CataloguePDFError, extract_items
         except ImportError:
             self.record_failure(document, diagnostics, 'PDF extraction dependencies are unavailable.')
@@ -194,7 +195,8 @@ class StaffExtraction(APIView):
                 candidates = extract_items(source.read(MAX_CATALOGUE_PDF_BYTES + 1), family_hint=family_hint,
                                            start_page=batch['start_page'], end_page=batch['end_page'],
                                            progress=progress, diagnostics=diagnostics,
-                                           range_end=batch.get('range_end'), layout_context=layout_context)
+                                           range_end=batch.get('range_end'), layout_context=layout_context,
+                                           vision_page=configured_page_extractor(document.brand_name, document.title))
         except FileNotFoundError:
             self.record_failure(document, diagnostics, 'The source PDF file is missing.')
             return Response({'detail': 'The source PDF file is missing.'}, status=404)
@@ -230,7 +232,9 @@ class StaffExtraction(APIView):
                 rows_to_save = []
                 for candidate in candidates:
                     if (candidate.page, candidate.product_code) not in reviewed:
-                        clean_name, banner = normalize_item_name(candidate.name, family_hint)
+                        clean_name, banner = (candidate.name, '') if candidate.from_vision else normalize_item_name(
+                            candidate.name, family_hint,
+                        )
                         if clean_name:
                             rows_to_save.append((candidate, clean_name, banner))
                 append = (batch['append'] and not batch['replace_on_items']) or not rows_to_save or (
